@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/knowledge_match}
+    username: ${SPRING_DATASOURCE_USERNAME:match}
+    password: ${SPRING_DATASOURCE_PASSWORD:match}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  data:
+    redis:
+      url: ${REDIS_URL:redis://redis:6379}

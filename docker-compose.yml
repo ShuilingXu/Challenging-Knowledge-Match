@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: knowledge_match
+      POSTGRES_USER: match
+      POSTGRES_PASSWORD: match
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U match -d knowledge_match"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    environment:
+      S3_BUCKET: ${S3_BUCKET:-matrixlive-media}
+    entrypoint: >
+      /bin/sh -c "until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done;
+      mc mb --ignore-existing local/$$S3_BUCKET; exit 0;"
+
+  api:
+    build: ./server
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/knowledge_match
+      SPRING_DATASOURCE_USERNAME: match
+      SPRING_DATASOURCE_PASSWORD: match
+      REDIS_URL: redis://redis:6379
+      REALTIME_REDIS_ENABLED: "true"
+      MANAGEMENT_HEALTH_REDIS_ENABLED: "true"
+      S3_ENDPOINT: http://minio:9000
+      S3_ENABLED: "true"
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: ${S3_BUCKET:-matrixlive-media}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+
+  web:
+    build: .
+    ports:
+      - "4173:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

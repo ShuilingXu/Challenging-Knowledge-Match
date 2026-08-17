@@ -30,6 +30,26 @@ public class SiteSettings {
   @Column(length = 160)
   private String storageBucket;
 
+  private Boolean storageEnabled;
+
+  @Column(length = 80)
+  private String storageRegion;
+
+  @Column(length = 512)
+  private String storageAccessKey;
+
+  @Column(length = 2048)
+  private String storageSecretKey;
+
+  @Column(length = 4096)
+  private String storageSessionToken;
+
+  @Column(length = 1024)
+  private String storagePublicBaseUrl;
+
+  @Column(length = 16)
+  private String storageAddressingStyle;
+
   protected SiteSettings() { }
 
   public SiteSettings(String domain, String siteName, String logoUrl, String footerCode) {
@@ -47,14 +67,29 @@ public class SiteSettings {
   public String getFooterCode() { return footerCode; }
   public String getStorageEndpoint() { return storageEndpoint; }
   public String getStorageBucket() { return storageBucket; }
+  public Boolean getStorageEnabled() { return storageEnabled; }
+  public String getStorageRegion() { return storageRegion; }
+  public String getStorageAccessKey() { return storageAccessKey; }
+  public String getStorageSecretKey() { return storageSecretKey; }
+  public String getStorageSessionToken() { return storageSessionToken; }
+  public String getStoragePublicBaseUrl() { return storagePublicBaseUrl; }
+  public String getStorageAddressingStyle() { return storageAddressingStyle; }
 
-  public void update(String domain, String siteName, String logoUrl, String footerCode, String storageEndpoint,
-      String storageBucket) {
+  public void update(String domain, String siteName, String logoUrl, String footerCode, Boolean storageEnabled,
+      String storageEndpoint, String storageRegion, String storageBucket, String storageAccessKey,
+      String storageSecretKey, String storageSessionToken, String storagePublicBaseUrl, String storageAddressingStyle) {
     this.domain = domain;
     this.siteName = siteName;
     this.logoUrl = logoUrl;
     this.footerCode = footerCode;
+    if (storageEnabled != null) this.storageEnabled = storageEnabled;
     this.storageEndpoint = storageEndpoint;
+    this.storageRegion = storageRegion;
     this.storageBucket = storageBucket;
+    this.storageAccessKey = storageAccessKey;
+    this.storageSecretKey = storageSecretKey;
+    this.storageSessionToken = storageSessionToken;
+    this.storagePublicBaseUrl = storagePublicBaseUrl;
+    this.storageAddressingStyle = storageAddressingStyle;
   }
 }

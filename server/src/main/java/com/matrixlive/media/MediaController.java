@@ -19,8 +19,9 @@ public class MediaController {
 
   @PostMapping(consumes = "multipart/form-data")
   @ResponseStatus(HttpStatus.CREATED)
-  public MediaUploadResponse upload(@org.springframework.web.bind.annotation.PathVariable UUID activityId,
-      @RequestParam(defaultValue = "assets") String category, @RequestPart MultipartFile file) {
+  public MediaUploadResponse upload(@org.springframework.web.bind.annotation.PathVariable("activityId") UUID activityId,
+      @RequestParam(name = "category", defaultValue = "assets") String category,
+      @RequestPart("file") MultipartFile file) {
     ObjectStorageService.StoredObject object = storage.upload(activityId, category, file);
     return new MediaUploadResponse(object.objectKey(), object.url(), object.contentType(), object.size());
   }

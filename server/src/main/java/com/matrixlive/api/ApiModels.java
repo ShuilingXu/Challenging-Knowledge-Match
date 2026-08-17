@@ -47,16 +47,30 @@ public final class ApiModels {
       Instant endsAt, String description, String clientDisplayName, String clientThemeColor,
       String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt) { }
 
-  public record SiteSettingsResponse(String domain, String siteName, String logoUrl, String footerCode,
-      String storageEndpoint, String storageBucket) { }
+  /** Settings safe to expose on participant-facing routes. */
+  public record SiteSettingsResponse(String domain, String siteName, String logoUrl, String footerCode) { }
+
+  /** Object-storage configuration is only returned from the system-admin endpoint. */
+  public record AdminSiteSettingsResponse(String domain, String siteName, String logoUrl, String footerCode,
+      boolean storageEnabled, String storageEndpoint, String storageRegion, String storageBucket,
+      String storageAccessKey, boolean storageSecretConfigured, boolean storageSessionTokenConfigured,
+      String storagePublicBaseUrl, String storageAddressingStyle) { }
 
   public record UpdateSiteSettingsRequest(
       @Size(max = 255) String domain,
       @Size(max = 160) String siteName,
       @Size(max = 1024) String logoUrl,
       @Size(max = 5000) String footerCode,
+      Boolean storageEnabled,
       @Size(max = 1024) String storageEndpoint,
-      @Size(max = 160) String storageBucket) { }
+      @Size(max = 80) String storageRegion,
+      @Size(max = 160) String storageBucket,
+      @Size(max = 512) String storageAccessKey,
+      @Size(max = 2048) String storageSecretKey,
+      @Size(max = 4096) String storageSessionToken,
+      @Size(max = 1024) String storagePublicBaseUrl,
+      @Size(max = 16) String storageAddressingStyle,
+      Boolean clearStorageCredentials) { }
 
   public record VenueRequest(@NotBlank @Size(max = 80) String code, @NotBlank @Size(max = 160) String name,
       @Min(1) Integer capacity, Boolean enabled) { }
@@ -117,7 +131,7 @@ public final class ApiModels {
       Set<@NotBlank String> answers,
       @Min(1) @Max(100000) Integer fullScore,
       @Min(0) Integer displayOrder,
-      @Size(max = 1024) String mediaUrl,
+      @Size(max = 2048) String mediaUrl,
       @Min(0) @Max(100) Integer partialCreditPercent,
       Boolean enabled) { }
 
@@ -151,6 +165,11 @@ public final class ApiModels {
   public record ControlRequest(@NotBlank String stage, UUID questionId, Integer seconds) { }
   public record ControlState(String stage, UUID questionId, int seconds, Instant updatedAt) { }
   public record ScoreboardEntry(int rank, UUID participantId, String name, String venue, int score) { }
+  public record QuestionSubmissionEntry(UUID participantId, String participantName, String venue, List<String> answers,
+      int awardedPoints, String status, int responseRank, Instant submittedAt) { }
+  public record QuestionResponseStats(UUID questionId, int eligibleParticipantCount, int submittedCount,
+      int unansweredCount, int pendingReviewCount, int correctCount, int partialCount, int incorrectCount,
+      List<QuestionSubmissionEntry> submissions) { }
 
   public record PrizePoolRequest(
       @NotBlank @Size(max = 80) String code,
@@ -199,9 +218,13 @@ public final class ApiModels {
       String lastGrantReason, Instant updatedAt) { }
 
   public record DrawRequest(@NotNull UUID participantId, UUID prizePoolId,
-      @NotBlank @Size(max = 160) String idempotencyKey) {
+      @Size(max = 80) String venue, @NotBlank @Size(max = 160) String idempotencyKey) {
+    public DrawRequest(UUID participantId, UUID prizePoolId, String idempotencyKey) {
+      this(participantId, prizePoolId, null, idempotencyKey);
+    }
+
     public DrawRequest(UUID participantId, String idempotencyKey) {
-      this(participantId, null, idempotencyKey);
+      this(participantId, null, null, idempotencyKey);
     }
   }
 

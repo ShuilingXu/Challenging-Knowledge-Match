@@ -35,6 +35,7 @@ import com.matrixlive.security.auth.ActivityMembership;
 import com.matrixlive.security.auth.ActivityMembershipRepository;
 import com.matrixlive.security.auth.UserRole;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -250,7 +251,7 @@ public class ActivityService {
     ensureRegistrationAllowed(activity);
     String venue = normalizeVenue(venueCode);
     Venue venueEntity = venues.findByActivityIdAndCode(activityId, venue)
-        .orElseGet(() -> venues.save(new Venue(activityId, venue, venue, null)));
+        .orElseThrow(() -> badRequest("Venue is not configured in this activity"));
     if (!venueEntity.isEnabled()) throw conflict("Venue is disabled");
     if (venueEntity.getCapacity() != null
         && participants.countByActivityIdAndVenue(activityId, venue) >= venueEntity.getCapacity()) {
@@ -356,6 +357,8 @@ public class ActivityService {
         request.answers() == null ? new HashSet<>(splitComma(question.getAnswers())) : request.answers(),
         request.fullScore() == null ? question.getFullScore() : request.fullScore(),
         request.displayOrder() == null ? question.getDisplayOrder() : request.displayOrder(),
+        // PUT receives an empty string when the editor explicitly removes a
+        // media asset; null keeps the existing value for partial API clients.
         request.mediaUrl() == null ? question.getMediaUrl() : request.mediaUrl(),
         request.partialCreditPercent() == null ? question.getPartialCreditPercent() : request.partialCreditPercent(),
         request.enabled() == null ? question.isEnabled() : request.enabled(), question.getDisplayOrder());
@@ -391,6 +394,7 @@ public class ActivityService {
     if (state == null || !"QUESTION_OPEN".equals(state.stage()) || !question.getId().equals(state.questionId())) {
       throw conflict("This question is not currently open for answers");
     }
+    if (remainingSeconds(state) <= 0) throw conflict("The answer window has closed");
     if (submissions.findByActivityIdAndParticipantIdAndQuestionId(activityId, participant.getId(), question.getId()).isPresent()) {
       throw conflict("Participant has already answered this question");
     }
@@ -472,6 +476,34 @@ public class ActivityService {
     }).toList();
   }
 
+  @Transactional(readOnly = true)
+  public QuestionResponseStats questionResponseStats(UUID activityId, UUID questionId) {
+    requireQuestion(activityId, questionId);
+    List<Participant> activityParticipants = participants.findByActivityId(activityId);
+    Map<UUID, Participant> participantById = new HashMap<>();
+    int eligibleParticipantCount = 0;
+    for (Participant participant : activityParticipants) {
+      participantById.put(participant.getId(), participant);
+      if ("ACTIVE".equals(participant.getStatus())) eligibleParticipantCount++;
+    }
+    List<AnswerSubmission> answered = submissions.findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, questionId);
+    int correctCount = (int) answered.stream().filter(item -> "CORRECT".equals(item.getStatus())).count();
+    int partialCount = (int) answered.stream().filter(item -> "PARTIAL".equals(item.getStatus())).count();
+    int incorrectCount = (int) answered.stream().filter(item -> "INCORRECT".equals(item.getStatus())).count();
+    int pendingReviewCount = (int) answered.stream().filter(item -> "PENDING_REVIEW".equals(item.getStatus())).count();
+    List<QuestionSubmissionEntry> entries = IntStream.range(0, answered.size()).mapToObj(index -> {
+      AnswerSubmission submission = answered.get(index);
+      Participant participant = participantById.get(submission.getParticipantId());
+      return new QuestionSubmissionEntry(submission.getParticipantId(),
+          participant == null ? "已移除参与者" : participant.getName(),
+          participant == null ? "--" : participant.getVenue(), splitComma(submission.getSubmittedAnswers()),
+          submission.getAwardedPoints(), submission.getStatus(), index + 1, submission.getSubmittedAt());
+    }).toList();
+    return new QuestionResponseStats(questionId, eligibleParticipantCount, answered.size(),
+        Math.max(0, eligibleParticipantCount - answered.size()), pendingReviewCount, correctCount, partialCount,
+        incorrectCount, entries);
+  }
+
   @Transactional
   public ControlState control(UUID activityId, ControlRequest request) {
     requireActivity(activityId);
@@ -489,7 +521,7 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public ControlState controlState(UUID activityId) {
     requireActivity(activityId);
-    return controls.getOrDefault(activityId, new ControlState("LOBBY", null, 0, Instant.now()));
+    return liveControlState(controls.getOrDefault(activityId, new ControlState("LOBBY", null, 0, Instant.now())));
   }
 
   private void synchronizeControlledScreens(UUID activityId, ControlState state) {
@@ -506,9 +538,27 @@ public class ActivityService {
         payload.put("title", question.getTitle());
         payload.put("options", splitPipe(question.getOptions()));
         payload.put("mediaUrl", question.getMediaUrl());
-        payload.put("seconds", state.seconds());
+        payload.put("seconds", remainingSeconds(state));
+        payload.put("updatedAt", state.updatedAt());
         payload.put("questionType", question.getType());
-        if ("ANSWER_REVEALED".equals(stage)) payload.put("answers", splitComma(question.getAnswers()));
+        if ("ANSWER_REVEALED".equals(stage)) {
+          payload.put("answers", splitComma(question.getAnswers()));
+          List<Map<String, Object>> responses = submissions
+              .findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, question.getId()).stream()
+              .map(item -> {
+                Map<String, Object> response = new HashMap<>();
+                Participant participant = participants.findById(item.getParticipantId()).orElse(null);
+                response.put("participantName", participant == null ? "参与者" : participant.getName());
+                response.put("answers", splitComma(item.getSubmittedAnswers()));
+                response.put("awardedPoints", item.getAwardedPoints());
+                response.put("status", item.getStatus());
+                response.put("submittedAt", item.getSubmittedAt());
+                response.put("elapsedSeconds", Math.max(0L,
+                    Duration.between(state.updatedAt(), item.getSubmittedAt()).getSeconds()));
+                return response;
+              }).toList();
+          payload.put("responses", responses);
+        }
       }
       mode = "ANSWER_REVEALED".equals(stage) ? ScreenDisplayMode.RESULT : ScreenDisplayMode.QUESTION;
     } else if ("SCOREBOARD".equals(stage)) {
@@ -535,6 +585,17 @@ public class ActivityService {
       payload.put("message", "工作人员将在控场台下发下一步内容。");
     }
     screens.publishActivityDisplay(activityId, mode, payload);
+  }
+
+  private ControlState liveControlState(ControlState state) {
+    if (!"QUESTION_OPEN".equals(state.stage()) || state.seconds() <= 0) return state;
+    return new ControlState(state.stage(), state.questionId(), remainingSeconds(state), state.updatedAt());
+  }
+
+  private int remainingSeconds(ControlState state) {
+    if (state.seconds() <= 0 || state.updatedAt() == null) return Math.max(0, state.seconds());
+    long elapsed = Duration.between(state.updatedAt(), Instant.now()).getSeconds();
+    return Math.max(0, state.seconds() - Math.toIntExact(Math.min(Integer.MAX_VALUE, elapsed)));
   }
 
   @Transactional(readOnly = true)
@@ -608,7 +669,12 @@ public class ActivityService {
 
   @Transactional
   public List<AwardDetailResponse> issueRankingAwards(UUID activityId, UUID poolId) {
-    requireActivity(activityId);
+    Activity activity = requireActivity(activityId);
+    ControlState controlState = controls.get(activityId);
+    if (!"FINISHED".equals(activity.getStatus())
+        && (controlState == null || !"WINNERS".equals(controlState.stage()))) {
+      throw conflict("Ranking awards can only be issued after the activity ends or during winner confirmation");
+    }
     PrizePool pool = requirePrizePoolForUpdate(activityId, poolId);
     if (!"RANKING".equals(pool.getPurpose())) throw badRequest("Prize pool is not a ranking pool");
     if (pool.getRankFrom() == null || pool.getRankTo() == null) throw badRequest("Ranking pool requires rank range");
@@ -657,6 +723,10 @@ public class ActivityService {
     }
     Participant participant = requireParticipantForUpdate(activityId, request.participantId());
     if (!"ACTIVE".equals(participant.getStatus())) throw conflict("Participant is disabled");
+    if (request.venue() != null && !request.venue().isBlank()
+        && !participant.getVenue().equals(normalizeVenue(request.venue()))) {
+      throw conflict("Lottery entry venue does not match the participant venue");
+    }
     LotteryChance chance = lotteryChances.findByActivityIdAndParticipantIdForUpdate(activityId, participant.getId())
         .orElseThrow(() -> conflict("No lottery chances have been granted"));
     if (chance.getRemainingDraws() <= 0) throw conflict("No lottery chances remaining");

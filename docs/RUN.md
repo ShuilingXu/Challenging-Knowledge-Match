@@ -27,6 +27,20 @@ Run `mvn spring-boot:run` from `server`. It starts with an in-memory H2 database
 
 The WebSocket endpoint is `/ws`. Activity messages are broadcast to `/topic/activities/{activityId}` with an event type, payload, and timestamp.
 
+## S3 media storage
+
+Question media uploads use `POST /api/activities/{activityId}/media` with a
+`multipart/form-data` part named `file`. The endpoint accepts image, audio, and
+video MIME types and stores objects under `{activityId}/questions/`.
+
+For AWS S3, set `S3_ENABLED=true`, `S3_REGION`, `S3_BUCKET`,
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (or the `S3_ACCESS_KEY`/
+`S3_SECRET_KEY` aliases) and leave `S3_ENDPOINT` empty. The API derives the
+regional AWS endpoint. MinIO and other S3-compatible services should set
+`S3_ENDPOINT`; `S3_ADDRESSING_STYLE` accepts `AUTO`, `PATH`, or `VIRTUAL`.
+`S3_PUBLIC_BASE_URL` is optional; if it already ends with the bucket name, the
+API appends only the object key, otherwise it appends `/{bucket}/{objectKey}`.
+
 ## Full local stack
 
 Run `docker compose up --build`. The web app is served on `http://127.0.0.1:4173`, MinIO on ports `9000` and `9001`, and the API is proxied under `/api`.

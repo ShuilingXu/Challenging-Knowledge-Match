@@ -40,11 +40,14 @@ class ActivityDomainWorkflowTest {
     assertEquals(1, service.listParticipants(activity.id(), "south").size());
     assertThrows(DomainException.class, () -> service.register(activity.id(), "north",
         new RegisterParticipantRequest("Duplicate", "13800001000", "Matrix", Map.of("department", "Engineering"))));
+    assertThrows(DomainException.class, () -> service.register(activity.id(), "west",
+        new RegisterParticipantRequest("Unknown venue", "13800009999", "Matrix", Map.of("department", "Engineering"))));
   }
 
   @Test
   void recordsScoreLedgerAndMakesLotteryDrawsPersistentAndIdempotent() {
     var activity = service.createActivity(new CreateActivityRequest("Scoring workflow", "Guangzhou", Instant.now()));
+    service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
     var participant = service.register(activity.id(), "hall-a",
         new RegisterParticipantRequest("Taylor", "13900002000", "QA"));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("MULTIPLE", "Select all valid values",
@@ -76,11 +79,26 @@ class ActivityDomainWorkflowTest {
     assertEquals("REDEEMED", service.redeem(activity.id(), first.awardId()).status());
     assertThrows(DomainException.class, () -> service.draw(activity.id(), new DrawRequest(participant.id(), pool.id(),
         UUID.randomUUID().toString())));
+    service.grantLotteryChances(activity.id(), participant.id(), new GrantLotteryChancesRequest(1, "venue validation"));
+    assertThrows(DomainException.class, () -> service.draw(activity.id(), new DrawRequest(participant.id(), pool.id(), "other-hall",
+        UUID.randomUUID().toString())));
+  }
+
+  @Test
+  void rankingAwardsRequireFinishedActivityOrWinnerConfirmation() {
+    var activity = service.createActivity(new CreateActivityRequest("Ranking workflow", "Shanghai", Instant.now()));
+    var pool = service.createPrizePool(activity.id(), new PrizePoolRequest("rank-1", "Top prize", "RANKING",
+        "DIGITAL", "", null, 1, 0, 1, 1, 1, true));
+    assertThrows(DomainException.class, () -> service.issueRankingAwards(activity.id(), pool.id()));
+
+    service.control(activity.id(), new ControlRequest("WINNERS", null, 0));
+    assertTrue(service.issueRankingAwards(activity.id(), pool.id()).isEmpty());
   }
 
   @Test
   void holdsTextAnswersForManualReviewAndAppliesFeedbackWhenGraded() {
     var activity = service.createActivity(new CreateActivityRequest("Text review", "Beijing", Instant.now()));
+    service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
     var participant = service.register(activity.id(), "hall-a",
         new RegisterParticipantRequest("Jordan", "13900003000", "Matrix"));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT", "Describe the event highlight",

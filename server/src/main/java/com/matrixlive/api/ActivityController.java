@@ -186,6 +186,11 @@ public class ActivityController {
   @GetMapping("/{activityId}/control")
   public ControlState controlState(@PathVariable UUID activityId) { return service.controlState(activityId); }
 
+  @GetMapping("/{activityId}/questions/{questionId}/response-stats")
+  public QuestionResponseStats questionResponseStats(@PathVariable UUID activityId, @PathVariable UUID questionId) {
+    return service.questionResponseStats(activityId, questionId);
+  }
+
   @PostMapping("/{activityId}/control")
   public ControlState control(@PathVariable UUID activityId, @Valid @RequestBody ControlRequest request) {
     return service.control(activityId, request);

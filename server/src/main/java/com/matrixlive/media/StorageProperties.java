@@ -10,8 +10,12 @@ public class StorageProperties {
   private String endpoint;
   private String accessKey;
   private String secretKey;
+  private String sessionToken;
+  private String region = "us-east-1";
   private String bucket;
   private String publicBaseUrl;
+  /** AUTO lets the MinIO client choose; PATH and VIRTUAL force S3 addressing. */
+  private String addressingStyle = "AUTO";
   private long maxFileSize = 20 * 1024 * 1024;
 
   public boolean isEnabled() { return enabled; }
@@ -22,10 +26,16 @@ public class StorageProperties {
   public void setAccessKey(String accessKey) { this.accessKey = accessKey; }
   public String getSecretKey() { return secretKey; }
   public void setSecretKey(String secretKey) { this.secretKey = secretKey; }
+  public String getSessionToken() { return sessionToken; }
+  public void setSessionToken(String sessionToken) { this.sessionToken = sessionToken; }
+  public String getRegion() { return region; }
+  public void setRegion(String region) { this.region = region; }
   public String getBucket() { return bucket; }
   public void setBucket(String bucket) { this.bucket = bucket; }
   public String getPublicBaseUrl() { return publicBaseUrl; }
   public void setPublicBaseUrl(String publicBaseUrl) { this.publicBaseUrl = publicBaseUrl; }
+  public String getAddressingStyle() { return addressingStyle; }
+  public void setAddressingStyle(String addressingStyle) { this.addressingStyle = addressingStyle; }
   public long getMaxFileSize() { return maxFileSize; }
   public void setMaxFileSize(long maxFileSize) { this.maxFileSize = maxFileSize; }
 }

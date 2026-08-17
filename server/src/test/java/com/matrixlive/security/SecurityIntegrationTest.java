@@ -30,6 +30,20 @@ class SecurityIntegrationTest {
   }
 
   @Test
+  void keepsObjectStorageConfigurationOffThePublicSiteSettingsRoute() throws Exception {
+    MvcResult publicSettings = mvc.perform(get("/api/site-settings"))
+        .andExpect(status().isOk()).andReturn();
+    JsonNode response = objectMapper.readTree(publicSettings.getResponse().getContentAsString());
+    org.junit.jupiter.api.Assertions.assertNull(response.get("storageEndpoint"));
+    org.junit.jupiter.api.Assertions.assertNull(response.get("storageAccessKey"));
+
+    mvc.perform(get("/api/admin/site-settings")).andExpect(status().isUnauthorized());
+    String adminToken = accessToken(login("sysadmin", "ChangeMe!2026"));
+    mvc.perform(get("/api/admin/site-settings").header("Authorization", "Bearer " + adminToken))
+        .andExpect(status().isOk());
+  }
+
+  @Test
   void rotatesRefreshTokensAndRevokesTheAccessTokenAtLogout() throws Exception {
     MvcResult login = login("sysadmin", "ChangeMe!2026");
     String access = accessToken(login);

@@ -11,6 +11,7 @@ public interface AnswerSubmissionRepository extends JpaRepository<AnswerSubmissi
   Optional<AnswerSubmission> findByActivityIdAndIdempotencyKey(UUID activityId, String idempotencyKey);
   Optional<AnswerSubmission> findByActivityIdAndParticipantIdAndQuestionId(UUID activityId, UUID participantId, UUID questionId);
   List<AnswerSubmission> findByActivityIdAndParticipantIdOrderBySubmittedAtDesc(UUID activityId, UUID participantId);
+  List<AnswerSubmission> findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(UUID activityId, UUID questionId);
   long countByActivityIdAndQuestionId(UUID activityId, UUID questionId);
   boolean existsByActivityIdAndQuestionId(UUID activityId, UUID questionId);
 }

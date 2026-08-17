@@ -522,6 +522,7 @@ function OverviewPage({ activityId, activities }) {
   useEffect(() => {
     load();
   }, [load]);
+  useActivityStream(activityId, load);
   const activity = activities.find((item) => item.id === activityId);
   return (
     <div className="page-content">
@@ -928,9 +929,24 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
 function ControlPage({ activityId }) {
   const [questions, setQuestions] = useState([]);
   const [state, setState] = useState(null);
+  const [responseStats, setResponseStats] = useState(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const loadStats = useCallback(
+    async (questionId) => {
+      if (!activityId || !questionId) {
+        setResponseStats(null);
+        return;
+      }
+      try {
+        setResponseStats(await api.questionStats(activityId, questionId));
+      } catch (cause) {
+        setError(cause.message);
+      }
+    },
+    [activityId],
+  );
   const load = useCallback(async () => {
     if (!activityId) return;
     try {
@@ -940,17 +956,18 @@ function ControlPage({ activityId }) {
       ]);
       setQuestions(allQuestions);
       setState(control);
-      setSelectedQuestionId(
-        (current) =>
-          control.questionId ||
-          (allQuestions.some((item) => item.id === current)
-            ? current
-            : allQuestions[0]?.id || ""),
+      const nextQuestionId = control.questionId || allQuestions[0]?.id || "";
+      setSelectedQuestionId((current) =>
+        control.questionId ||
+        (allQuestions.some((item) => item.id === current)
+          ? current
+          : nextQuestionId),
       );
+      await loadStats(nextQuestionId);
     } catch (cause) {
       setError(cause.message);
     }
-  }, [activityId]);
+  }, [activityId, loadStats]);
   useEffect(() => {
     load();
   }, [load]);
@@ -963,23 +980,34 @@ function ControlPage({ activityId }) {
   const current =
     questions.find((question) => question.id === controlledQuestionId) ||
     questions[0];
+  const enabledQuestions = questions
+    .filter((item) => item.enabled)
+    .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
+  const currentIndex = enabledQuestions.findIndex((item) => item.id === current?.id);
+  const nextQuestion = currentIndex >= 0 ? enabledQuestions[currentIndex + 1] : enabledQuestions[0];
+  const selectQuestion = (questionId) => {
+    setSelectedQuestionId(questionId);
+    loadStats(questionId);
+  };
   const update = async (stage, overrides = {}) => {
     if (["QUESTION_OPEN", "ANSWER_REVEALED"].includes(stage) && !current)
       return;
     setBusy(true);
     try {
+      const questionId =
+        overrides.questionId ??
+        (["QUESTION_OPEN", "ANSWER_REVEALED"].includes(stage)
+          ? current?.id
+          : state?.questionId || null);
       const next = await api.control(activityId, {
         stage,
-        questionId:
-          overrides.questionId ??
-          (["QUESTION_OPEN", "ANSWER_REVEALED"].includes(stage)
-            ? current?.id
-            : state?.questionId || null),
+        questionId,
         seconds:
           overrides.seconds ??
           (stage === "QUESTION_OPEN" ? 30 : state?.seconds || 0),
       });
       setState(next);
+      await loadStats(questionId);
     } catch (cause) {
       setError(cause.message);
     } finally {
@@ -1010,11 +1038,10 @@ function ControlPage({ activityId }) {
               <select
                 aria-label="选择控场题目"
                 value={current?.id || ""}
-                onChange={(event) => setSelectedQuestionId(event.target.value)}
+                onChange={(event) => selectQuestion(event.target.value)}
               >
                 <option value="">请选择题目</option>
-                {questions
-                  .filter((item) => item.enabled)
+                {enabledQuestions
                   .map((item, index) => (
                     <option key={item.id} value={item.id}>
                       第 {index + 1} 题 · {item.title}
@@ -1027,6 +1054,10 @@ function ControlPage({ activityId }) {
               </Link>
             </div>
             <h2>{current?.title || "请先在题库中创建并启用题目"}</h2>
+            <ScreenMedia
+              src={current?.mediaUrl}
+              className="control-question-media"
+            />
             <div className="control-option-grid">
               {asOptions(current).map((option, index) => (
                 <div key={`${option}-${index}`}>
@@ -1047,9 +1078,49 @@ function ControlPage({ activityId }) {
               </span>
               <span>
                 <Users size={16} />
-                答题情况通过实时事件更新
+                {responseStats
+                  ? `已答 ${responseStats.submittedCount}/${responseStats.eligibleParticipantCount} 人`
+                  : "等待答题数据"}
               </span>
             </div>
+            <section className="control-response-overview" aria-live="polite">
+              <div className="control-response-metrics">
+                <span>
+                  <b>{responseStats?.unansweredCount || 0}</b>
+                  待答
+                </span>
+                <span className="is-review">
+                  <b>{responseStats?.pendingReviewCount || 0}</b>
+                  待评分
+                </span>
+                <span className="is-correct">
+                  <b>{responseStats?.correctCount || 0}</b>
+                  正确
+                </span>
+                <span className="is-partial">
+                  <b>{responseStats?.partialCount || 0}</b>
+                  部分正确
+                </span>
+                <span className="is-incorrect">
+                  <b>{responseStats?.incorrectCount || 0}</b>
+                  不正确
+                </span>
+              </div>
+              <div className="control-response-feed">
+                <span>最近提交</span>
+                {responseStats?.submissions?.map((submission) => (
+                  <div key={submission.participantId}>
+                    <strong>{submission.participantName}</strong>
+                    <small>
+                      回答：{submission.answers?.join("、") || "未填写"} · {submission.awardedPoints || 0} 分
+                      <br />
+                      第 {submission.responseRank} 位 · {submissionStatusLabel(submission.status)} · {formatDate(submission.submittedAt)}
+                    </small>
+                  </div>
+                ))}
+                {!responseStats?.submissions?.length && <small>尚无人提交本题</small>}
+              </div>
+            </section>
           </article>
           <div className="control-actions">
             <button
@@ -1059,6 +1130,18 @@ function ControlPage({ activityId }) {
             >
               <Play size={17} />
               开题并计时
+            </button>
+            <button
+              className="secondary-button"
+              disabled={busy || !nextQuestion}
+              onClick={() => {
+                if (!nextQuestion) return;
+                setSelectedQuestionId(nextQuestion.id);
+                update("QUESTION_OPEN", { questionId: nextQuestion.id, seconds: 30 });
+              }}
+            >
+              <ArrowRight size={17} />
+              下一题并开始
             </button>
             <button
               className="accent-button"
@@ -1160,6 +1243,7 @@ function QuestionsPage({ activityId }) {
   useEffect(() => {
     load();
   }, [load]);
+  useActivityStream(activityId, load);
   const openCreate = () => {
     setError("");
     setForm(emptyQuestion());
@@ -1187,6 +1271,21 @@ function QuestionsPage({ activityId }) {
           : current.options || "选项 A\n选项 B\n选项 C\n选项 D",
       answers: type === "TEXT" ? "" : current.answers || "B",
     }));
+  const uploadMedia = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setBusy("question-media");
+    setError("");
+    try {
+      const uploaded = await api.uploadMedia(activityId, file, "questions");
+      setForm((current) => ({ ...current, mediaUrl: uploaded.url }));
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      event.target.value = "";
+      setBusy("");
+    }
+  };
   const submit = async (event) => {
     event.preventDefault();
     setBusy("question-form");
@@ -1220,7 +1319,9 @@ function QuestionsPage({ activityId }) {
       answers,
       fullScore: Number(form.fullScore),
       partialCreditPercent: Number(form.partialCreditPercent),
-      mediaUrl: form.mediaUrl || null,
+      // Empty string is the explicit "remove media" value; null remains the
+      // server-side convention for a partial update that leaves it unchanged.
+      mediaUrl: form.mediaUrl || "",
     };
     try {
       if (dialog === "create") await api.createQuestion(activityId, payload);
@@ -1518,6 +1619,30 @@ function QuestionsPage({ activityId }) {
                 placeholder="https://..."
               />
             </label>
+            <div className="media-upload-control">
+              <label className="secondary-button">
+                <FilePlus2 size={16} />
+                {busy === "question-media" ? "正在上传" : "上传媒体"}
+                <input
+                  type="file"
+                  accept="image/*,audio/*,video/*"
+                  disabled={busy === "question-media"}
+                  onChange={uploadMedia}
+                />
+              </label>
+              {form.mediaUrl && (
+                <button
+                  className="toolbar-icon"
+                  type="button"
+                  title="移除题目媒体"
+                  onClick={() => setForm({ ...form, mediaUrl: "" })}
+                >
+                  <X size={16} />
+                </button>
+              )}
+              <span>{form.mediaUrl ? "媒体已关联到本题" : "支持图片、音频和视频"}</span>
+            </div>
+            <ScreenMedia src={form.mediaUrl} className="question-editor-media" />
             <label className="toggle-control">
               <input
                 type="checkbox"
@@ -1915,6 +2040,7 @@ function RewardsPage({ activityId }) {
   });
   const [pools, setPools] = useState([]);
   const [participants, setParticipants] = useState([]);
+  const [venues, setVenues] = useState([]);
   const [awards, setAwards] = useState([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -1923,6 +2049,7 @@ function RewardsPage({ activityId }) {
   const [redemptionOpen, setRedemptionOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
   const [lotteryDialog, setLotteryDialog] = useState(null);
+  const [lotteryVenue, setLotteryVenue] = useState("");
   const [busy, setBusy] = useState("");
   const [awardForm, setAwardForm] = useState({
     participantId: "",
@@ -1937,14 +2064,16 @@ function RewardsPage({ activityId }) {
   const load = useCallback(async () => {
     if (!activityId) return;
     try {
-      const [nextPools, nextParticipants, nextAwards] = await Promise.all([
+      const [nextPools, nextParticipants, nextAwards, nextVenues] = await Promise.all([
         api.prizePools(activityId),
         api.participants(activityId),
         api.awardsAdmin(activityId),
+        api.venues(activityId),
       ]);
       setPools(nextPools);
       setParticipants(nextParticipants);
       setAwards(nextAwards);
+      setVenues(nextVenues || []);
     } catch (cause) {
       setError(cause.message);
     }
@@ -2075,6 +2204,7 @@ function RewardsPage({ activityId }) {
     );
   const openLottery = (pool) => {
     setChanceForm({ participantId: "", draws: 1, reason: "" });
+    setLotteryVenue((venues.find((venue) => venue.enabled) || venues[0])?.code || "");
     setLotteryDialog(pool);
   };
   const grantLotteryChances = async (event) => {
@@ -2095,6 +2225,9 @@ function RewardsPage({ activityId }) {
     (pool) =>
       pool.enabled && pool.purpose !== "RANKING" && pool.remainingQuantity > 0,
   );
+  const lotteryUrl = lotteryDialog
+    ? `${window.location.origin}/lottery/${activityId}?pool=${encodeURIComponent(lotteryDialog.id)}${lotteryVenue ? `&venue=${encodeURIComponent(lotteryVenue)}` : ""}`
+    : "";
   return (
     <div className="page-content">
       <PageHeader
@@ -2610,7 +2743,7 @@ function RewardsPage({ activityId }) {
         >
           <div className="lottery-entry">
             <QRCodeSVG
-              value={`${window.location.origin}/lottery/${activityId}?pool=${encodeURIComponent(lotteryDialog.id)}`}
+              value={lotteryUrl}
               size={132}
               level="M"
               includeMargin
@@ -2619,7 +2752,7 @@ function RewardsPage({ activityId }) {
               <p className="eyebrow">LOTTERY LINK</p>
               <strong>{lotteryDialog.name}</strong>
               <a
-                href={`/lottery/${activityId}?pool=${encodeURIComponent(lotteryDialog.id)}`}
+                href={lotteryUrl}
                 target="_blank"
                 rel="noreferrer"
               >
@@ -2628,6 +2761,19 @@ function RewardsPage({ activityId }) {
               </a>
             </div>
           </div>
+          <label>
+            抽奖会场
+            <select
+              required
+              value={lotteryVenue}
+              onChange={(event) => setLotteryVenue(event.target.value)}
+            >
+              <option value="">选择入口会场</option>
+              {venues.filter((venue) => venue.enabled).map((venue) => (
+                <option key={venue.id} value={venue.code}>{venue.name}</option>
+              ))}
+            </select>
+          </label>
           <form className="dialog-form" onSubmit={grantLotteryChances}>
             <label>
               授予参与者
@@ -2706,6 +2852,7 @@ function ScreensPage({ activityId }) {
   const [error, setError] = useState("");
   const [registering, setRegistering] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [pairing, setPairing] = useState(null);
   const [renamingDevice, setRenamingDevice] = useState(null);
   const [deviceForm, setDeviceForm] = useState({
@@ -2764,7 +2911,38 @@ function ScreensPage({ activityId }) {
       setError(cause.message);
     }
   };
-  const createTemplate = async (event) => {
+  const templateToForm = (template) => {
+    const form = emptyTemplate();
+    for (const component of template?.components || []) {
+      const config = component.config || {};
+      if (component.type === "BACKGROUND") {
+        form.background = config.color || form.background;
+        form.backgroundImage = config.imageUrl || "";
+      } else if (component.type === "TEXT") {
+        form.headline = config.text || config.label || "";
+      } else if (component.type === "IMAGE") {
+        form.imageUrl = config.url || "";
+      } else if (component.type === "FILE") {
+        form.fileUrl = config.url || "";
+      } else if (component.type === "ACTIVITY_QR") {
+        form.includeActivityQr = true;
+      } else if (component.type === "REGISTRATION_QR") {
+        form.includeRegistrationQr = true;
+      }
+    }
+    return {
+      ...form,
+      name: template?.name || "",
+      description: template?.description || "",
+    };
+  };
+  const openTemplateEditor = (template = null) => {
+    setError("");
+    setEditingTemplateId(template?.id || null);
+    setTemplateForm(template ? templateToForm(template) : emptyTemplate());
+    setEditingTemplate(true);
+  };
+  const saveTemplate = async (event) => {
     event.preventDefault();
     const components = [
       {
@@ -2801,12 +2979,18 @@ function ScreensPage({ activityId }) {
         config: { url: templateForm.fileUrl, label: "活动文件" },
       });
     try {
-      await api.createTemplate(activityId, {
+      const payload = {
         name: templateForm.name,
         description: templateForm.description,
         components,
-      });
+      };
+      if (editingTemplateId) {
+        await api.updateTemplate(activityId, editingTemplateId, payload);
+      } else {
+        await api.createTemplate(activityId, payload);
+      }
       setEditingTemplate(false);
+      setEditingTemplateId(null);
       setTemplateForm(emptyTemplate());
       await load();
     } catch (cause) {
@@ -3070,10 +3254,7 @@ function ScreensPage({ activityId }) {
               type="button"
               title="新建模板"
               aria-label="新建模板"
-              onClick={() => {
-                setTemplateForm(emptyTemplate());
-                setEditingTemplate(true);
-              }}
+              onClick={() => openTemplateEditor()}
             >
               <Plus size={18} />
             </button>
@@ -3101,6 +3282,16 @@ function ScreensPage({ activityId }) {
                   下发
                   <Send size={15} />
                 </button>
+                {!template.preset && (
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={() => openTemplateEditor(template)}
+                  >
+                    <Pencil size={14} />
+                    编辑
+                  </button>
+                )}
                 <button
                   className="text-button"
                   type="button"
@@ -3175,8 +3366,14 @@ function ScreensPage({ activityId }) {
         </Dialog>
       )}
       {editingTemplate && (
-        <Dialog title="创建大屏模板" onClose={() => setEditingTemplate(false)}>
-          <form className="dialog-form" onSubmit={createTemplate}>
+        <Dialog
+          title={editingTemplateId ? "编辑大屏模板" : "创建大屏模板"}
+          onClose={() => {
+            setEditingTemplate(false);
+            setEditingTemplateId(null);
+          }}
+        >
+          <form className="dialog-form" onSubmit={saveTemplate}>
             <label>
               模板名称
               <input
@@ -3294,7 +3491,7 @@ function ScreensPage({ activityId }) {
               />
             </label>
             <button className="primary-button" type="submit">
-              保存模板
+              {editingTemplateId ? "更新模板" : "保存模板"}
               <Check size={17} />
             </button>
           </form>
@@ -3362,8 +3559,16 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
     siteName: "",
     logoUrl: "",
     footerCode: "",
+    storageEnabled: false,
     storageEndpoint: "",
+    storageRegion: "us-east-1",
     storageBucket: "",
+    storageAccessKey: "",
+    storageSecretKey: "",
+    storageSessionToken: "",
+    storagePublicBaseUrl: "",
+    storageAddressingStyle: "AUTO",
+    clearStorageCredentials: false,
   });
   const [brandForm, setBrandForm] = useState({
     clientDisplayName: "",
@@ -3381,21 +3586,31 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
           api.venues(activityId),
           api.registrationFields(activityId),
           isSystemAdmin ? api.users() : Promise.resolve([]),
-          api.siteSettings(),
+          isSystemAdmin ? api.adminSiteSettings() : Promise.resolve(null),
         ]);
       setMembers(memberList);
       setVenues(venueList);
       setRegistrationFields(fieldList);
       setUsers(accountList);
       setSiteSettings(nextSiteSettings);
-      setSiteForm({
-        domain: nextSiteSettings.domain || "",
-        siteName: nextSiteSettings.siteName || "",
-        logoUrl: nextSiteSettings.logoUrl || "",
-        footerCode: nextSiteSettings.footerCode || "",
-        storageEndpoint: nextSiteSettings.storageEndpoint || "",
-        storageBucket: nextSiteSettings.storageBucket || "",
-      });
+      if (nextSiteSettings) {
+        setSiteForm({
+          domain: nextSiteSettings.domain || "",
+          siteName: nextSiteSettings.siteName || "",
+          logoUrl: nextSiteSettings.logoUrl || "",
+          footerCode: nextSiteSettings.footerCode || "",
+          storageEnabled: Boolean(nextSiteSettings.storageEnabled),
+          storageEndpoint: nextSiteSettings.storageEndpoint || "",
+          storageRegion: nextSiteSettings.storageRegion || "us-east-1",
+          storageBucket: nextSiteSettings.storageBucket || "",
+          storageAccessKey: nextSiteSettings.storageAccessKey || "",
+          storageSecretKey: "",
+          storageSessionToken: "",
+          storagePublicBaseUrl: nextSiteSettings.storagePublicBaseUrl || "",
+          storageAddressingStyle: nextSiteSettings.storageAddressingStyle || "AUTO",
+          clearStorageCredentials: false,
+        });
+      }
       setError("");
     } catch (cause) {
       setError(cause.message);
@@ -3431,7 +3646,16 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
   const createUser = async (event) => {
     event.preventDefault();
     try {
-      await api.createUser(account);
+      if (account.systemRole === "SYSTEM_ADMIN") {
+        await api.createUser(account);
+      } else {
+        await api.createMembershipUser(activityId, {
+          username: account.username,
+          displayName: account.displayName,
+          password: account.password,
+          role: account.systemRole,
+        });
+      }
       setCreating(false);
       setAccount({
         username: "",
@@ -3555,7 +3779,12 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
     try {
       const saved = await api.updateSiteSettings(siteForm);
       setSiteSettings(saved);
-      setSiteForm(saved);
+      setSiteForm({
+        ...saved,
+        storageSecretKey: "",
+        storageSessionToken: "",
+        clearStorageCredentials: false,
+      });
     } catch (cause) {
       setError(cause.message);
     } finally {
@@ -3667,27 +3896,97 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
               <p className="eyebrow">OBJECT STORAGE</p>
               <h3>S3 静态文件存储</h3>
               <span>
-                接入点与桶名持久化后会直接用于题库媒体上传；访问密钥始终仅从部署环境读取。
+                填写标准 S3 连接信息后，题库媒体会直传到指定桶；密钥只在提交时写入，不会再次显示。
               </span>
             </div>
             <form className="settings-inline-form settings-inline-form--storage" onSubmit={saveSite}>
+              <label className="storage-toggle">
+                <span>S3 上传</span>
+                <input
+                  type="checkbox"
+                  checked={siteForm.storageEnabled}
+                  onChange={(event) => setSiteForm({ ...siteForm, storageEnabled: event.target.checked })}
+                />
+              </label>
               <label>
                 S3 接入点
                 <input
-                  required
                   type="url"
                   value={siteForm.storageEndpoint || ""}
                   onChange={(event) => setSiteForm({ ...siteForm, storageEndpoint: event.target.value })}
-                  placeholder="https://s3.example.com"
+                  placeholder="留空使用 AWS 区域端点；兼容服务填 https://..."
+                />
+              </label>
+              <label>
+                区域
+                <input
+                  required={siteForm.storageEnabled}
+                  value={siteForm.storageRegion || ""}
+                  onChange={(event) => setSiteForm({ ...siteForm, storageRegion: event.target.value })}
+                  placeholder="us-east-1"
                 />
               </label>
               <label>
                 S3 静态文件桶
                 <input
-                  required
+                  required={siteForm.storageEnabled}
                   value={siteForm.storageBucket || ""}
                   onChange={(event) => setSiteForm({ ...siteForm, storageBucket: event.target.value })}
                   placeholder="event-media"
+                />
+              </label>
+              <label>
+                Access key
+                <input
+                  value={siteForm.storageAccessKey || ""}
+                  onChange={(event) => setSiteForm({ ...siteForm, storageAccessKey: event.target.value })}
+                  placeholder="Access key ID"
+                />
+              </label>
+              <label>
+                Secret key
+                <input
+                  type="password"
+                  value={siteForm.storageSecretKey || ""}
+                  onChange={(event) => setSiteForm({ ...siteForm, storageSecretKey: event.target.value })}
+                  placeholder={siteSettings?.storageSecretConfigured ? "已保存，留空不修改" : "Secret access key"}
+                />
+              </label>
+              <label>
+                会话令牌（可选）
+                <input
+                  type="password"
+                  value={siteForm.storageSessionToken || ""}
+                  onChange={(event) => setSiteForm({ ...siteForm, storageSessionToken: event.target.value })}
+                  placeholder={siteSettings?.storageSessionTokenConfigured ? "已保存，留空不修改" : "STS session token"}
+                />
+              </label>
+              <label>
+                公共访问地址（可选）
+                <input
+                  type="url"
+                  value={siteForm.storagePublicBaseUrl || ""}
+                  onChange={(event) => setSiteForm({ ...siteForm, storagePublicBaseUrl: event.target.value })}
+                  placeholder="https://cdn.example.com"
+                />
+              </label>
+              <label>
+                寻址方式
+                <select
+                  value={siteForm.storageAddressingStyle || "AUTO"}
+                  onChange={(event) => setSiteForm({ ...siteForm, storageAddressingStyle: event.target.value })}
+                >
+                  <option value="AUTO">自动（推荐）</option>
+                  <option value="VIRTUAL">虚拟主机式（bucket.endpoint）</option>
+                  <option value="PATH">路径式（endpoint/bucket）</option>
+                </select>
+              </label>
+              <label className="storage-toggle storage-toggle--clear">
+                <span>清除已保存密钥</span>
+                <input
+                  type="checkbox"
+                  checked={siteForm.clearStorageCredentials}
+                  onChange={(event) => setSiteForm({ ...siteForm, clearStorageCredentials: event.target.checked })}
                 />
               </label>
               <button className="primary-button" disabled={busy === "site"}>
@@ -4011,7 +4310,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
         </div>
       </section>
       {creating && (
-        <Dialog title="创建系统账户" onClose={() => setCreating(false)}>
+        <Dialog title="创建账户" onClose={() => setCreating(false)}>
           <form className="dialog-form" onSubmit={createUser}>
             <label>
               登录名
@@ -4349,8 +4648,12 @@ function ParticipantPortal({ lotteryMode = false }) {
   if (loading) return <LoadingPage label="正在连接活动现场" />;
   if (error && !questions.length)
     return <BackendProblem message={error} onRetry={load} />;
+  const orderedQuestions = [...questions]
+    .filter((item) => item.enabled !== false)
+    .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
   const question =
-    questions.find((item) => item.id === state?.questionId) || questions[0];
+    questions.find((item) => item.id === state?.questionId) || orderedQuestions[0];
+  const questionIndex = Math.max(0, orderedQuestions.findIndex((item) => item.id === question?.id));
   const brandName = activity?.clientDisplayName || activity?.name || "活动现场";
   const pageStyle = {
     "--client-theme": activity?.clientThemeColor || "#168F7C",
@@ -4411,6 +4714,8 @@ function ParticipantPortal({ lotteryMode = false }) {
                   participant={participant}
                   participantToken={participantToken}
                   question={question}
+                  questionIndex={questionIndex}
+                  questionCount={orderedQuestions.length}
                   state={state}
                   submission={submissions.find(
                     (item) => item.questionId === question?.id,
@@ -4736,6 +5041,8 @@ function AnswerCard({
   participant,
   participantToken,
   question,
+  questionIndex = 0,
+  questionCount = 0,
   state,
   submission,
   onAnswered,
@@ -4745,6 +5052,7 @@ function AnswerCard({
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const remaining = useLiveCountdown(state);
   useEffect(() => {
     setAnswers([]);
     setTextAnswer("");
@@ -4827,11 +5135,11 @@ function AnswerCard({
     <article className="answer-card">
       <div className="answer-card__meta">
         <span>
-          <i />第 {question.sequence || "01"} 题
+          <i />第 {String(questionIndex + 1).padStart(2, "0")} / {String(Math.max(questionCount, 1)).padStart(2, "0")} 题
         </span>
         <strong>
-          {state?.seconds
-            ? formatSeconds(state.seconds)
+          {remaining
+            ? formatSeconds(remaining)
             : state?.stage === "QUESTION_OPEN"
               ? "进行中"
               : stageLabel(state?.stage || "LOBBY")}
@@ -4841,6 +5149,7 @@ function AnswerCard({
         {typeLabel(question.type)} · {question.fullScore || 100} 分
       </span>
       <h2>{question.title}</h2>
+      <ScreenMedia src={question.mediaUrl} className="answer-question-media" />
       {text ? (
         <textarea
           className="text-answer"
@@ -4968,6 +5277,7 @@ function RewardsCard({
         {
           participantId: participant.id,
           prizePoolId: preferredPoolId || null,
+          venue: participant.venue || null,
           idempotencyKey: crypto.randomUUID(),
         },
         participantToken,
@@ -5199,8 +5509,8 @@ function ScreenDisplay({ activityId, display, mode }) {
   const payload = display.data || {};
   const rows = payload.rows || payload.scoreboard || [];
   if (mode === "SCOREBOARD" || mode === "LEADERBOARD")
-    return <ScreenScoreboard board={rows} />;
-  if (mode === "WINNERS") return <ScreenWinners winners={rows} />;
+    return <ScreenScoreboard board={rows} display={display} />;
+  if (mode === "WINNERS") return <ScreenWinners winners={rows} display={display} />;
   if (mode === "QUESTION" || mode === "RESULT")
     return (
       <ScreenQuestion
@@ -5214,8 +5524,10 @@ function ScreenDisplay({ activityId, display, mode }) {
         state={{
           stage: mode === "RESULT" ? "ANSWER_REVEALED" : "QUESTION_OPEN",
           seconds: payload.seconds,
+          updatedAt: payload.updatedAt || display.updatedAt,
         }}
         result={mode === "RESULT"}
+        responses={payload.responses || payload.submissions || payload.response || []}
         volume={display.volume}
       />
     );
@@ -5252,19 +5564,7 @@ function TemplateScreen({ activityId, display }) {
   const background =
     components.find((item) => item.type === "BACKGROUND")?.config || {};
   const joinUrl = window.location.origin + "/join/" + activityId;
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return undefined;
-    container.scrollTop = display.scrollPosition || 0;
-    if (!display.autoScroll) return undefined;
-    const timer = window.setInterval(() => {
-      container.scrollTop = Math.min(
-        container.scrollHeight,
-        container.scrollTop + 1,
-      );
-    }, 80);
-    return () => window.clearInterval(timer);
-  }, [display.autoScroll, display.scrollPosition, display.template?.id]);
+  useScreenScroll(containerRef, display, display.template?.id);
   return (
     <div
       ref={containerRef}
@@ -5303,10 +5603,17 @@ function TemplateScreen({ activityId, display }) {
             );
           if (item.type === "FILE")
             return (
-              <div className="template-file" key={item.id}>
+              <a
+                className="template-file"
+                key={item.id}
+                href={config.url || undefined}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={value || config.url || "打开活动文件"}
+              >
                 <FilePlus2 size={42} />
                 <strong>{value || config.url || "活动文件"}</strong>
-              </div>
+              </a>
             );
           return (
             <div className="template-text" key={item.id}>
@@ -5318,7 +5625,13 @@ function TemplateScreen({ activityId, display }) {
   );
 }
 
-function ScreenQuestion({ question, state, result, volume }) {
+function ScreenQuestion({ question, state, result, responses = [], volume }) {
+  const remaining = useLiveCountdown(state);
+  const resultResponses = Array.isArray(responses)
+    ? responses
+    : responses
+      ? [responses]
+      : [];
   return (
     <div className="screen-question-new">
       <div className="screen-question-new__meta">
@@ -5326,8 +5639,8 @@ function ScreenQuestion({ question, state, result, volume }) {
         <strong>
           {result
             ? "答案已公布"
-            : state?.seconds
-              ? formatSeconds(state.seconds)
+            : remaining
+              ? formatSeconds(remaining)
               : stageLabel(state?.stage || "LOBBY")}
         </strong>
       </div>
@@ -5353,6 +5666,17 @@ function ScreenQuestion({ question, state, result, volume }) {
           </div>
         ))}
       </div>
+      {result && resultResponses.length > 0 && (
+        <div className="screen-result-summary" aria-label="答题结果摘要">
+          {resultResponses.map((response, index) => (
+            <article key={response.id || response.submissionId || response.participantId || index}>
+              <strong>{response.participantName || response.name || `参与者 ${index + 1}`}</strong>
+              <span>回答：{formatResponseAnswers(response)}</span>
+              <small>{formatResponseDuration(response)} · {formatResponseScore(response)}</small>
+            </article>
+          ))}
+        </div>
+      )}
       <footer>
         <span>请在手机端提交答案</span>
         <span>活动数据由服务端实时确认</span>
@@ -5403,9 +5727,11 @@ function ScreenMedia({ src, className, volume = 100 }) {
   return <img className={className} src={source} alt="现场展示素材" />;
 }
 
-function ScreenScoreboard({ board }) {
+function ScreenScoreboard({ board, display }) {
+  const scrollRef = useRef(null);
+  useScreenScroll(scrollRef, display, "scoreboard");
   return (
-    <div className="screen-scoreboard-new">
+    <div ref={scrollRef} className="screen-scoreboard-new screen-scrollable">
       <div>
         <span>LIVE SCOREBOARD</span>
         <h1>
@@ -5416,7 +5742,7 @@ function ScreenScoreboard({ board }) {
         <p>实时积分将由已确认的得分流水计算。</p>
       </div>
       <div className="screen-scoreboard-list">
-        {board.slice(0, 5).map((item) => (
+        {board.map((item) => (
           <article key={item.participantId}>
             <b>{item.rank}</b>
             <Avatar name={item.name} />
@@ -5432,16 +5758,18 @@ function ScreenScoreboard({ board }) {
     </div>
   );
 }
-function ScreenWinners({ winners }) {
+function ScreenWinners({ winners, display }) {
+  const scrollRef = useRef(null);
+  useScreenScroll(scrollRef, display, "winners");
   return (
-    <div className="screen-scoreboard-new">
+    <div ref={scrollRef} className="screen-scoreboard-new screen-scrollable">
       <div>
         <span>AWARD CEREMONY</span>
         <h1>本场获奖名单</h1>
         <p>奖项已由工作人员确认，请获奖参与者前往核销台领取。</p>
       </div>
       <div className="screen-scoreboard-list">
-        {winners.slice(0, 8).map((winner, index) => (
+        {winners.map((winner, index) => (
           <article key={`${winner.name}-${winner.prizeName}-${index}`}>
             <b>{String(index + 1).padStart(2, "0")}</b>
             <Avatar name={winner.name} />
@@ -5507,15 +5835,56 @@ function useScreenStream(deviceId, onEvent, token) {
   }, [deviceId, onEvent, token]);
 }
 
+function useLiveCountdown(state) {
+  const seconds = Math.max(0, Math.floor(Number(state?.seconds) || 0));
+  const updatedAt = state?.updatedAt;
+  const calculate = useCallback(() => {
+    if (!seconds) return 0;
+    const timestamp = parseTimestamp(updatedAt);
+    if (!Number.isFinite(timestamp)) return seconds;
+    const elapsed = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    return Math.max(0, seconds - elapsed);
+  }, [seconds, updatedAt]);
+  const [remaining, setRemaining] = useState(calculate);
+  useEffect(() => {
+    setRemaining(calculate());
+    if (!seconds || !Number.isFinite(parseTimestamp(updatedAt))) return undefined;
+    const timer = window.setInterval(() => {
+      const next = calculate();
+      setRemaining(next);
+      if (next <= 0) window.clearInterval(timer);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [calculate, seconds, updatedAt]);
+  return remaining;
+}
+
+function useScreenScroll(scrollRef, display, contentKey) {
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return undefined;
+    const target = Math.max(0, Number(display?.scrollPosition) || 0);
+    container.scrollTop = Math.min(target, container.scrollHeight);
+    if (!display?.autoScroll) return undefined;
+    const timer = window.setInterval(() => {
+      const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+      if (!maxScroll) return;
+      container.scrollTop = container.scrollTop >= maxScroll ? 0 : Math.min(maxScroll, container.scrollTop + 1);
+    }, 80);
+    return () => window.clearInterval(timer);
+  }, [display?.autoScroll, display?.scrollPosition, contentKey, scrollRef]);
+}
+
 function ControlTimer({ state, onRestart }) {
+  const remaining = useLiveCountdown(state);
   return (
     <article className="control-timer">
       <p className="eyebrow">QUESTION TIMER</p>
-      <strong>{state?.seconds ? formatSeconds(state.seconds) : "00:00"}</strong>
+      <strong>{remaining ? formatSeconds(remaining) : "00:00"}</strong>
       <div>
         <i
           style={{
-            width: `${Math.min(100, ((state?.seconds || 0) / 30) * 100)}%`,
+            width: `${Math.min(100, (remaining / Math.max(1, Number(state?.seconds) || 30)) * 100)}%`,
           }}
         />
       </div>
@@ -5654,6 +6023,17 @@ function stageLabel(stage) {
     }[stage] || stage
   );
 }
+function submissionStatusLabel(status) {
+  return (
+    {
+      CORRECT: "正确",
+      PARTIAL: "部分正确",
+      INCORRECT: "不正确",
+      PENDING_REVIEW: "待评分",
+      SCORED: "已评分",
+    }[status] || status || "已提交"
+  );
+}
 function typeLabel(type) {
   return (
     { SINGLE: "单选题", MULTIPLE: "多选题", TEXT: "文本题" }[type] ||
@@ -5662,7 +6042,35 @@ function typeLabel(type) {
   );
 }
 function formatSeconds(seconds) {
-  return `00:${String(Math.max(0, seconds || 0)).padStart(2, "0")}`;
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(total / 60);
+  return `${String(minutes).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+function parseTimestamp(value) {
+  if (typeof value === "number") return value < 1_000_000_000_000 ? value * 1000 : value;
+  if (!value) return Number.NaN;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Number.NaN;
+}
+function formatResponseAnswers(response) {
+  const value = response?.answers ?? response?.answer ?? response?.response ?? response?.content;
+  if (Array.isArray(value)) return value.map((item) => (typeof item === "string" ? item : item?.label || item?.text || String(item))).join("、") || "未记录回答";
+  return value == null || value === "" ? "未记录回答" : String(value);
+}
+function formatResponseDuration(response) {
+  let seconds = response?.elapsedSeconds ?? response?.durationSeconds ?? response?.responseTimeSeconds;
+  if (seconds == null && response?.elapsedMs != null) seconds = Number(response.elapsedMs) / 1000;
+  if (seconds == null) {
+    const start = parseTimestamp(response?.openedAt || response?.questionOpenedAt || response?.startedAt);
+    const end = parseTimestamp(response?.submittedAt);
+    if (Number.isFinite(start) && Number.isFinite(end)) seconds = (end - start) / 1000;
+  }
+  return Number.isFinite(Number(seconds)) ? `耗时 ${formatSeconds(seconds)}` : "耗时待同步";
+}
+function formatResponseScore(response) {
+  if (response?.status === "PENDING_REVIEW") return "待评分";
+  const score = response?.awardedPoints ?? response?.score ?? response?.points;
+  return score == null || score === "" ? "0 分" : `${score} 分`;
 }
 function formatDate(value) {
   return value

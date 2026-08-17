@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 server/target/
+server/.m2/
 .env
 .env.*
 requirement.md

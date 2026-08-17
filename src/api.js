@@ -89,6 +89,24 @@ export async function request(path, { method = 'GET', body, auth = true, retry =
   return parseResponse(response)
 }
 
+async function requestMultipart(path, { file, category, retry = true } = {}) {
+  const form = new FormData()
+  form.append('file', file)
+  if (category) form.append('category', category)
+  const token = getAccessToken()
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: form,
+    credentials: 'include',
+  })
+  if (response.status === 401 && retry && token) {
+    await refreshSession()
+    return requestMultipart(path, { file, category, retry: false })
+  }
+  return parseResponse(response)
+}
+
 export async function login(email, password) {
   const session = await request('/api/auth/login', { method: 'POST', auth: false, body: { username: email, password } })
   setSession(session)
@@ -111,6 +129,7 @@ export async function logout() {
 
 export const api = {
   siteSettings: () => request('/api/site-settings', { auth: false }),
+  adminSiteSettings: () => request('/api/admin/site-settings'),
   updateSiteSettings: (payload) => request('/api/admin/site-settings', { method: 'PATCH', body: payload }),
   activities: () => request('/api/activities'),
   createActivity: (payload) => request('/api/activities', { method: 'POST', body: payload }),
@@ -143,6 +162,7 @@ export const api = {
   createQuestion: (id, payload) => request(`/api/activities/${id}/questions`, { method: 'POST', body: payload }),
   updateQuestion: (id, questionId, payload) => request(`/api/activities/${id}/questions/${questionId}`, { method: 'PUT', body: payload }),
   deleteQuestion: (id, questionId) => request(`/api/activities/${id}/questions/${questionId}`, { method: 'DELETE' }),
+  uploadMedia: (id, file, category = 'questions') => requestMultipart(`/api/activities/${id}/media`, { file, category }),
   answer: (id, payload, participantToken) => request(`/api/activities/${id}/answers`, { method: 'POST', body: payload, auth: !participantToken, headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {} }),
   submissions: (id, participantId) => request(`/api/activities/${id}/participants/${participantId}/submissions`),
   gradeSubmission: (id, submissionId, payload) => request(`/api/activities/${id}/submissions/${submissionId}/grade`, { method: 'POST', body: payload }),
@@ -151,6 +171,7 @@ export const api = {
   scoreboard: (id, participantToken) => request(`/api/activities/${id}/scoreboard`, { auth: !participantToken, headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {} }),
   controlState: (id, participantToken) => request(`/api/activities/${id}/control`, { auth: !participantToken, headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {} }),
   control: (id, payload) => request(`/api/activities/${id}/control`, { method: 'POST', body: payload }),
+  questionStats: (id, questionId) => request(`/api/activities/${id}/questions/${questionId}/response-stats`),
   prizePools: (id) => request(`/api/activities/${id}/prize-pools`),
   createPrizePool: (id, payload) => request(`/api/activities/${id}/prize-pools`, { method: 'POST', body: payload }),
   updatePrizePool: (id, poolId, payload) => request(`/api/activities/${id}/prize-pools/${poolId}`, { method: 'PATCH', body: payload }),

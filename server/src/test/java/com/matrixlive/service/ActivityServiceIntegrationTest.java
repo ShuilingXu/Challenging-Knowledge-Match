@@ -10,6 +10,7 @@ import com.matrixlive.api.ApiModels.ControlRequest;
 import com.matrixlive.api.ApiModels.QuestionWriteRequest;
 import com.matrixlive.api.ApiModels.RegisterParticipantRequest;
 import com.matrixlive.api.ApiModels.SubmitAnswerRequest;
+import com.matrixlive.api.ApiModels.VenueRequest;
 import com.matrixlive.domain.Question;
 import com.matrixlive.repository.QuestionRepository;
 import com.matrixlive.screen.ScreenDisplayMode;
@@ -32,6 +33,7 @@ class ActivityServiceIntegrationTest {
   @Test
   void isolatesRegistrationAndReplaysIdempotentAnswers() {
     var activity = service.createActivity(new CreateActivityRequest("API 测试活动", "上海", Instant.now()));
+    service.createVenue(activity.id(), new VenueRequest("south", "South Hall", 20, true));
     var participant = service.register(activity.id(), "south", new RegisterParticipantRequest("测试用户", "138 0000 2048", "QA"));
     assertThrows(DomainException.class, () -> service.register(activity.id(), "south",
         new RegisterParticipantRequest("测试用户", "13800002048", "QA")));
@@ -48,6 +50,14 @@ class ActivityServiceIntegrationTest {
     assertFalse(first.replayed());
     assertTrue(replay.replayed());
     assertEquals(first.submissionId(), replay.submissionId());
+
+    var stats = service.questionResponseStats(activity.id(), question.getId());
+    assertEquals(1, stats.eligibleParticipantCount());
+    assertEquals(1, stats.submittedCount());
+    assertEquals(0, stats.unansweredCount());
+    assertEquals(1, stats.correctCount());
+    assertEquals("测试用户", stats.submissions().getFirst().participantName());
+    assertEquals(1, stats.submissions().getFirst().responseRank());
   }
 
   @Test

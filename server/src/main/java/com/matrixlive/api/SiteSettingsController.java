@@ -19,8 +19,11 @@ public class SiteSettingsController {
   @GetMapping("/api/site-settings")
   public SiteSettingsResponse get() { return service.get(); }
 
+  @GetMapping("/api/admin/site-settings")
+  public AdminSiteSettingsResponse getAdmin() { return service.getAdmin(); }
+
   @PatchMapping("/api/admin/site-settings")
-  public SiteSettingsResponse update(@Valid @RequestBody UpdateSiteSettingsRequest request) {
+  public AdminSiteSettingsResponse update(@Valid @RequestBody UpdateSiteSettingsRequest request) {
     return service.update(request);
   }
 }

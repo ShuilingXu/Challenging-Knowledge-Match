@@ -39,7 +39,7 @@ public class Question {
   @Column(nullable = false)
   private boolean enabled;
 
-  @Column(length = 1024)
+  @Column(length = 2048)
   private String mediaUrl;
 
   @Column(nullable = false)

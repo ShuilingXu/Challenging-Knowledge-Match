@@ -45,17 +45,23 @@ public class Question {
   @Column(nullable = false)
   private int partialCreditPercent;
 
+  @Column(columnDefinition = "text")
+  private String textAcceptedAnswers;
+
+  @Column(nullable = false, length = 24)
+  private String textMatchMode;
+
   @Version
   private long version;
 
   protected Question() { }
 
   public Question(UUID activityId, String type, String title, String options, String answers, int fullScore) {
-    this(activityId, type, title, options, answers, fullScore, 0, null, 40);
+    this(activityId, type, title, options, answers, fullScore, 0, null, 40, "[]", "MANUAL");
   }
 
   public Question(UUID activityId, String type, String title, String options, String answers, int fullScore,
-      int displayOrder, String mediaUrl, int partialCreditPercent) {
+      int displayOrder, String mediaUrl, int partialCreditPercent, String textAcceptedAnswers, String textMatchMode) {
     this.activityId = activityId;
     this.type = type;
     this.title = title;
@@ -65,6 +71,8 @@ public class Question {
     this.displayOrder = displayOrder;
     this.mediaUrl = mediaUrl;
     this.partialCreditPercent = partialCreditPercent;
+    this.textAcceptedAnswers = textAcceptedAnswers == null ? "[]" : textAcceptedAnswers;
+    this.textMatchMode = textMatchMode == null ? "MANUAL" : textMatchMode;
     this.enabled = true;
   }
 
@@ -79,10 +87,12 @@ public class Question {
   public boolean isEnabled() { return enabled; }
   public String getMediaUrl() { return mediaUrl; }
   public int getPartialCreditPercent() { return partialCreditPercent; }
+  public String getTextAcceptedAnswers() { return textAcceptedAnswers; }
+  public String getTextMatchMode() { return textMatchMode; }
   public long getVersion() { return version; }
 
   public void update(String type, String title, String options, String answers, Integer fullScore, Integer displayOrder,
-      String mediaUrl, Integer partialCreditPercent, Boolean enabled) {
+      String mediaUrl, Integer partialCreditPercent, String textAcceptedAnswers, String textMatchMode, Boolean enabled) {
     if (type != null) this.type = type;
     if (title != null) this.title = title;
     if (options != null) this.options = options;
@@ -91,6 +101,8 @@ public class Question {
     if (displayOrder != null) this.displayOrder = displayOrder;
     if (mediaUrl != null) this.mediaUrl = mediaUrl;
     if (partialCreditPercent != null) this.partialCreditPercent = partialCreditPercent;
+    if (textAcceptedAnswers != null) this.textAcceptedAnswers = textAcceptedAnswers;
+    if (textMatchMode != null) this.textMatchMode = textMatchMode;
     if (enabled != null) this.enabled = enabled;
   }
 }

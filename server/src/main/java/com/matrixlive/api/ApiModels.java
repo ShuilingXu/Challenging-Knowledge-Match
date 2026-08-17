@@ -133,16 +133,29 @@ public final class ApiModels {
       @Min(0) Integer displayOrder,
       @Size(max = 2048) String mediaUrl,
       @Min(0) @Max(100) Integer partialCreditPercent,
-      Boolean enabled) { }
+      @Size(max = 50) List<@NotBlank @Size(max = 2000) String> textAcceptedAnswers,
+      @Size(max = 24) String textMatchMode,
+      Boolean enabled) {
+    public QuestionWriteRequest(String type, String title, List<String> options, Set<String> answers,
+        Integer fullScore, Integer displayOrder, String mediaUrl, Integer partialCreditPercent, Boolean enabled) {
+      this(type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent, null, null, enabled);
+    }
+  }
 
   public record QuestionResponse(UUID id, String type, String title, List<String> options, int fullScore,
       int displayOrder, String mediaUrl, boolean enabled) { }
 
+  /** Staff-only question view used by the live control room. Text answer keys are intentionally
+   * excluded from the participant-facing QuestionResponse. */
+  public record QuestionControlResponse(UUID id, String type, String title, List<String> options, int fullScore,
+      int displayOrder, String mediaUrl, List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) { }
+
   public record QuestionAdminResponse(UUID id, String type, String title, List<String> options,
       List<String> answers, int fullScore, int displayOrder, String mediaUrl, int partialCreditPercent,
-      boolean enabled) { }
+      List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) { }
 
-  public record SubmitAnswerRequest(@NotNull UUID participantId, @NotNull UUID questionId, Set<String> answers,
+  public record SubmitAnswerRequest(@NotNull UUID participantId, @NotNull UUID questionId,
+      Set<@NotBlank @Size(max = 8000) String> answers,
       @NotBlank @Size(max = 160) String idempotencyKey) { }
 
   public record AnswerResult(UUID submissionId, int awardedPoints, int totalScore, boolean replayed,

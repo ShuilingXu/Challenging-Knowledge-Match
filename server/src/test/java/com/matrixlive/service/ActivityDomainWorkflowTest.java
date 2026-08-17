@@ -118,4 +118,47 @@ class ActivityDomainWorkflowTest {
     assertEquals("观点完整，表达清晰。", graded.feedback());
     assertEquals(85, service.participant(activity.id(), participant.id()).score());
   }
+
+  @Test
+  void autoScoresAcceptedTextAndStillAllowsManualAdjustment() {
+    var activity = service.createActivity(new CreateActivityRequest("Automatic text scoring", "Shanghai", Instant.now()));
+    service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
+    var participant = service.register(activity.id(), "hall-a",
+        new RegisterParticipantRequest("Casey", "13900003001", "Matrix"));
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT", "What is the answer?",
+        List.of(), Set.of(), 100, 0, null, 40, List.of("the answer"), "FUZZY", true));
+    service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
+
+    var answer = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.id(),
+        Set.of("  THE   ANSWER  "), UUID.randomUUID().toString()));
+
+    assertEquals("CORRECT", answer.status());
+    assertEquals(100, answer.awardedPoints());
+    assertEquals(100, service.participant(activity.id(), participant.id()).score());
+    assertEquals(List.of("the answer"), service.listQuestionAdministration(activity.id()).getFirst().textAcceptedAnswers());
+    assertEquals("FUZZY", service.listQuestionAdministration(activity.id()).getFirst().textMatchMode());
+
+    var adjusted = service.gradeSubmission(activity.id(), answer.submissionId(), new GradeSubmissionRequest(75, "人工复核"));
+    assertEquals(75, adjusted.awardedPoints());
+    assertEquals(75, service.participant(activity.id(), participant.id()).score());
+  }
+
+  @Test
+  void unmatchedTextRemainsPendingAndRegexPatternsAreValidated() {
+    var activity = service.createActivity(new CreateActivityRequest("Regex text scoring", "Shanghai", Instant.now()));
+    service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
+    var participant = service.register(activity.id(), "hall-a",
+        new RegisterParticipantRequest("Morgan", "13900003002", "Matrix"));
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT", "Provide the code",
+        List.of(), Set.of(), 100, 0, null, 40, List.of("code\\s+\\d+"), "REGEX", true));
+    service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
+
+    var answer = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.id(),
+        Set.of("not the code"), UUID.randomUUID().toString()));
+    assertEquals("PENDING_REVIEW", answer.status());
+    assertEquals(0, service.participant(activity.id(), participant.id()).score());
+
+    assertThrows(DomainException.class, () -> service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT",
+        "Bad regex", List.of(), Set.of(), 100, 0, null, 40, List.of("["), "REGEX", true)));
+  }
 }

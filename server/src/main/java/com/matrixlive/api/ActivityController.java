@@ -134,6 +134,11 @@ public class ActivityController {
     return service.listQuestionAdministration(activityId);
   }
 
+  @GetMapping("/{activityId}/questions/control")
+  public List<QuestionControlResponse> controlQuestions(@PathVariable UUID activityId) {
+    return service.listQuestionControl(activityId);
+  }
+
   @PostMapping("/{activityId}/questions")
   @ResponseStatus(HttpStatus.CREATED)
   public QuestionAdminResponse createQuestion(@PathVariable UUID activityId,

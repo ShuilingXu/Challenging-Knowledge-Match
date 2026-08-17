@@ -1,6 +1,10 @@
 package com.matrixlive.service;
 
+import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 
 public final class AnswerScorer {
@@ -24,6 +28,31 @@ public final class AnswerScorer {
   public static Set<String> parse(String answers) {
     if (answers == null || answers.isBlank()) return Set.of();
     return java.util.Arrays.stream(answers.split(",")).filter(answer -> !answer.isBlank()).collect(Collectors.toUnmodifiableSet());
+  }
+
+  public static boolean matchesText(String submitted, List<String> acceptedAnswers, String matchMode) {
+    if (submitted == null || acceptedAnswers == null || acceptedAnswers.isEmpty()) return false;
+    return acceptedAnswers.stream().anyMatch(expected -> matchesTextAnswer(submitted, expected, matchMode));
+  }
+
+  private static boolean matchesTextAnswer(String submitted, String expected, String matchMode) {
+    if (expected == null || expected.isBlank()) return false;
+    if ("REGEX".equals(matchMode)) {
+      try {
+        return Pattern.compile(expected, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+            .matcher(submitted.trim()).matches();
+      } catch (PatternSyntaxException exception) {
+        return false;
+      }
+    }
+    String normalizedSubmitted = normalizeText(submitted);
+    String normalizedExpected = normalizeText(expected);
+    return !normalizedSubmitted.isEmpty() && !normalizedExpected.isEmpty()
+        && (normalizedSubmitted.contains(normalizedExpected) || normalizedExpected.contains(normalizedSubmitted));
+  }
+
+  private static String normalizeText(String value) {
+    return value == null ? "" : value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
   }
 
   private static Set<String> normalize(Set<String> answers) {

@@ -84,11 +84,17 @@ class SecurityIntegrationTest {
         .andExpect(status().isOk());
     mvc.perform(get(activityPath + "/control").header("Authorization", "Bearer " + participantToken))
         .andExpect(status().isOk());
+    mvc.perform(get(activityPath + "/questions/control").header("Authorization", "Bearer " + participantToken))
+        .andExpect(status().isForbidden());
     mvc.perform(post(activityPath + "/control").header("Authorization", "Bearer " + participantToken)
             .contentType(MediaType.APPLICATION_JSON).content("{\"stage\":\"QUESTION\",\"seconds\":30}"))
         .andExpect(status().isForbidden());
 
     String staffToken = accessToken(login("event-staff", "ChangeMe!2026"));
+    mvc.perform(get(activityPath + "/questions/control").header("Authorization", "Bearer " + staffToken))
+        .andExpect(status().isOk());
+    mvc.perform(get(activityPath + "/questions/admin").header("Authorization", "Bearer " + staffToken))
+        .andExpect(status().isForbidden());
     mvc.perform(post(activityPath + "/control").header("Authorization", "Bearer " + staffToken)
             .contentType(MediaType.APPLICATION_JSON).content("{\"stage\":\"QUESTION\",\"seconds\":30}"))
         .andExpect(status().isOk());

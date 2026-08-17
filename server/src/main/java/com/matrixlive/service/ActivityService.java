@@ -49,6 +49,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.IntStream;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -64,6 +66,7 @@ public class ActivityService {
   private static final Set<String> ACTIVITY_STATUSES = Set.of(
       "DRAFT", "REGISTRATION_OPEN", "LIVE", "PAUSED", "FINISHED", "CANCELLED");
   private static final Set<String> QUESTION_TYPES = Set.of("SINGLE", "MULTIPLE", "TEXT");
+  private static final Set<String> TEXT_MATCH_MODES = Set.of("FUZZY", "REGEX", "MANUAL");
   private static final Set<String> FIELD_TYPES = Set.of(
       "TEXT", "TEXTAREA", "EMAIL", "PHONE", "NUMBER", "SELECT", "RADIO", "CHECKBOX");
   private static final Set<String> POOL_PURPOSES = Set.of("LOTTERY", "RANKING", "MANUAL");
@@ -335,16 +338,23 @@ public class ActivityService {
     return questions.findByActivityIdOrderByDisplayOrderAsc(activityId).stream().map(this::toQuestionAdmin).toList();
   }
 
+  @Transactional(readOnly = true)
+  public List<QuestionControlResponse> listQuestionControl(UUID activityId) {
+    requireActivity(activityId);
+    return questions.findByActivityIdOrderByDisplayOrderAsc(activityId).stream().map(this::toQuestionControl).toList();
+  }
+
   @Transactional
   public QuestionAdminResponse createQuestion(UUID activityId, QuestionWriteRequest request) {
     requireActivity(activityId);
     QuestionValues values = questionValues(request.type(), request.title(), request.options(), request.answers(),
-        request.fullScore(), request.displayOrder(), request.mediaUrl(), request.partialCreditPercent(), request.enabled(),
+        request.fullScore(), request.displayOrder(), request.mediaUrl(), request.partialCreditPercent(),
+        request.textAcceptedAnswers(), request.textMatchMode(), request.enabled(),
         (int) questions.countByActivityId(activityId));
     Question question = questions.save(new Question(activityId, values.type(), values.title(), joinPipe(values.options()),
         joinComma(values.answers()), values.fullScore(), values.displayOrder(), values.mediaUrl(),
-        values.partialCreditPercent()));
-    question.update(null, null, null, null, null, null, null, null, values.enabled());
+        values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()), values.textMatchMode()));
+    question.update(null, null, null, null, null, null, null, null, null, null, values.enabled());
     return toQuestionAdmin(question);
   }
 
@@ -361,9 +371,12 @@ public class ActivityService {
         // media asset; null keeps the existing value for partial API clients.
         request.mediaUrl() == null ? question.getMediaUrl() : request.mediaUrl(),
         request.partialCreditPercent() == null ? question.getPartialCreditPercent() : request.partialCreditPercent(),
+        request.textAcceptedAnswers() == null ? readTextAnswers(question.getTextAcceptedAnswers()) : request.textAcceptedAnswers(),
+        request.textMatchMode() == null ? question.getTextMatchMode() : request.textMatchMode(),
         request.enabled() == null ? question.isEnabled() : request.enabled(), question.getDisplayOrder());
     question.update(values.type(), values.title(), joinPipe(values.options()), joinComma(values.answers()), values.fullScore(),
-        values.displayOrder(), values.mediaUrl(), values.partialCreditPercent(), values.enabled());
+        values.displayOrder(), values.mediaUrl(), values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()),
+        values.textMatchMode(), values.enabled());
     return toQuestionAdmin(question);
   }
 
@@ -398,16 +411,20 @@ public class ActivityService {
     if (submissions.findByActivityIdAndParticipantIdAndQuestionId(activityId, participant.getId(), question.getId()).isPresent()) {
       throw conflict("Participant has already answered this question");
     }
-    Set<String> answers = normalizeAnswers(request.answers());
+    Set<String> answers = normalizeAnswers(question, request.answers());
     validateSubmittedAnswers(question, answers);
     int responseRank = Math.toIntExact(submissions.countByActivityIdAndQuestionId(activityId, question.getId()) + 1);
-    boolean requiresManualReview = "TEXT".equals(question.getType());
-    int points = requiresManualReview ? 0 : AnswerScorer.score(question.getType(), answers,
-        new HashSet<>(splitComma(question.getAnswers())), question.getFullScore(), question.getPartialCreditPercent());
+    boolean autoTextCorrect = "TEXT".equals(question.getType()) && !"MANUAL".equals(question.getTextMatchMode())
+        && AnswerScorer.matchesText(answers.iterator().next(), readTextAnswers(question.getTextAcceptedAnswers()),
+            question.getTextMatchMode());
+    boolean requiresManualReview = "TEXT".equals(question.getType()) && !autoTextCorrect;
+    int points = "TEXT".equals(question.getType()) ? (autoTextCorrect ? question.getFullScore() : 0)
+        : AnswerScorer.score(question.getType(), answers, new HashSet<>(splitComma(question.getAnswers())),
+            question.getFullScore(), question.getPartialCreditPercent());
     String outcome = requiresManualReview ? "PENDING_REVIEW" : points >= question.getFullScore() ? "CORRECT"
         : points > 0 ? "PARTIAL" : "INCORRECT";
     AnswerSubmission submission = submissions.save(new AnswerSubmission(activityId, participant.getId(), question.getId(),
-        idempotencyKey, joinComma(answers), points, outcome, null));
+        idempotencyKey, encodeSubmittedAnswers(question, answers), points, outcome, null));
     if (requiresManualReview) {
       broadcast(activityId, "answer.submitted", Map.of("participantId", participant.getId(), "questionId", question.getId(),
           "submissionId", submission.getId(), "status", submission.getStatus()));
@@ -496,7 +513,7 @@ public class ActivityService {
       Participant participant = participantById.get(submission.getParticipantId());
       return new QuestionSubmissionEntry(submission.getParticipantId(),
           participant == null ? "已移除参与者" : participant.getName(),
-          participant == null ? "--" : participant.getVenue(), splitComma(submission.getSubmittedAnswers()),
+          participant == null ? "--" : participant.getVenue(), readSubmittedAnswers(submission.getSubmittedAnswers()),
           submission.getAwardedPoints(), submission.getStatus(), index + 1, submission.getSubmittedAt());
     }).toList();
     return new QuestionResponseStats(questionId, eligibleParticipantCount, answered.size(),
@@ -542,14 +559,14 @@ public class ActivityService {
         payload.put("updatedAt", state.updatedAt());
         payload.put("questionType", question.getType());
         if ("ANSWER_REVEALED".equals(stage)) {
-          payload.put("answers", splitComma(question.getAnswers()));
+          payload.put("answers", displayAnswers(question));
           List<Map<String, Object>> responses = submissions
               .findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, question.getId()).stream()
               .map(item -> {
                 Map<String, Object> response = new HashMap<>();
                 Participant participant = participants.findById(item.getParticipantId()).orElse(null);
                 response.put("participantName", participant == null ? "参与者" : participant.getName());
-                response.put("answers", splitComma(item.getSubmittedAnswers()));
+                response.put("answers", readSubmittedAnswers(item.getSubmittedAnswers()));
                 response.put("awardedPoints", item.getAwardedPoints());
                 response.put("status", item.getStatus());
                 response.put("submittedAt", item.getSubmittedAt());
@@ -919,6 +936,9 @@ public class ActivityService {
   private void validateSubmittedAnswers(Question question, Set<String> answers) {
     if (answers.isEmpty()) throw badRequest("At least one answer is required");
     if ("SINGLE".equals(question.getType()) && answers.size() != 1) throw badRequest("Single-choice questions require one answer");
+    if ("TEXT".equals(question.getType()) && answers.size() != 1) {
+      throw badRequest("Text questions require one answer");
+    }
     if (!"TEXT".equals(question.getType())) {
       Set<String> options = new HashSet<>(splitPipe(question.getOptions()));
       if (!options.containsAll(answers)) throw badRequest("Answer contains an unknown option");
@@ -927,11 +947,17 @@ public class ActivityService {
 
   private QuestionValues questionValues(String rawType, String rawTitle, List<String> rawOptions, Set<String> rawAnswers,
       Integer rawFullScore, Integer rawDisplayOrder, String rawMediaUrl, Integer rawPartialCreditPercent,
-      Boolean rawEnabled, int fallbackDisplayOrder) {
+      List<String> rawTextAcceptedAnswers, String rawTextMatchMode, Boolean rawEnabled, int fallbackDisplayOrder) {
     String type = normalizeEnum(rawType, QUESTION_TYPES, "question type");
     String title = cleanRequired(rawTitle, "Question title");
     List<String> options = cleanValues(rawOptions == null ? List.of() : rawOptions, "option");
     Set<String> answers = new HashSet<>(cleanValues(rawAnswers == null ? Set.of() : rawAnswers, "answer"));
+    List<String> textAcceptedAnswers = "TEXT".equals(type)
+        ? cleanTextAnswers(rawTextAcceptedAnswers == null ? List.of() : rawTextAcceptedAnswers)
+        : List.of();
+    String textMatchMode = "TEXT".equals(type)
+        ? normalizeEnum(rawTextMatchMode == null ? "MANUAL" : rawTextMatchMode, TEXT_MATCH_MODES, "text match mode")
+        : "MANUAL";
     int fullScore = rawFullScore == null ? 100 : rawFullScore;
     int displayOrder = rawDisplayOrder == null ? fallbackDisplayOrder : rawDisplayOrder;
     int partialCreditPercent = rawPartialCreditPercent == null ? 40 : rawPartialCreditPercent;
@@ -940,13 +966,18 @@ public class ActivityService {
     }
     if ("TEXT".equals(type)) {
       if (!options.isEmpty()) throw badRequest("Text questions cannot define options");
+      answers = Set.of();
+      if (!"MANUAL".equals(textMatchMode) && textAcceptedAnswers.isEmpty()) {
+        throw badRequest("Automatic text matching requires at least one accepted answer");
+      }
+      if ("REGEX".equals(textMatchMode)) validateTextPatterns(textAcceptedAnswers);
     } else {
       if (options.size() < 2) throw badRequest("Choice questions require at least two options");
       if (answers.isEmpty() || !new HashSet<>(options).containsAll(answers)) throw badRequest("Correct answer is not in options");
       if ("SINGLE".equals(type) && answers.size() != 1) throw badRequest("Single-choice questions require one correct answer");
     }
     return new QuestionValues(type, title, options, answers, fullScore, displayOrder, cleanOptional(rawMediaUrl),
-        partialCreditPercent, rawEnabled == null || rawEnabled);
+        partialCreditPercent, textAcceptedAnswers, textMatchMode, rawEnabled == null || rawEnabled);
   }
 
   private FieldValues fieldValues(String rawType, List<String> rawOptions) {
@@ -1039,9 +1070,28 @@ public class ActivityService {
     return cleaned;
   }
 
-  private Set<String> normalizeAnswers(Set<String> rawAnswers) {
+  private Set<String> normalizeAnswers(Question question, Set<String> rawAnswers) {
+    if ("TEXT".equals(question.getType())) {
+      return Set.copyOf(cleanTextAnswers(rawAnswers == null ? Set.of() : rawAnswers));
+    }
     Set<String> values = new HashSet<>(cleanValues(rawAnswers == null ? Set.of() : rawAnswers, "answer"));
     return Set.copyOf(values);
+  }
+
+  private List<String> cleanTextAnswers(Collection<String> values) {
+    List<String> cleaned = values.stream().map(value -> cleanRequired(value, "text answer")).toList();
+    if (new HashSet<>(cleaned).size() != cleaned.size()) throw badRequest("Duplicate text answers are not allowed");
+    return cleaned;
+  }
+
+  private void validateTextPatterns(List<String> patterns) {
+    for (String pattern : patterns) {
+      try {
+        Pattern.compile(pattern);
+      } catch (PatternSyntaxException exception) {
+        throw badRequest("Invalid text answer regular expression: " + exception.getDescription());
+      }
+    }
   }
 
   private String normalizeVenue(String value) {
@@ -1113,6 +1163,38 @@ public class ActivityService {
     return List.of(value.split(","));
   }
 
+  private List<String> readTextAnswers(String value) {
+    if (value == null || value.isBlank()) return List.of();
+    try {
+      List<String> parsed = objectMapper.readValue(value, new TypeReference<List<String>>() { });
+      return parsed == null ? List.of() : List.copyOf(parsed);
+    } catch (JsonProcessingException exception) {
+      return List.of();
+    }
+  }
+
+  private String writeTextAnswers(Collection<String> values) {
+    try {
+      return objectMapper.writeValueAsString(values == null ? List.of() : values);
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("Unable to store text answers", exception);
+    }
+  }
+
+  private String encodeSubmittedAnswers(Question question, Set<String> answers) {
+    return "TEXT".equals(question.getType()) ? writeTextAnswers(answers) : joinComma(answers);
+  }
+
+  private List<String> readSubmittedAnswers(String value) {
+    if (value != null && value.stripLeading().startsWith("[")) return readTextAnswers(value);
+    return splitComma(value);
+  }
+
+  private List<String> displayAnswers(Question question) {
+    return "TEXT".equals(question.getType()) ? readTextAnswers(question.getTextAcceptedAnswers())
+        : splitComma(question.getAnswers());
+  }
+
   private String joinPipe(Collection<String> values) { return String.join("|", values); }
   private String joinComma(Collection<String> values) { return String.join(",", values.stream().sorted().toList()); }
 
@@ -1166,7 +1248,15 @@ public class ActivityService {
   private QuestionAdminResponse toQuestionAdmin(Question question) {
     return new QuestionAdminResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
         splitComma(question.getAnswers()), question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(),
-        question.getPartialCreditPercent(), question.isEnabled());
+        question.getPartialCreditPercent(), readTextAnswers(question.getTextAcceptedAnswers()), question.getTextMatchMode(),
+        question.isEnabled());
+  }
+
+  private QuestionControlResponse toQuestionControl(Question question) {
+    return new QuestionControlResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
+        question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(),
+        "TEXT".equals(question.getType()) ? readTextAnswers(question.getTextAcceptedAnswers()) : List.of(),
+        question.getTextMatchMode(), question.isEnabled());
   }
 
   private AnswerResult toAnswerResult(AnswerSubmission submission, int totalScore, boolean replayed, int responseRank) {
@@ -1176,7 +1266,7 @@ public class ActivityService {
 
   private SubmissionResponse toSubmission(AnswerSubmission submission) {
     return new SubmissionResponse(submission.getId(), submission.getParticipantId(), submission.getQuestionId(),
-        splitComma(submission.getSubmittedAnswers()), submission.getAwardedPoints(), submission.getStatus(),
+        readSubmittedAnswers(submission.getSubmittedAnswers()), submission.getAwardedPoints(), submission.getStatus(),
         submission.getFeedback(), submission.getSubmittedAt(), submission.getGradedAt());
   }
 
@@ -1217,7 +1307,8 @@ public class ActivityService {
 
   private record FieldValues(String type, List<String> options) { }
   private record QuestionValues(String type, String title, List<String> options, Set<String> answers, int fullScore,
-      int displayOrder, String mediaUrl, int partialCreditPercent, boolean enabled) { }
+      int displayOrder, String mediaUrl, int partialCreditPercent, List<String> textAcceptedAnswers, String textMatchMode,
+      boolean enabled) { }
   private record PrizeValues(String purpose, String deliveryType, int totalQuantity, int minScore, int drawWeight,
       Integer rankFrom, Integer rankTo) { }
 }

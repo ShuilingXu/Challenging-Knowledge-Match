@@ -10,6 +10,20 @@ export class ApiError extends Error {
   }
 }
 
+export function createIdempotencyKey(cryptoApi = globalThis.crypto) {
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID()
+
+  if (typeof cryptoApi?.getRandomValues === 'function') {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
+  return `request-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
 export function getAccessToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
@@ -159,12 +173,16 @@ export const api = {
   participantToken: (payload) => request('/api/auth/participant-token', { method: 'POST', auth: false, body: payload }),
   questions: (id, participantToken) => request(`/api/activities/${id}/questions`, { auth: !participantToken, headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {} }),
   questionsAdmin: (id) => request(`/api/activities/${id}/questions/admin`),
+  questionsControl: (id) => request(`/api/activities/${id}/questions/control`),
   createQuestion: (id, payload) => request(`/api/activities/${id}/questions`, { method: 'POST', body: payload }),
   updateQuestion: (id, questionId, payload) => request(`/api/activities/${id}/questions/${questionId}`, { method: 'PUT', body: payload }),
   deleteQuestion: (id, questionId) => request(`/api/activities/${id}/questions/${questionId}`, { method: 'DELETE' }),
   uploadMedia: (id, file, category = 'questions') => requestMultipart(`/api/activities/${id}/media`, { file, category }),
   answer: (id, payload, participantToken) => request(`/api/activities/${id}/answers`, { method: 'POST', body: payload, auth: !participantToken, headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {} }),
-  submissions: (id, participantId) => request(`/api/activities/${id}/participants/${participantId}/submissions`),
+  submissions: (id, participantId, participantToken) => request(`/api/activities/${id}/participants/${participantId}/submissions`, {
+    auth: !participantToken,
+    headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {},
+  }),
   gradeSubmission: (id, submissionId, payload) => request(`/api/activities/${id}/submissions/${submissionId}/grade`, { method: 'POST', body: payload }),
   scoreLedger: (id, participantId) => request(`/api/activities/${id}/participants/${participantId}/score-ledger`),
   adjustScore: (id, payload) => request(`/api/activities/${id}/scores/adjustments`, { method: 'POST', body: payload }),

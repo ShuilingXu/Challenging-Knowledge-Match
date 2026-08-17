@@ -69,6 +69,7 @@ import {
   ApiError,
   api,
   clearSession,
+  createIdempotencyKey,
   getAccessToken,
   getParticipantToken,
   getScreenSession,
@@ -112,6 +113,7 @@ function App() {
               </RequireStaff>
             }
           />
+          <Route path="/join/demo" element={<ParticipantEntryRedirect />} />
           <Route path="/join/:activityId" element={<ParticipantPortal />} />
           <Route
             path="/lottery/:activityId"
@@ -173,6 +175,32 @@ function RequireStaff({ children }) {
   if (!ready) return <LoadingPage label="正在验证工作台权限" />;
   if (!user) return <Navigate to="/login" replace />;
   return children;
+}
+
+function ParticipantEntryRedirect() {
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    api.activities()
+      .then((activities) => {
+        const target =
+          activities.find((activity) => activity.status === "LIVE") ||
+          activities[0];
+        if (mounted && target?.id) navigate(`/join/${target.id}`, { replace: true });
+        else if (mounted) setError("当前没有可参加的活动");
+      })
+      .catch((cause) => mounted && setError(cause.message));
+    return () => {
+      mounted = false;
+    };
+  }, [navigate]);
+
+  if (error) {
+    return <BackendProblem message={error} onRetry={() => window.location.reload()} />;
+  }
+  return <LoadingPage label="正在查找进行中的活动" />;
 }
 
 function LoadingPage({ label = "正在加载活动数据" }) {
@@ -951,7 +979,7 @@ function ControlPage({ activityId }) {
     if (!activityId) return;
     try {
       const [allQuestions, control] = await Promise.all([
-        api.questions(activityId),
+        api.questionsControl(activityId),
         api.controlState(activityId),
       ]);
       setQuestions(allQuestions);
@@ -1067,7 +1095,14 @@ function ControlPage({ activityId }) {
               ))}
               {current?.type === "TEXT" && (
                 <div className="control-text-note">
-                  文本回答将进入工作人员评分队列。
+                  <strong>{textMatchLabel(current.textMatchMode)}</strong>
+                  {textAcceptedAnswers(current).length ? (
+                    <span>
+                      正确答案：{textAcceptedAnswers(current).join("、")}
+                    </span>
+                  ) : (
+                    <span>未配置标准答案，回答将进入人工评分。</span>
+                  )}
                 </div>
               )}
             </div>
@@ -1212,6 +1247,8 @@ function QuestionsPage({ activityId }) {
     answers: "B",
     fullScore: 100,
     partialCreditPercent: 40,
+    textAcceptedAnswers: "",
+    textMatchMode: "FUZZY",
     mediaUrl: "",
     enabled: true,
   });
@@ -1258,6 +1295,8 @@ function QuestionsPage({ activityId }) {
       answers: answerSet(question).size
         ? [...answerSet(question)].join(", ")
         : "",
+      textAcceptedAnswers: textAcceptedAnswers(question).join("\n"),
+      textMatchMode: question.textMatchMode || "MANUAL",
     });
     setDialog(question);
   };
@@ -1270,6 +1309,8 @@ function QuestionsPage({ activityId }) {
           ? ""
           : current.options || "选项 A\n选项 B\n选项 C\n选项 D",
       answers: type === "TEXT" ? "" : current.answers || "B",
+      textMatchMode:
+        type === "TEXT" ? current.textMatchMode || "FUZZY" : "FUZZY",
     }));
   const uploadMedia = async (event) => {
     const file = event.target.files?.[0];
@@ -1313,12 +1354,21 @@ function QuestionsPage({ activityId }) {
                 ? options[index]
                 : answer;
             });
+    const textAcceptedAnswers =
+      form.type === "TEXT"
+        ? form.textAcceptedAnswers
+            .split("\n")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : [];
     const payload = {
       ...form,
       options,
       answers,
       fullScore: Number(form.fullScore),
       partialCreditPercent: Number(form.partialCreditPercent),
+      textAcceptedAnswers,
+      textMatchMode: form.type === "TEXT" ? form.textMatchMode : null,
       // Empty string is the explicit "remove media" value; null remains the
       // server-side convention for a partial update that leaves it unchanged.
       mediaUrl: form.mediaUrl || "",
@@ -1391,7 +1441,7 @@ function QuestionsPage({ activityId }) {
       <PageHeader
         eyebrow="QUESTION LIBRARY"
         title="题库与组卷"
-        description="维护题型、媒体和计分规则；文本回答会进入人工评分队列。"
+        description="维护题型、媒体和计分规则；文本题可自动匹配，未命中时进入人工评分队列。"
         action={
           <button className="primary-button" onClick={openCreate}>
             <FilePlus2 size={17} />
@@ -1423,7 +1473,7 @@ function QuestionsPage({ activityId }) {
                 <small>
                   {typeLabel(question.type)} · {question.fullScore || 100} 分 ·{" "}
                   {question.type === "TEXT"
-                    ? "人工评分"
+                    ? `${textMatchLabel(question.textMatchMode)} · ${textAcceptedAnswers(question).length} 项标准答案`
                     : `${asOptions(question).length} 个选项`}
                   {question.mediaUrl ? " · 含媒体" : ""}
                 </small>
@@ -1576,6 +1626,49 @@ function QuestionsPage({ activityId }) {
                 </label>
               </>
             )}
+            {form.type === "TEXT" && (
+              <>
+                <fieldset className="segmented text-match-mode">
+                  <legend>给分方式</legend>
+                  {[
+                    ["FUZZY", "模糊匹配"],
+                    ["REGEX", "正则匹配"],
+                    ["MANUAL", "人工评分"],
+                  ].map(([value, label]) => (
+                    <button
+                      type="button"
+                      className={
+                        form.textMatchMode === value ? "is-selected" : ""
+                      }
+                      key={value}
+                      onClick={() =>
+                        setForm({ ...form, textMatchMode: value })
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </fieldset>
+                <label>
+                  正确答案选项（每行一项）
+                  <textarea
+                    required={form.textMatchMode !== "MANUAL"}
+                    value={form.textAcceptedAnswers}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        textAcceptedAnswers: event.target.value,
+                      })
+                    }
+                    placeholder={
+                      form.textMatchMode === "REGEX"
+                        ? "例如：^(北京|beijing)$"
+                        : "输入可接受的正确回答"
+                    }
+                  />
+                </label>
+              </>
+            )}
             <div className="form-grid">
               <label>
                 满分
@@ -1673,6 +1766,21 @@ function QuestionsPage({ activityId }) {
               </span>
               <p>{dialog.answers?.join("、") || "未填写内容"}</p>
             </div>
+            {textAcceptedAnswers(questionById.get(dialog.questionId)).length >
+              0 && (
+              <div className="review-reference">
+                <span>
+                  正确答案选项 · {textMatchLabel(questionById.get(dialog.questionId)?.textMatchMode)}
+                </span>
+                <div>
+                  {textAcceptedAnswers(questionById.get(dialog.questionId)).map(
+                    (answer) => (
+                      <code key={answer}>{answer}</code>
+                    ),
+                  )}
+                </div>
+              </div>
+            )}
             <label>
               得分
               <input
@@ -4560,6 +4668,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
 function ParticipantPortal({ lotteryMode = false }) {
   const { activityId } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const requestedVenue =
     new URLSearchParams(location.search).get("venue") || "";
   const lotteryPoolId =
@@ -4604,9 +4713,24 @@ function ParticipantPortal({ lotteryMode = false }) {
           activeVenueCode(venueList, current || requestedVenue),
         );
         applyPublicBrand(activityInfo, siteInfo);
-      } catch {
+      } catch (cause) {
+        if (cause instanceof ApiError && cause.status === 404) {
+          try {
+            const activities = await api.activities();
+            const target =
+              activities.find((item) => item.status === "LIVE") ||
+              activities[0];
+            if (target?.id && target.id !== activityId) {
+              navigate(`/join/${target.id}`, { replace: true });
+              return;
+            }
+          } catch {
+            // Keep the original activity error when the fallback list is unavailable.
+          }
+        }
         setFields([]);
         setVenues([]);
+        setError(cause.message);
       } finally {
         setLoading(false);
       }
@@ -4619,7 +4743,7 @@ function ParticipantPortal({ lotteryMode = false }) {
           api.controlState(activityId, participantToken),
           api.scoreboard(activityId, participantToken),
           participant?.id
-            ? api.submissions(activityId, participant.id)
+            ? api.submissions(activityId, participant.id, participantToken)
             : Promise.resolve([]),
           api.activity(activityId),
           api.siteSettings(),
@@ -4640,7 +4764,7 @@ function ParticipantPortal({ lotteryMode = false }) {
     } finally {
       setLoading(false);
     }
-  }, [activityId, participant?.id, participantToken, requestedVenue]);
+  }, [activityId, navigate, participant?.id, participantToken, requestedVenue]);
   useEffect(() => {
     load();
   }, [load]);
@@ -4668,8 +4792,8 @@ function ParticipantPortal({ lotteryMode = false }) {
         activity={activity}
         siteSettings={siteSettings}
       />
-      <div className="participant-mobile">
-        <div className="participant-mobile__content">
+      <section className="participant-workspace" aria-label="活动参与区">
+        <div className="participant-workspace__content">
           {activity?.clientHeroImageUrl && (
             <img
               className="participant-brand-hero"
@@ -4743,7 +4867,7 @@ function ParticipantPortal({ lotteryMode = false }) {
           )}
         </div>
         {participant && (
-          <nav className="participant-tabs">
+          <nav className="participant-nav" aria-label="参与者功能导航">
             <button
               className={tab === "play" ? "is-active" : ""}
               onClick={() => setTab("play")}
@@ -4767,7 +4891,7 @@ function ParticipantPortal({ lotteryMode = false }) {
             </button>
           </nav>
         )}
-      </div>
+      </section>
       <div className="participant-sidecopy">
         <span className="eyebrow">
           {lotteryMode ? "LOTTERY ACCESS" : "PARTICIPANT EXPERIENCE"}
@@ -5104,7 +5228,7 @@ function AnswerCard({
           participantId: participant.id,
           questionId: question.id,
           answers: value,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: createIdempotencyKey(),
         },
         participantToken,
       );
@@ -5278,7 +5402,7 @@ function RewardsCard({
           participantId: participant.id,
           prizePoolId: preferredPoolId || null,
           venue: participant.venue || null,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: createIdempotencyKey(),
         },
         participantToken,
       );
@@ -5666,6 +5790,16 @@ function ScreenQuestion({ question, state, result, responses = [], volume }) {
           </div>
         ))}
       </div>
+      {result && question?.type === "TEXT" && answerSet(question).size > 0 && (
+        <div className="screen-text-answer">
+          <span>正确答案</span>
+          <div>
+            {[...answerSet(question)].map((answer) => (
+              <strong key={answer}>{answer}</strong>
+            ))}
+          </div>
+        </div>
+      )}
       {result && resultResponses.length > 0 && (
         <div className="screen-result-summary" aria-label="答题结果摘要">
           {resultResponses.map((response, index) => (
@@ -6102,6 +6236,24 @@ function asOptions(question) {
 function answerSet(question) {
   const answers = question?.answers || question?.correctAnswers || [];
   return new Set(Array.isArray(answers) ? answers : String(answers).split(","));
+}
+function textAcceptedAnswers(question) {
+  const answers = question?.textAcceptedAnswers || [];
+  return Array.isArray(answers)
+    ? answers.filter(Boolean)
+    : String(answers)
+        .split("\n")
+        .map((answer) => answer.trim())
+        .filter(Boolean);
+}
+function textMatchLabel(mode) {
+  return (
+    {
+      FUZZY: "自动匹配（模糊）",
+      REGEX: "自动匹配（正则）",
+      MANUAL: "人工评分",
+    }[mode] || "人工评分"
+  );
 }
 function persistParticipant(activityId, participant) {
   sessionStorage.setItem(

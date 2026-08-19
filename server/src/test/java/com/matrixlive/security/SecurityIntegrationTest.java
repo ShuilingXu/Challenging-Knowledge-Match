@@ -1,6 +1,7 @@
 package com.matrixlive.security;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -113,6 +114,46 @@ class SecurityIntegrationTest {
 
     mvc.perform(get("/api/activities/" + activityId + "/memberships")
             .header("Authorization", "Bearer " + activityAdminToken))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void activityAdminCanListAccountsForActivityAccessManagement() throws Exception {
+    UUID activityId = activities.findAll().getFirst().getId();
+    String activityPath = "/api/activities/" + activityId;
+    String activityAdminToken = accessToken(login("activity-admin", "ChangeMe!2026"));
+    String staffToken = accessToken(login("event-staff", "ChangeMe!2026"));
+
+    mvc.perform(get(activityPath + "/memberships/users")
+            .header("Authorization", "Bearer " + activityAdminToken))
+        .andExpect(status().isOk());
+    mvc.perform(get(activityPath + "/memberships/users")
+            .header("Authorization", "Bearer " + staffToken))
+        .andExpect(status().isForbidden());
+  }
+
+  @Test
+  void systemAdminCanCreateAssignAndEditAnActivityUserAccount() throws Exception {
+    UUID activityId = activities.findAll().getFirst().getId();
+    String adminToken = accessToken(login("sysadmin", "ChangeMe!2026"));
+    String username = "acceptance-" + UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+
+    MvcResult created = mvc.perform(post("/api/admin/users").header("Authorization", "Bearer " + adminToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"username\":\"" + username + "\",\"displayName\":\"Acceptance User\","
+                + "\"password\":\"TempPass!2026\",\"systemRole\":null}"))
+        .andExpect(status().isCreated()).andReturn();
+    String userId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+
+    mvc.perform(post("/api/activities/" + activityId + "/memberships")
+            .header("Authorization", "Bearer " + adminToken).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"userId\":\"" + userId + "\",\"role\":\"STAFF\"}"))
+        .andExpect(status().isCreated());
+
+    mvc.perform(patch("/api/admin/users/" + userId).header("Authorization", "Bearer " + adminToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"username\":\"" + username + "\",\"displayName\":\"Edited User\","
+                + "\"password\":\"TempPass!2027\"}"))
         .andExpect(status().isOk());
   }
 

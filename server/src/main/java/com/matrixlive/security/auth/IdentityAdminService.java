@@ -42,6 +42,23 @@ public class IdentityAdminService {
   public List<UserResponse> listUsers() { return users.findAll().stream().map(this::toUser).toList(); }
 
   @Transactional
+  public UserResponse updateUser(UUID userId, UpdateUserRequest request) {
+    UserAccount user = requireUser(userId);
+    updateAccount(user, request);
+    return toUser(user);
+  }
+
+  @Transactional
+  public UserResponse updateActivityUser(UUID activityId, UUID userId, UpdateUserRequest request) {
+    requireActivity(activityId);
+    memberships.findByUserIdAndActivityId(userId, activityId)
+        .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "User is not a member of this activity"));
+    UserAccount user = requireUser(userId);
+    updateAccount(user, request);
+    return toUser(user);
+  }
+
+  @Transactional
   public UserResponse setEnabled(UUID userId, boolean enabled) {
     UserAccount user = users.findById(userId)
         .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "User does not exist"));
@@ -52,6 +69,11 @@ public class IdentityAdminService {
   public List<MembershipResponse> listMemberships(UUID activityId) {
     requireActivity(activityId);
     return memberships.findByActivityIdOrderByCreatedAtAsc(activityId).stream().map(this::toMembership).toList();
+  }
+
+  public List<UserResponse> listActivityUsers(UUID activityId) {
+    requireActivity(activityId);
+    return users.findAll().stream().map(this::toUser).toList();
   }
 
   @Transactional
@@ -90,6 +112,26 @@ public class IdentityAdminService {
 
   private void requireActivity(UUID activityId) {
     if (!activities.existsById(activityId)) throw new DomainException(HttpStatus.NOT_FOUND, "Activity does not exist");
+  }
+
+  private UserAccount requireUser(UUID userId) {
+    return users.findById(userId).orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "User does not exist"));
+  }
+
+  private void updateAccount(UserAccount user, UpdateUserRequest request) {
+    String username = request.username().trim().toLowerCase(java.util.Locale.ROOT);
+    String displayName = request.displayName().trim();
+    users.findByUsernameIgnoreCase(username)
+        .filter(existing -> !existing.getId().equals(user.getId()))
+        .ifPresent(existing -> { throw new DomainException(HttpStatus.CONFLICT, "Username is already in use"); });
+    if (username.isBlank() || displayName.isBlank()) {
+      throw new DomainException(HttpStatus.BAD_REQUEST, "Username and display name are required");
+    }
+    user.changeUsername(username);
+    user.changeDisplayName(displayName);
+    if (request.password() != null && !request.password().isBlank()) {
+      user.changePassword(passwordEncoder.encode(request.password()));
+    }
   }
 
   private UserResponse toUser(UserAccount user) {

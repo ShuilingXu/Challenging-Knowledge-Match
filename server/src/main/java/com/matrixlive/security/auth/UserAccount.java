@@ -55,5 +55,7 @@ public class UserAccount {
   public boolean isEnabled() { return enabled; }
   public Instant getCreatedAt() { return createdAt; }
   public void setEnabled(boolean enabled) { this.enabled = enabled; }
+  public void changeUsername(String username) { this.username = username; }
+  public void changeDisplayName(String displayName) { this.displayName = displayName; }
   public void changePassword(String passwordHash) { this.passwordHash = passwordHash; }
 }

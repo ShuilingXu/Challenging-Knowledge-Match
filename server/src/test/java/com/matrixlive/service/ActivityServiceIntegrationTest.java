@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.matrixlive.api.ApiModels.CreateActivityRequest;
 import com.matrixlive.api.ApiModels.ControlRequest;
 import com.matrixlive.api.ApiModels.QuestionWriteRequest;
+import com.matrixlive.api.ApiModels.QuestionSetRequest;
 import com.matrixlive.api.ApiModels.RegisterParticipantRequest;
 import com.matrixlive.api.ApiModels.SubmitAnswerRequest;
 import com.matrixlive.api.ApiModels.VenueRequest;
@@ -78,5 +79,35 @@ class ActivityServiceIntegrationTest {
     var boardDisplay = screens.currentDisplay(activity.id(), device.id());
     assertEquals(ScreenDisplayMode.SCOREBOARD, boardDisplay.mode());
     assertTrue(boardDisplay.data().containsKey("rows"));
+  }
+
+  @Test
+  void editsQuestionsAndActivatesAnOrderedQuestionSetForRuntime() {
+    var activity = service.createActivity(new CreateActivityRequest("Question set", "Shanghai", Instant.now()));
+    var first = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "First", java.util.List.of("A", "B"),
+        Set.of("A"), 100, 0, null, 40, true));
+    var second = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Second", java.util.List.of("A", "B"),
+        Set.of("B"), 100, 1, null, 40, true));
+
+    service.updateQuestion(activity.id(), first.id(), new QuestionWriteRequest("SINGLE", "First with media",
+        java.util.List.of("A", "B"), Set.of("B"), 80, 0, "https://cdn.example.test/first.png", 40, true));
+    var edited = service.updateQuestion(activity.id(), first.id(), new QuestionWriteRequest("SINGLE", "First edited",
+        java.util.List.of("A", "B"), Set.of("B"), 80, 0, "", 40, true));
+    assertEquals("First edited", edited.title());
+    assertEquals(80, edited.fullScore());
+    assertEquals("", edited.mediaUrl());
+
+    var set = service.createQuestionSet(activity.id(), new QuestionSetRequest("Final round", "Ordered runtime set",
+        java.util.List.of(second.id(), first.id()), false));
+    assertEquals(java.util.List.of(second.id(), first.id()), set.items().stream().map(item -> item.questionId()).toList());
+
+    var reordered = service.updateQuestionSet(activity.id(), set.id(), new QuestionSetRequest("Final round",
+        "Reordered runtime set", java.util.List.of(first.id(), second.id()), false));
+    assertEquals(java.util.List.of(first.id(), second.id()), reordered.items().stream().map(item -> item.questionId()).toList());
+
+    service.activateQuestionSet(activity.id(), set.id());
+    assertEquals(java.util.List.of(first.id(), second.id()), service.listQuestionControl(activity.id()).stream()
+        .map(item -> item.id()).toList());
+    assertEquals(set.id(), service.activity(activity.id()).activeQuestionSetId());
   }
 }

@@ -13,6 +13,8 @@ import com.matrixlive.domain.Participant;
 import com.matrixlive.domain.PrizeAward;
 import com.matrixlive.domain.PrizePool;
 import com.matrixlive.domain.Question;
+import com.matrixlive.domain.QuestionSet;
+import com.matrixlive.domain.QuestionSetItem;
 import com.matrixlive.domain.RegistrationField;
 import com.matrixlive.domain.ScoreLedger;
 import com.matrixlive.domain.Venue;
@@ -24,6 +26,8 @@ import com.matrixlive.repository.ParticipantRepository;
 import com.matrixlive.repository.PrizeAwardRepository;
 import com.matrixlive.repository.PrizePoolRepository;
 import com.matrixlive.repository.QuestionRepository;
+import com.matrixlive.repository.QuestionSetItemRepository;
+import com.matrixlive.repository.QuestionSetRepository;
 import com.matrixlive.repository.RegistrationFieldRepository;
 import com.matrixlive.repository.ScoreLedgerRepository;
 import com.matrixlive.repository.VenueRepository;
@@ -42,6 +46,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -65,6 +70,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ActivityService {
   private static final Set<String> ACTIVITY_STATUSES = Set.of(
       "DRAFT", "REGISTRATION_OPEN", "LIVE", "PAUSED", "FINISHED", "CANCELLED");
+  private static final Set<String> ACTIVITY_TYPES = Set.of("EVENT", "QUIZ", "LOTTERY", "OTHER");
   private static final Set<String> QUESTION_TYPES = Set.of("SINGLE", "MULTIPLE", "TEXT");
   private static final Set<String> TEXT_MATCH_MODES = Set.of("FUZZY", "REGEX", "MANUAL");
   private static final Set<String> FIELD_TYPES = Set.of(
@@ -80,6 +86,8 @@ public class ActivityService {
   private final RegistrationFieldRepository registrationFields;
   private final ParticipantRepository participants;
   private final QuestionRepository questions;
+  private final QuestionSetRepository questionSets;
+  private final QuestionSetItemRepository questionSetItems;
   private final AnswerSubmissionRepository submissions;
   private final ScoreLedgerRepository scoreLedgers;
   private final PrizePoolRepository prizePools;
@@ -93,7 +101,8 @@ public class ActivityService {
 
   public ActivityService(ActivityRepository activities, ActivityMembershipRepository memberships, VenueRepository venues,
       RegistrationFieldRepository registrationFields, ParticipantRepository participants,
-      QuestionRepository questions, AnswerSubmissionRepository submissions, ScoreLedgerRepository scoreLedgers,
+      QuestionRepository questions, QuestionSetRepository questionSets, QuestionSetItemRepository questionSetItems,
+      AnswerSubmissionRepository submissions, ScoreLedgerRepository scoreLedgers,
       PrizePoolRepository prizePools, PrizeAwardRepository awards, LotteryDrawRepository lotteryDraws,
       LotteryChanceRepository lotteryChances, RealtimeEventBus realtime, ObjectMapper objectMapper, ScreenService screens) {
     this.activities = activities;
@@ -102,6 +111,8 @@ public class ActivityService {
     this.registrationFields = registrationFields;
     this.participants = participants;
     this.questions = questions;
+    this.questionSets = questionSets;
+    this.questionSetItems = questionSetItems;
     this.submissions = submissions;
     this.scoreLedgers = scoreLedgers;
     this.prizePools = prizePools;
@@ -133,6 +144,7 @@ public class ActivityService {
         request.endsAt(), cleanOptional(request.description()));
     activity.updateClientBrand(cleanOptional(request.clientDisplayName()), normalizeThemeColor(request.clientThemeColor()),
         cleanOptional(request.clientHeroImageUrl()), cleanOptional(request.clientBackgroundImageUrl()));
+    configureActivityHierarchy(activity, request.parentActivityId(), request.activityType());
     activities.save(activity);
     createInitiatorMembership(activity.getId());
     return toActivity(activity);
@@ -151,6 +163,9 @@ public class ActivityService {
         request.clientThemeColor() == null ? activity.getClientThemeColor() : normalizeThemeColor(request.clientThemeColor()),
         request.clientHeroImageUrl() == null ? activity.getClientHeroImageUrl() : cleanOptional(request.clientHeroImageUrl()),
         request.clientBackgroundImageUrl() == null ? activity.getClientBackgroundImageUrl() : cleanOptional(request.clientBackgroundImageUrl()));
+    configureActivityHierarchy(activity,
+        request.parentActivityId() == null ? activity.getParentActivityId() : request.parentActivityId(),
+        request.activityType() == null ? activity.getActivityType() : request.activityType());
     return toActivity(activity);
   }
 
@@ -329,7 +344,7 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public List<QuestionResponse> listQuestions(UUID activityId) {
     requireActivity(activityId);
-    return questions.findByActivityIdOrderByDisplayOrderAsc(activityId).stream().map(this::toQuestion).toList();
+    return orderedQuestionsForActivity(activityId).stream().map(this::toQuestion).toList();
   }
 
   @Transactional(readOnly = true)
@@ -341,7 +356,79 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public List<QuestionControlResponse> listQuestionControl(UUID activityId) {
     requireActivity(activityId);
-    return questions.findByActivityIdOrderByDisplayOrderAsc(activityId).stream().map(this::toQuestionControl).toList();
+    return orderedQuestionsForActivity(activityId).stream().map(this::toQuestionControl).toList();
+  }
+
+  @Transactional(readOnly = true)
+  public List<QuestionSetResponse> listQuestionSets(UUID activityId) {
+    requireActivity(activityId);
+    return questionSets.findByActivityIdOrderByUpdatedAtDesc(activityId).stream().map(this::toQuestionSet).toList();
+  }
+
+  @Transactional
+  public QuestionSetResponse createQuestionSet(UUID activityId, QuestionSetRequest request) {
+    requireActivity(activityId);
+    String name = cleanRequired(request.name(), "Question set name is required");
+    if (questionSets.existsByActivityIdAndName(activityId, name)) {
+      throw conflict("A question set with this name already exists");
+    }
+    List<UUID> questionIds = validateQuestionSetItems(activityId, request.questionIds());
+    boolean active = Boolean.TRUE.equals(request.active());
+    if (active && questionIds.isEmpty()) throw badRequest("An active question set must contain at least one question");
+    QuestionSet set = questionSets.save(new QuestionSet(activityId, name, cleanOptional(request.description()), active));
+    replaceQuestionSetItems(set, questionIds);
+    if (active) activateQuestionSet(set);
+    QuestionSetResponse response = toQuestionSet(set);
+    broadcast(activityId, "question_set.created", response);
+    return response;
+  }
+
+  @Transactional
+  public QuestionSetResponse updateQuestionSet(UUID activityId, UUID questionSetId, QuestionSetRequest request) {
+    QuestionSet set = requireQuestionSet(activityId, questionSetId);
+    String name = request.name() == null ? set.getName() : cleanRequired(request.name(), "Question set name is required");
+    if (!name.equals(set.getName()) && questionSets.existsByActivityIdAndName(activityId, name)) {
+      throw conflict("A question set with this name already exists");
+    }
+    List<UUID> questionIds = request.questionIds() == null
+        ? questionSetItems.findByQuestionSetIdOrderByDisplayOrderAsc(questionSetId).stream().map(QuestionSetItem::getQuestionId).toList()
+        : validateQuestionSetItems(activityId, request.questionIds());
+    if (Boolean.TRUE.equals(request.active()) && questionIds.isEmpty()) {
+      throw badRequest("An active question set must contain at least one question");
+    }
+    boolean wasActive = set.isActive();
+    set.update(name, request.description() == null ? set.getDescription() : cleanOptional(request.description()), request.active());
+    replaceQuestionSetItems(set, questionIds);
+    if (Boolean.TRUE.equals(request.active())) activateQuestionSet(set);
+    else if (Boolean.FALSE.equals(request.active()) && wasActive) {
+      activities.findById(activityId).filter(activity -> questionSetId.equals(activity.getActiveQuestionSetId()))
+          .ifPresent(activity -> activity.activateQuestionSet(null));
+    }
+    QuestionSetResponse response = toQuestionSet(set);
+    broadcast(activityId, "question_set.updated", response);
+    return response;
+  }
+
+  @Transactional
+  public QuestionSetResponse activateQuestionSet(UUID activityId, UUID questionSetId) {
+    QuestionSet set = requireQuestionSet(activityId, questionSetId);
+    if (questionSetItems.findByQuestionSetIdOrderByDisplayOrderAsc(questionSetId).isEmpty()) {
+      throw badRequest("An active question set must contain at least one question");
+    }
+    activateQuestionSet(set);
+    QuestionSetResponse response = toQuestionSet(set);
+    broadcast(activityId, "question_set.activated", response);
+    return response;
+  }
+
+  @Transactional
+  public void deleteQuestionSet(UUID activityId, UUID questionSetId) {
+    QuestionSet set = requireQuestionSet(activityId, questionSetId);
+    questionSetItems.deleteByQuestionSetId(set.getId());
+    questionSets.delete(set);
+    activities.findById(activityId).filter(activity -> questionSetId.equals(activity.getActiveQuestionSetId()))
+        .ifPresent(activity -> activity.activateQuestionSet(null));
+    broadcast(activityId, "question_set.deleted", Map.of("questionSetId", questionSetId));
   }
 
   @Transactional
@@ -374,8 +461,9 @@ public class ActivityService {
         request.textAcceptedAnswers() == null ? readTextAnswers(question.getTextAcceptedAnswers()) : request.textAcceptedAnswers(),
         request.textMatchMode() == null ? question.getTextMatchMode() : request.textMatchMode(),
         request.enabled() == null ? question.isEnabled() : request.enabled(), question.getDisplayOrder());
+    String mediaUrl = request.mediaUrl() != null && request.mediaUrl().isBlank() ? "" : values.mediaUrl();
     question.update(values.type(), values.title(), joinPipe(values.options()), joinComma(values.answers()), values.fullScore(),
-        values.displayOrder(), values.mediaUrl(), values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()),
+        values.displayOrder(), mediaUrl, values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()),
         values.textMatchMode(), values.enabled());
     return toQuestionAdmin(question);
   }
@@ -410,6 +498,11 @@ public class ActivityService {
     if (remainingSeconds(state) <= 0) throw conflict("The answer window has closed");
     if (submissions.findByActivityIdAndParticipantIdAndQuestionId(activityId, participant.getId(), question.getId()).isPresent()) {
       throw conflict("Participant has already answered this question");
+    }
+    QuestionSet activeSet = questionSets.findByActivityIdAndActiveTrue(activityId).orElse(null);
+    if (activeSet != null && questionSetItems.findByQuestionSetIdOrderByDisplayOrderAsc(activeSet.getId()).stream()
+        .noneMatch(item -> item.getQuestionId().equals(question.getId()))) {
+      throw conflict("This question is not part of the active question set");
     }
     Set<String> answers = normalizeAnswers(question, request.answers());
     validateSubmittedAnswers(question, answers);
@@ -833,6 +926,53 @@ public class ActivityService {
         .orElseThrow(() -> notFound("Question does not exist in this activity"));
   }
 
+  private QuestionSet requireQuestionSet(UUID activityId, UUID questionSetId) {
+    return questionSets.findByIdAndActivityId(questionSetId, activityId)
+        .orElseThrow(() -> notFound("Question set does not exist in this activity"));
+  }
+
+  private List<Question> orderedQuestionsForActivity(UUID activityId) {
+    QuestionSet activeSet = questionSets.findByActivityIdAndActiveTrue(activityId).orElse(null);
+    if (activeSet == null) {
+      return questions.findByActivityIdOrderByDisplayOrderAsc(activityId).stream()
+          .filter(Question::isEnabled)
+          .toList();
+    }
+    Map<UUID, Question> byId = questions.findByActivityIdOrderByDisplayOrderAsc(activityId).stream()
+        .collect(java.util.stream.Collectors.toMap(Question::getId, question -> question));
+    return questionSetItems.findByQuestionSetIdOrderByDisplayOrderAsc(activeSet.getId()).stream()
+        .map(item -> byId.get(item.getQuestionId()))
+        .filter(java.util.Objects::nonNull)
+        .filter(Question::isEnabled)
+        .toList();
+  }
+
+  private List<UUID> validateQuestionSetItems(UUID activityId, List<UUID> questionIds) {
+    List<UUID> ids = questionIds == null ? List.of() : List.copyOf(questionIds);
+    if (new LinkedHashSet<>(ids).size() != ids.size()) throw badRequest("Question set cannot contain duplicate questions");
+    ids.forEach(questionId -> requireQuestion(activityId, questionId));
+    return ids;
+  }
+
+  private void replaceQuestionSetItems(QuestionSet set, List<UUID> questionIds) {
+    questionSetItems.deleteByQuestionSetId(set.getId());
+    // Force the bulk delete to reach the database before re-inserting the
+    // reordered rows, otherwise the unique constraints can see both versions
+    // during Hibernate's transaction flush.
+    questionSetItems.flush();
+    for (int index = 0; index < questionIds.size(); index++) {
+      questionSetItems.save(new QuestionSetItem(set.getId(), questionIds.get(index), index));
+    }
+  }
+
+  private void activateQuestionSet(QuestionSet selected) {
+    questionSets.findByActivityIdOrderByUpdatedAtDesc(selected.getActivityId()).stream()
+        .filter(candidate -> !candidate.getId().equals(selected.getId()) && candidate.isActive())
+        .forEach(QuestionSet::deactivate);
+    selected.activate();
+    activities.findById(selected.getActivityId()).ifPresent(activity -> activity.activateQuestionSet(selected.getId()));
+  }
+
   private AnswerSubmission requireSubmission(UUID activityId, UUID submissionId) {
     return submissions.findById(submissionId).filter(submission -> submission.getActivityId().equals(activityId))
         .orElseThrow(() -> notFound("Answer submission does not exist in this activity"));
@@ -1131,6 +1271,26 @@ public class ActivityService {
     return color.toUpperCase(Locale.ROOT);
   }
 
+  private void configureActivityHierarchy(Activity activity, UUID parentActivityId, String activityType) {
+    String type = normalizeEnum(activityType == null ? "EVENT" : activityType, ACTIVITY_TYPES, "activity type");
+    if (parentActivityId != null && parentActivityId.equals(activity.getId())) {
+      throw badRequest("An activity cannot be its own parent");
+    }
+    if ("EVENT".equals(type) && parentActivityId != null) {
+      throw badRequest("A parent activity is only valid for a sub-activity");
+    }
+    if (!"EVENT".equals(type) && parentActivityId == null) {
+      throw badRequest("Sub-activities require a parent activity");
+    }
+    if (parentActivityId != null) {
+      Activity parent = requireActivity(parentActivityId);
+      if (parent.getParentActivityId() != null) {
+        throw badRequest("Only a top-level activity can own sub-activities");
+      }
+    }
+    activity.configureHierarchy(parentActivityId, type);
+  }
+
   private String normalizeEnum(String value, Set<String> allowed, String label) {
     String normalized = cleanRequired(value, label).toUpperCase(Locale.ROOT);
     if (!allowed.contains(normalized)) throw badRequest("Unsupported " + label);
@@ -1211,7 +1371,8 @@ public class ActivityService {
     return new ActivityResponse(activity.getId(), activity.getName(), activity.getCity(), activity.getStatus(),
         activity.getStartsAt(), activity.getEndsAt(), activity.getDescription(), activity.getClientDisplayName(),
         activity.getClientThemeColor(), activity.getClientHeroImageUrl(), activity.getClientBackgroundImageUrl(),
-        activity.getCreatedAt(), activity.getUpdatedAt());
+        activity.getCreatedAt(), activity.getUpdatedAt(), activity.getParentActivityId(), activity.getActivityType(),
+        activity.getActiveQuestionSetId());
   }
 
   private VenueResponse toVenue(Venue venue) {
@@ -1250,6 +1411,19 @@ public class ActivityService {
         splitComma(question.getAnswers()), question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(),
         question.getPartialCreditPercent(), readTextAnswers(question.getTextAcceptedAnswers()), question.getTextMatchMode(),
         question.isEnabled());
+  }
+
+  private QuestionSetResponse toQuestionSet(QuestionSet set) {
+    Map<UUID, Question> byId = questions.findByActivityIdOrderByDisplayOrderAsc(set.getActivityId()).stream()
+        .collect(java.util.stream.Collectors.toMap(Question::getId, question -> question));
+    List<QuestionSetItemResponse> items = questionSetItems.findByQuestionSetIdOrderByDisplayOrderAsc(set.getId()).stream()
+        .map(item -> {
+          Question question = byId.get(item.getQuestionId());
+          return new QuestionSetItemResponse(item.getQuestionId(), question == null ? "已删除题目" : question.getTitle(),
+              question == null ? "UNKNOWN" : question.getType(), item.getDisplayOrder());
+        }).toList();
+    return new QuestionSetResponse(set.getId(), set.getActivityId(), set.getName(), set.getDescription(), set.isActive(),
+        items, set.getCreatedAt(), set.getUpdatedAt());
   }
 
   private QuestionControlResponse toQuestionControl(Question question) {

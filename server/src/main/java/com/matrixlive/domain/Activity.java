@@ -27,6 +27,15 @@ public class Activity {
   @Column(nullable = false, length = 32)
   private String status;
 
+  @Column(name = "parent_activity_id")
+  private UUID parentActivityId;
+
+  @Column(name = "activity_type", nullable = false, length = 24)
+  private String activityType;
+
+  @Column(name = "active_question_set_id")
+  private UUID activeQuestionSetId;
+
   @Column(columnDefinition = "text")
   private String description;
 
@@ -63,6 +72,7 @@ public class Activity {
     this.startsAt = startsAt;
     this.endsAt = endsAt;
     this.description = description;
+    this.activityType = "EVENT";
   }
 
   @PrePersist
@@ -81,6 +91,9 @@ public class Activity {
   public String getName() { return name; }
   public String getCity() { return city; }
   public String getStatus() { return status; }
+  public UUID getParentActivityId() { return parentActivityId; }
+  public String getActivityType() { return activityType; }
+  public UUID getActiveQuestionSetId() { return activeQuestionSetId; }
   public String getDescription() { return description; }
   public String getClientDisplayName() { return clientDisplayName; }
   public String getClientThemeColor() { return clientThemeColor; }
@@ -109,4 +122,11 @@ public class Activity {
   }
 
   public void changeStatus(String status) { this.status = status; }
+
+  public void configureHierarchy(UUID parentActivityId, String activityType) {
+    this.parentActivityId = parentActivityId;
+    this.activityType = activityType == null || activityType.isBlank() ? "EVENT" : activityType;
+  }
+
+  public void activateQuestionSet(UUID questionSetId) { this.activeQuestionSetId = questionSetId; }
 }

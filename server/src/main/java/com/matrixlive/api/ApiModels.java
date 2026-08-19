@@ -24,9 +24,11 @@ public final class ApiModels {
       @Size(max = 160) String clientDisplayName,
       @Size(max = 16) String clientThemeColor,
       @Size(max = 1024) String clientHeroImageUrl,
-      @Size(max = 1024) String clientBackgroundImageUrl) {
+      @Size(max = 1024) String clientBackgroundImageUrl,
+      UUID parentActivityId,
+      @Size(max = 24) String activityType) {
     public CreateActivityRequest(String name, String city, Instant startsAt) {
-      this(name, city, startsAt, null, null, null, null, null, null);
+      this(name, city, startsAt, null, null, null, null, null, null, null, null);
     }
   }
 
@@ -39,13 +41,16 @@ public final class ApiModels {
       @Size(max = 160) String clientDisplayName,
       @Size(max = 16) String clientThemeColor,
       @Size(max = 1024) String clientHeroImageUrl,
-      @Size(max = 1024) String clientBackgroundImageUrl) { }
+      @Size(max = 1024) String clientBackgroundImageUrl,
+      UUID parentActivityId,
+      @Size(max = 24) String activityType) { }
 
   public record ChangeActivityStatusRequest(@NotBlank String status) { }
 
   public record ActivityResponse(UUID id, String name, String city, String status, Instant startsAt,
       Instant endsAt, String description, String clientDisplayName, String clientThemeColor,
-      String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt) { }
+      String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt,
+      UUID parentActivityId, String activityType, UUID activeQuestionSetId) { }
 
   /** Settings safe to expose on participant-facing routes. */
   public record SiteSettingsResponse(String domain, String siteName, String logoUrl, String footerCode) { }
@@ -153,6 +158,17 @@ public final class ApiModels {
   public record QuestionAdminResponse(UUID id, String type, String title, List<String> options,
       List<String> answers, int fullScore, int displayOrder, String mediaUrl, int partialCreditPercent,
       List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) { }
+
+  public record QuestionSetRequest(
+      @NotBlank @Size(max = 180) String name,
+      @Size(max = 1000) String description,
+      List<@NotNull UUID> questionIds,
+      Boolean active) { }
+
+  public record QuestionSetItemResponse(UUID questionId, String title, String type, int displayOrder) { }
+
+  public record QuestionSetResponse(UUID id, UUID activityId, String name, String description, boolean active,
+      List<QuestionSetItemResponse> items, Instant createdAt, Instant updatedAt) { }
 
   public record SubmitAnswerRequest(@NotNull UUID participantId, @NotNull UUID questionId,
       Set<@NotBlank @Size(max = 8000) String> answers,

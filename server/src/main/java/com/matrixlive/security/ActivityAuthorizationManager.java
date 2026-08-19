@@ -82,7 +82,11 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
   private boolean allowsStaff(HttpServletRequest request, String remainder) {
     String method = request.getMethod();
     // Viewing operational data is sufficient for the floor team, except answer keys exposed by the admin question route.
-    if ("GET".equals(method)) return !"questions/admin".equals(remainder) && !remainder.startsWith("memberships");
+    if ("GET".equals(method)) {
+      return !"questions/admin".equals(remainder)
+          && !remainder.startsWith("memberships")
+          && !remainder.startsWith("question-sets");
+    }
     if ("control".equals(remainder)) return "POST".equals(method);
     if (remainder.matches("awards/[0-9a-fA-F-]{36}/redeem")) return "POST".equals(method);
     // Floor staff may correct participant details, but cannot change registration schema or event configuration.

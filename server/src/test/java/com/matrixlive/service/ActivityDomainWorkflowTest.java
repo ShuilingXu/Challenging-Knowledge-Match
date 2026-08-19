@@ -161,4 +161,55 @@ class ActivityDomainWorkflowTest {
     assertThrows(DomainException.class, () -> service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT",
         "Bad regex", List.of(), Set.of(), 100, 0, null, 40, List.of("["), "REGEX", true)));
   }
+
+  @Test
+  void questionSetsControlPublishedOrderAndActivitiesSupportOneLevelSubActivities() {
+    var parent = service.createActivity(new CreateActivityRequest("Shanghai knowledge event", "Shanghai", Instant.now(),
+        null, "Parent event", null, null, null, null, null, "EVENT"));
+    var quiz = service.createActivity(new CreateActivityRequest("Knowledge quiz", "Shanghai", Instant.now(), null,
+        "Quiz child", null, null, null, null, parent.id(), "QUIZ"));
+    assertEquals(parent.id(), quiz.parentActivityId());
+    assertEquals("QUIZ", quiz.activityType());
+
+    var first = service.createQuestion(quiz.id(), new QuestionWriteRequest("SINGLE", "First", List.of("A", "B"),
+        Set.of("A"), 10, 0, null, 40, true));
+    var second = service.createQuestion(quiz.id(), new QuestionWriteRequest("SINGLE", "Second", List.of("A", "B"),
+        Set.of("B"), 10, 1, null, 40, true));
+    var set = service.createQuestionSet(quiz.id(), new QuestionSetRequest("Final round", "Published order",
+        List.of(second.id(), first.id()), false));
+    assertEquals(List.of(second.id(), first.id()), set.items().stream().map(QuestionSetItemResponse::questionId).toList());
+
+    service.activateQuestionSet(quiz.id(), set.id());
+    assertEquals(List.of(second.id(), first.id()), service.listQuestions(quiz.id()).stream().map(QuestionResponse::id).toList());
+    assertThrows(DomainException.class, () -> service.createActivity(new CreateActivityRequest("Nested", "Shanghai",
+        Instant.now(), null, null, null, null, null, null, quiz.id(), "OTHER")));
+    assertThrows(DomainException.class, () -> service.createActivity(new CreateActivityRequest("Invalid child", "Shanghai",
+        Instant.now(), null, null, null, null, null, null, null, "QUIZ")));
+  }
+
+  @Test
+  void disabledQuestionsAreExcludedWhenNoQuestionSetIsActive() {
+    var activity = service.createActivity(new CreateActivityRequest("Enabled question fallback", "Shanghai", Instant.now()));
+    var enabled = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Enabled", List.of("A", "B"),
+        Set.of("A"), 10, 0, null, 40, true));
+    service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Disabled", List.of("A", "B"),
+        Set.of("B"), 10, 1, null, 40, false));
+
+    assertEquals(List.of(enabled.id()), service.listQuestions(activity.id()).stream()
+        .map(QuestionResponse::id).toList());
+  }
+
+  @Test
+  void updatesExistingQuestionContentAndScoringConfiguration() {
+    var activity = service.createActivity(new CreateActivityRequest("Question editing", "Shanghai", Instant.now()));
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Old title",
+        List.of("A", "B"), Set.of("A"), 10, 0, null, 40, true));
+    var updated = service.updateQuestion(activity.id(), question.id(), new QuestionWriteRequest("MULTIPLE", "New title",
+        List.of("A", "B", "C"), Set.of("A", "C"), 20, 3, null, 50, true));
+    assertEquals("New title", updated.title());
+    assertEquals("MULTIPLE", updated.type());
+    assertEquals(List.of("A", "C"), updated.answers());
+    assertEquals(20, updated.fullScore());
+    assertEquals(3, updated.displayOrder());
+  }
 }

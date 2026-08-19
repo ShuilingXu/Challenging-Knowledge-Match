@@ -2,6 +2,7 @@ package com.matrixlive.security.auth;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -20,6 +21,9 @@ public final class AuthModels {
                                          String username, String role, Instant expiresAt) { }
   public record CreateUserRequest(@NotBlank String username, @NotBlank String displayName, @NotBlank String password,
                                   UserRole systemRole) { }
+  /** Account edits keep the current username/display name and optionally replace the password. */
+  public record UpdateUserRequest(@NotBlank String username, @NotBlank String displayName,
+                                  @Size(min = 8, max = 200) String password) { }
   public record UpdateUserStatusRequest(boolean enabled) { }
   public record UserResponse(UUID id, String username, String displayName, String systemRole,
                              boolean enabled, Instant createdAt) { }

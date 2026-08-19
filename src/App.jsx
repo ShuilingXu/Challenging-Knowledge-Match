@@ -21,8 +21,10 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import {
   Activity,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   BadgeCheck,
   Bell,
   Bolt,
@@ -327,6 +329,7 @@ function LoginPage() {
 
 function StaffApp() {
   const { user, signOut } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activities, setActivities] = useState([]);
   const [activityId, setActivityId] = useState(
     localStorage.getItem("matrix.activity-id") || "",
@@ -356,17 +359,34 @@ function StaffApp() {
   useEffect(() => {
     if (activityId) localStorage.setItem("matrix.activity-id", activityId);
   }, [activityId]);
+  useEffect(() => {
+    document.body.classList.toggle("staff-menu-open", sidebarOpen);
+    return () => document.body.classList.remove("staff-menu-open");
+  }, [sidebarOpen]);
   if (loading) return <LoadingPage />;
   if (error)
     return <BackendProblem message={error} onRetry={reloadActivities} />;
   return (
     <div className="staff-shell">
-      <StaffSidebar user={user} onSignOut={signOut} />
+      <button
+        className={`staff-nav-backdrop ${sidebarOpen ? "is-open" : ""}`}
+        type="button"
+        aria-label="关闭导航菜单"
+        aria-hidden={!sidebarOpen}
+        onClick={() => setSidebarOpen(false)}
+      />
+      <StaffSidebar
+        user={user}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onSignOut={signOut}
+      />
       <main className="staff-main">
         <StaffTopbar
           activities={activities}
           activityId={activityId}
           setActivityId={setActivityId}
+          onMenuToggle={() => setSidebarOpen(true)}
         />
         <Routes>
           <Route
@@ -424,16 +444,30 @@ function StaffApp() {
   );
 }
 
-function StaffSidebar({ user, onSignOut }) {
+function StaffSidebar({ user, open, onClose, onSignOut }) {
   const location = useLocation();
   const navigate = useNavigate();
   const active = location.pathname.split("/").pop();
+  const go = (path) => {
+    navigate(path);
+    onClose();
+  };
   return (
-    <aside className="staff-sidebar">
-      <Link to="/app/overview" className="product-logo product-logo--sidebar">
+    <aside className={`staff-sidebar ${open ? "is-open" : ""}`}>
+      <div className="staff-sidebar__header">
+        <Link to="/app/overview" className="product-logo product-logo--sidebar" onClick={onClose}>
         <Mark />
         <span>矩阵现场</span>
-      </Link>
+        </Link>
+        <button
+          className="staff-sidebar__close"
+          type="button"
+          aria-label="关闭导航菜单"
+          onClick={onClose}
+        >
+          <X size={19} />
+        </button>
+      </div>
       <div className="sidebar-context">
         <span>运营工作区</span>
         <strong>{user?.organization || "Matrix Live"}</strong>
@@ -450,7 +484,7 @@ function StaffSidebar({ user, onSignOut }) {
               type="button"
               className={active === item.id ? "is-active" : ""}
               key={item.id}
-              onClick={() => navigate(`/app/${item.id}`)}
+              onClick={() => go(`/app/${item.id}`)}
             >
               <Icon size={18} />
               <span>{item.label}</span>
@@ -460,7 +494,7 @@ function StaffSidebar({ user, onSignOut }) {
         })}
       </nav>
       <div className="sidebar-footer">
-        <button type="button" onClick={() => navigate("/app/settings")}>
+        <button type="button" onClick={() => go("/app/settings")}>
           <CircleHelp size={18} />
           帮助与支持
         </button>
@@ -479,14 +513,30 @@ function StaffSidebar({ user, onSignOut }) {
   );
 }
 
-function StaffTopbar({ activities, activityId, setActivityId }) {
+function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
+  const location = useLocation();
   const current = activities.find((item) => item.id === activityId);
+  const currentPage = navItems.find(
+    (item) => item.id === location.pathname.split("/").pop(),
+  );
   return (
     <header className="staff-topbar">
+      <button
+        className="staff-menu-toggle"
+        type="button"
+        aria-label="打开导航菜单"
+        onClick={onMenuToggle}
+      >
+        <Menu size={19} />
+      </button>
       <div className="crumb">
         <span>活动运营</span>
         <ChevronRight size={14} />
         <strong>{current?.name || "未选择活动"}</strong>
+      </div>
+      <div className="staff-topbar__mobile-title">
+        <strong>{currentPage?.label || "活动总览"}</strong>
+        <span>{current?.name || "未选择活动"}</span>
       </div>
       <div className="topbar-actions">
         <div className="activity-select">
@@ -670,6 +720,8 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     clientThemeColor: "#168F7C",
     clientHeroImageUrl: "",
     clientBackgroundImageUrl: "",
+    parentActivityId: "",
+    activityType: "EVENT",
   });
   const [dialog, setDialog] = useState(null);
   const [form, setForm] = useState(emptyActivity);
@@ -699,6 +751,8 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     clientThemeColor: form.clientThemeColor,
     clientHeroImageUrl: form.clientHeroImageUrl,
     clientBackgroundImageUrl: form.clientBackgroundImageUrl,
+    parentActivityId: form.parentActivityId || null,
+    activityType: form.activityType || "EVENT",
   });
   const submit = async (event) => {
     event.preventDefault();
@@ -767,7 +821,10 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 {activity.endsAt ? ` 至 ${formatDate(activity.endsAt)}` : ""}
               </span>
               <small>
-                {activity.description || "尚未填写活动说明"} · 管理员：
+                {activity.parentActivityId
+                  ? `${activities.find((item) => item.id === activity.parentActivityId)?.name || "父活动"} · `
+                  : "顶层活动 · "}
+                {activityTypeLabel(activity.activityType)} · {activity.description || "尚未填写活动说明"} · 管理员：
                 {"创建者与活动成员"}
               </small>
             </div>
@@ -843,6 +900,48 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 placeholder="例如：上海"
               />
             </label>
+            <div className="form-grid">
+              <label>
+                活动类型
+                <select
+                  value={form.activityType || "EVENT"}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      activityType: event.target.value,
+                      parentActivityId:
+                        event.target.value === "EVENT" ? "" : form.parentActivityId,
+                    })
+                  }
+                >
+                  <option value="EVENT">顶层活动</option>
+                  <option value="QUIZ">答题活动</option>
+                  <option value="LOTTERY">抽奖活动</option>
+                  <option value="OTHER">其他活动</option>
+                </select>
+              </label>
+              {form.activityType && form.activityType !== "EVENT" && (
+                <label>
+                  所属父活动
+                  <select
+                    required
+                    value={form.parentActivityId || ""}
+                    onChange={(event) =>
+                      setForm({ ...form, parentActivityId: event.target.value })
+                    }
+                  >
+                    <option value="">选择父活动</option>
+                    {activities
+                      .filter((item) => !item.parentActivityId)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.city} · {item.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+            </div>
             <div className="form-grid">
               <label>
                 开始时间
@@ -1253,9 +1352,12 @@ function QuestionsPage({ activityId }) {
     enabled: true,
   });
   const [questions, setQuestions] = useState([]);
+  const [questionSets, setQuestionSets] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [dialog, setDialog] = useState(null);
+  const [questionSetDialog, setQuestionSetDialog] = useState(null);
+  const [questionSetForm, setQuestionSetForm] = useState({ name: "", description: "", questionIds: [], active: false });
   const [form, setForm] = useState(emptyQuestion());
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -1263,11 +1365,13 @@ function QuestionsPage({ activityId }) {
   const load = useCallback(async () => {
     if (!activityId) return;
     try {
-      const [questionList, people] = await Promise.all([
+      const [questionList, setList, people] = await Promise.all([
         api.questionsAdmin(activityId),
+        api.questionSets(activityId),
         api.participants(activityId),
       ]);
       setQuestions(questionList);
+      setQuestionSets(setList);
       setParticipants(people);
       const allSubmissions = await Promise.all(
         people.map((person) => api.submissions(activityId, person.id)),
@@ -1299,6 +1403,88 @@ function QuestionsPage({ activityId }) {
       textMatchMode: question.textMatchMode || "MANUAL",
     });
     setDialog(question);
+  };
+  const openSetCreate = () => {
+    setError("");
+    setQuestionSetForm({ name: "", description: "", questionIds: [], active: false });
+    setQuestionSetDialog("create");
+  };
+  const openSetEdit = (set) => {
+    setError("");
+    setQuestionSetForm({
+      name: set.name,
+      description: set.description || "",
+      questionIds: (set.items || []).map((item) => item.questionId),
+      active: Boolean(set.active),
+    });
+    setQuestionSetDialog(set);
+  };
+  const toggleSetQuestion = (questionId) => {
+    setQuestionSetForm((current) => ({
+      ...current,
+      questionIds: current.questionIds.includes(questionId)
+        ? current.questionIds.filter((id) => id !== questionId)
+        : [...current.questionIds, questionId],
+    }));
+  };
+  const moveSetQuestion = (index, direction) => {
+    setQuestionSetForm((current) => {
+      const next = [...current.questionIds];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return current;
+      [next[index], next[target]] = [next[target], next[index]];
+      return { ...current, questionIds: next };
+    });
+  };
+  const saveSet = async (event) => {
+    event.preventDefault();
+    if (!questionSetForm.questionIds.length) {
+      setError("题组至少需要选择一道题目");
+      return;
+    }
+    setBusy("question-set");
+    setError("");
+    try {
+      const payload = {
+        name: questionSetForm.name,
+        description: questionSetForm.description,
+        questionIds: questionSetForm.questionIds,
+        active: Boolean(questionSetForm.active),
+      };
+      if (questionSetDialog === "create") await api.createQuestionSet(activityId, payload);
+      else await api.updateQuestionSet(activityId, questionSetDialog.id, payload);
+      setQuestionSetDialog(null);
+      await load();
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      setBusy("");
+    }
+  };
+  const activateSet = async (set) => {
+    setBusy(`activate-set-${set.id}`);
+    setError("");
+    try {
+      await api.activateQuestionSet(activityId, set.id);
+      await load();
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      setBusy("");
+    }
+  };
+  const deleteSet = async (set) => {
+    if (!window.confirm(`确认删除题目组“${set.name}”吗？`)) return;
+    setBusy(`delete-set-${set.id}`);
+    setError("");
+    try {
+      await api.deleteQuestionSet(activityId, set.id);
+      await load();
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      setBusy("");
+    }
   };
   const updateType = (type) =>
     setForm((current) => ({
@@ -1507,6 +1693,66 @@ function QuestionsPage({ activityId }) {
               icon={CircleHelp}
               title={questions.length ? "没有匹配的题目" : "尚未创建题目"}
               description="新建题目后即可在实时控场中发布。"
+            />
+          )}
+        </div>
+      </section>
+      <section className="data-panel question-set-panel">
+        <div className="data-panel__toolbar">
+          <div>
+            <p className="eyebrow">QUESTION SETS</p>
+            <h2>组卷与下发</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={openSetCreate}>
+            <Plus size={16} />
+            新建题组
+          </button>
+        </div>
+        <div className="question-set-rows">
+          {questionSets.map((set) => (
+            <article className="question-set-row" key={set.id}>
+              <div className="question-set-row__mark">
+                <ClipboardList size={17} />
+              </div>
+              <div>
+                <strong>{set.name}</strong>
+                <small>
+                  {set.items?.length || 0} 道题目{set.description ? ` · ${set.description}` : ""}
+                </small>
+              </div>
+              <span className={set.active ? "online-status" : "offline-status"}>
+                <i />
+                {set.active ? "当前下发" : "未下发"}
+              </span>
+              <button className="toolbar-icon" type="button" title="编辑题组" onClick={() => openSetEdit(set)}>
+                <Pencil size={16} />
+              </button>
+              {!set.active && (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={busy === `activate-set-${set.id}`}
+                  onClick={() => activateSet(set)}
+                >
+                  下发
+                </button>
+              )}
+              <button
+                className="toolbar-icon"
+                type="button"
+                title="删除题组"
+                disabled={busy === `delete-set-${set.id}`}
+                onClick={() => deleteSet(set)}
+              >
+                <X size={16} />
+              </button>
+            </article>
+          ))}
+          {!questionSets.length && (
+            <EmptyState
+              icon={ClipboardList}
+              title="尚未创建题组"
+              description="选择题库中的题目组成答题活动，并通过下发按钮让参与端使用该题组。"
             />
           )}
         </div>
@@ -1751,6 +1997,91 @@ function QuestionsPage({ activityId }) {
               disabled={busy === "question-form"}
             >
               {busy === "question-form" ? "正在保存" : "保存题目"}
+              <Check size={17} />
+            </button>
+          </form>
+        </Dialog>
+      )}
+      {questionSetDialog && (
+        <Dialog
+          title={questionSetDialog === "create" ? "新建题组" : "编辑题组"}
+          onClose={() => setQuestionSetDialog(null)}
+        >
+          <form className="dialog-form" onSubmit={saveSet}>
+            <label>
+              题组名称
+              <input
+                required
+                maxLength="180"
+                value={questionSetForm.name}
+                onChange={(event) => setQuestionSetForm({ ...questionSetForm, name: event.target.value })}
+                placeholder="例如：决赛第一轮"
+              />
+            </label>
+            <label>
+              说明
+              <input
+                maxLength="1000"
+                value={questionSetForm.description}
+                onChange={(event) => setQuestionSetForm({ ...questionSetForm, description: event.target.value })}
+                placeholder="用于现场工作人员识别题组"
+              />
+            </label>
+            <fieldset className="question-set-picker">
+              <legend>题目顺序</legend>
+              <div className="question-set-picker__selected">
+                {questionSetForm.questionIds.map((questionId, index) => {
+                  const question = questions.find((item) => item.id === questionId);
+                  return (
+                    <div key={questionId}>
+                      <span>{String(index + 1).padStart(2, "0")}</span>
+                      <strong>{question?.title || "题目已删除"}</strong>
+                      <button
+                        className="toolbar-icon"
+                        type="button"
+                        title="上移"
+                        disabled={index === 0}
+                        onClick={() => moveSetQuestion(index, -1)}
+                      >
+                        <ArrowUp size={15} />
+                      </button>
+                      <button
+                        className="toolbar-icon"
+                        type="button"
+                        title="下移"
+                        disabled={index === questionSetForm.questionIds.length - 1}
+                        onClick={() => moveSetQuestion(index, 1)}
+                      >
+                        <ArrowDown size={15} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {!questionSetForm.questionIds.length && <small>请从下方选择题目</small>}
+              </div>
+              <div className="question-set-picker__options">
+                {questions.map((question) => (
+                  <label key={question.id}>
+                    <input
+                      type="checkbox"
+                      checked={questionSetForm.questionIds.includes(question.id)}
+                      onChange={() => toggleSetQuestion(question.id)}
+                    />
+                    <span>{question.title}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <label className="toggle-control">
+              <input
+                type="checkbox"
+                checked={Boolean(questionSetForm.active)}
+                onChange={(event) => setQuestionSetForm({ ...questionSetForm, active: event.target.checked })}
+              />
+              保存后立即下发到当前活动
+            </label>
+            <button className="primary-button" disabled={busy === "question-set"}>
+              {busy === "question-set" ? "正在保存" : "保存题组"}
               <Check size={17} />
             </button>
           </form>
@@ -3651,6 +3982,12 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
   const [siteSettings, setSiteSettings] = useState(null);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [accountEditForm, setAccountEditForm] = useState({
+    username: "",
+    displayName: "",
+    password: "",
+  });
   const [configDialog, setConfigDialog] = useState(null);
   const [busy, setBusy] = useState("");
   const [form, setForm] = useState({ userId: "", role: "STAFF" });
@@ -3685,17 +4022,26 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
     clientBackgroundImageUrl: "",
   });
   const isSystemAdmin = user?.role === "SYSTEM_ADMIN";
+  const isActivityAdmin = members.some(
+    (member) => member.userId === user?.id && member.role === "ACTIVITY_ADMIN",
+  );
+  const canManageUsers = isSystemAdmin || isActivityAdmin;
   const load = useCallback(async () => {
     if (!activityId) return;
     try {
-      const [memberList, venueList, fieldList, accountList, nextSiteSettings] =
-        await Promise.all([
-          api.memberships(activityId),
-          api.venues(activityId),
-          api.registrationFields(activityId),
-          isSystemAdmin ? api.users() : Promise.resolve([]),
-          isSystemAdmin ? api.adminSiteSettings() : Promise.resolve(null),
-        ]);
+      const [memberList, venueList, fieldList, nextSiteSettings] = await Promise.all([
+        api.memberships(activityId),
+        api.venues(activityId),
+        api.registrationFields(activityId),
+        isSystemAdmin ? api.adminSiteSettings() : Promise.resolve(null),
+      ]);
+      const accountList = isSystemAdmin
+        ? await api.users()
+        : memberList.some(
+              (member) => member.userId === user?.id && member.role === "ACTIVITY_ADMIN",
+            )
+          ? await api.membershipUsers(activityId)
+          : [];
       setMembers(memberList);
       setVenues(venueList);
       setRegistrationFields(fieldList);
@@ -3723,7 +4069,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
     } catch (cause) {
       setError(cause.message);
     }
-  }, [activityId, isSystemAdmin]);
+  }, [activityId, isSystemAdmin, user?.id]);
   useEffect(() => {
     load();
   }, [load]);
@@ -3754,15 +4100,24 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
   const createUser = async (event) => {
     event.preventDefault();
     try {
+      let created;
       if (account.systemRole === "SYSTEM_ADMIN") {
-        await api.createUser(account);
+        created = await api.createUser({ ...account, systemRole: "SYSTEM_ADMIN" });
       } else {
-        await api.createMembershipUser(activityId, {
-          username: account.username,
-          displayName: account.displayName,
-          password: account.password,
-          role: account.systemRole,
-        });
+        if (isSystemAdmin) {
+          created = await api.createUser({ ...account, systemRole: null });
+          await api.upsertMembership(activityId, {
+            userId: created.id,
+            role: account.systemRole,
+          });
+        } else {
+          await api.createMembershipUser(activityId, {
+            username: account.username,
+            displayName: account.displayName,
+            password: account.password,
+            role: account.systemRole,
+          });
+        }
       }
       setCreating(false);
       setAccount({
@@ -3774,6 +4129,38 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
       await load();
     } catch (cause) {
       setError(cause.message);
+    }
+  };
+  const openAccountEdit = (item) => {
+    setError("");
+    setEditingAccount(item);
+    setAccountEditForm({
+      username: item.username || "",
+      displayName: item.displayName || "",
+      password: "",
+    });
+  };
+  const updateAccount = async (event) => {
+    event.preventDefault();
+    setBusy("account");
+    setError("");
+    try {
+      const payload = {
+        username: accountEditForm.username,
+        displayName: accountEditForm.displayName,
+        password: accountEditForm.password || null,
+      };
+      if (isSystemAdmin) {
+        await api.updateUser(editingAccount.id, payload);
+      } else {
+        await api.updateMembershipUser(activityId, editingAccount.id, payload);
+      }
+      setEditingAccount(null);
+      await load();
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      setBusy("");
     }
   };
   const openVenue = (venue) => {
@@ -3926,14 +4313,14 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
         title="站点与权限"
         description="维护当前活动的登记会场、报名字段和工作人员访问权限。"
         action={
-          isSystemAdmin ? (
-            <button
-              className="primary-button"
-              onClick={() => setCreating(true)}
-            >
-              <Plus size={17} />
-              新建管理员
-            </button>
+            canManageUsers ? (
+              <button
+                className="primary-button"
+                onClick={() => setCreating(true)}
+              >
+                <Plus size={17} />
+                新增用户
+              </button>
           ) : null
         }
       />
@@ -4417,8 +4804,56 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
           )}
         </div>
       </section>
+      {canManageUsers && (
+        <section className="access-workspace">
+          <div className="workspace-heading">
+            <div>
+              <p className="eyebrow">ACCOUNT DIRECTORY</p>
+              <h2>用户账户</h2>
+            </div>
+            <span className="settings-caption">可编辑登录名、显示名称和密码</span>
+          </div>
+          <div className="access-members account-directory">
+            {users.filter((item) => isSystemAdmin || members.some((member) => member.userId === item.id)).map((item) => {
+              const member = members.find((entry) => entry.userId === item.id);
+              const role = item.systemRole || member?.role || "STAFF";
+              return (
+                <article key={item.id}>
+                  <Avatar name={item.displayName} />
+                  <div>
+                    <strong>{item.displayName}</strong>
+                    <span>
+                      {item.username} · {roleLabel(role)}
+                      {!item.enabled && " · 已停用"}
+                    </span>
+                  </div>
+                  <button
+                    className="toolbar-icon"
+                    type="button"
+                    title="编辑账户"
+                    aria-label={`编辑账户 ${item.displayName}`}
+                    onClick={() => openAccountEdit(item)}
+                  >
+                    <Pencil size={16} />
+                  </button>
+                </article>
+              );
+            })}
+            {!users.length && (
+              <EmptyState
+                icon={Users}
+                title="暂无可管理账户"
+                description="创建账户后，可在此维护登录凭据与显示名称。"
+              />
+            )}
+          </div>
+        </section>
+      )}
       {creating && (
-        <Dialog title="创建账户" onClose={() => setCreating(false)}>
+        <Dialog
+          title={isSystemAdmin ? "创建账户" : "新增活动成员"}
+          onClose={() => setCreating(false)}
+        >
           <form className="dialog-form" onSubmit={createUser}>
             <label>
               登录名
@@ -4453,20 +4888,70 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
               />
             </label>
             <label>
-              系统角色
+              {isSystemAdmin ? "系统角色" : "活动角色"}
               <select
                 value={account.systemRole}
                 onChange={(event) =>
                   setAccount({ ...account, systemRole: event.target.value })
                 }
               >
-                <option value="SYSTEM_ADMIN">系统管理员</option>
+                {isSystemAdmin && <option value="SYSTEM_ADMIN">系统管理员</option>}
                 <option value="ACTIVITY_ADMIN">活动管理员</option>
                 <option value="STAFF">活动工作人员</option>
               </select>
             </label>
             <button className="primary-button">
               创建账户
+              <Check size={17} />
+            </button>
+          </form>
+        </Dialog>
+      )}
+      {editingAccount && (
+        <Dialog title="编辑用户账户" onClose={() => setEditingAccount(null)}>
+          <form className="dialog-form" onSubmit={updateAccount}>
+            <label>
+              登录名
+              <input
+                required
+                value={accountEditForm.username}
+                onChange={(event) =>
+                  setAccountEditForm({
+                    ...accountEditForm,
+                    username: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label>
+              显示名称
+              <input
+                required
+                value={accountEditForm.displayName}
+                onChange={(event) =>
+                  setAccountEditForm({
+                    ...accountEditForm,
+                    displayName: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label>
+              新密码（留空则保持不变）
+              <input
+                type="password"
+                minLength="8"
+                value={accountEditForm.password}
+                onChange={(event) =>
+                  setAccountEditForm({
+                    ...accountEditForm,
+                    password: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <button className="primary-button" disabled={busy === "account"}>
+              {busy === "account" ? "正在保存" : "保存账户"}
               <Check size={17} />
             </button>
           </form>
@@ -6144,6 +6629,16 @@ function roleLabel(role) {
     }[role] ||
     role ||
     "工作人员"
+  );
+}
+function activityTypeLabel(type) {
+  return (
+    {
+      EVENT: "顶层活动",
+      QUIZ: "答题活动",
+      LOTTERY: "抽奖活动",
+      OTHER: "其他活动",
+    }[type] || "活动"
   );
 }
 function stageLabel(stage) {

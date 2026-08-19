@@ -139,6 +139,35 @@ public class ActivityController {
     return service.listQuestionControl(activityId);
   }
 
+  @GetMapping("/{activityId}/question-sets")
+  public List<QuestionSetResponse> questionSets(@PathVariable UUID activityId) {
+    return service.listQuestionSets(activityId);
+  }
+
+  @PostMapping("/{activityId}/question-sets")
+  @ResponseStatus(HttpStatus.CREATED)
+  public QuestionSetResponse createQuestionSet(@PathVariable UUID activityId,
+      @Valid @RequestBody QuestionSetRequest request) {
+    return service.createQuestionSet(activityId, request);
+  }
+
+  @PutMapping("/{activityId}/question-sets/{questionSetId}")
+  public QuestionSetResponse updateQuestionSet(@PathVariable UUID activityId, @PathVariable UUID questionSetId,
+      @Valid @RequestBody QuestionSetRequest request) {
+    return service.updateQuestionSet(activityId, questionSetId, request);
+  }
+
+  @PostMapping("/{activityId}/question-sets/{questionSetId}/activate")
+  public QuestionSetResponse activateQuestionSet(@PathVariable UUID activityId, @PathVariable UUID questionSetId) {
+    return service.activateQuestionSet(activityId, questionSetId);
+  }
+
+  @DeleteMapping("/{activityId}/question-sets/{questionSetId}")
+  public ResponseEntity<Void> deleteQuestionSet(@PathVariable UUID activityId, @PathVariable UUID questionSetId) {
+    service.deleteQuestionSet(activityId, questionSetId);
+    return ResponseEntity.noContent().build();
+  }
+
   @PostMapping("/{activityId}/questions")
   @ResponseStatus(HttpStatus.CREATED)
   public QuestionAdminResponse createQuestion(@PathVariable UUID activityId,

@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -25,6 +26,11 @@ public class ActivityMembershipController {
   @GetMapping
   public List<MembershipResponse> list(@PathVariable UUID activityId) { return identity.listMemberships(activityId); }
 
+  @GetMapping("/users")
+  public List<UserResponse> listUsers(@PathVariable UUID activityId) {
+    return identity.listActivityUsers(activityId);
+  }
+
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)
   public MembershipResponse upsert(@PathVariable UUID activityId, @Valid @RequestBody MembershipRequest request) {
@@ -36,6 +42,12 @@ public class ActivityMembershipController {
   public MembershipResponse createUser(@PathVariable UUID activityId,
       @Valid @RequestBody CreateActivityMemberRequest request) {
     return identity.createActivityMember(activityId, request);
+  }
+
+  @PatchMapping("/users/{userId}")
+  public UserResponse updateUser(@PathVariable UUID activityId, @PathVariable UUID userId,
+      @Valid @RequestBody UpdateUserRequest request) {
+    return identity.updateActivityUser(activityId, userId, request);
   }
 
   @DeleteMapping("/{userId}")

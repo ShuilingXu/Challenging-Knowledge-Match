@@ -29,6 +29,11 @@ public class UserAdminController {
   @ResponseStatus(HttpStatus.CREATED)
   public UserResponse create(@Valid @RequestBody CreateUserRequest request) { return identity.createUser(request); }
 
+  @PatchMapping("/{userId}")
+  public UserResponse update(@PathVariable UUID userId, @Valid @RequestBody UpdateUserRequest request) {
+    return identity.updateUser(userId, request);
+  }
+
   @PatchMapping("/{userId}/enabled")
   public UserResponse setEnabled(@PathVariable UUID userId, @Valid @RequestBody UpdateUserStatusRequest request) {
     return identity.setEnabled(userId, request.enabled());

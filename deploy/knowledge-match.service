@@ -1,0 +1,22 @@
+[Unit]
+Description=Knowledge Match API
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=knowledge-match
+Group=knowledge-match
+WorkingDirectory=/opt/challenging-knowledge-match
+ExecStart=/opt/challenging-knowledge-match/deploy/run-api.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

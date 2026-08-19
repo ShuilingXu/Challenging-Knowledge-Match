@@ -1,0 +1,55 @@
+name: knowledge-match
+
+services:
+  storage-init:
+    image: minio/mc:latest
+    restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      S3_BUCKET: ${S3_BUCKET:-matrixlive-media}
+    entrypoint: >
+      /bin/sh -c "until mc alias set rustfs http://host.docker.internal:9000
+      \"$$S3_ACCESS_KEY\" \"$$S3_SECRET_KEY\"; do sleep 2; done;
+      mc mb --ignore-existing rustfs/$$S3_BUCKET; exit 0;"
+
+  api:
+    profiles: ["container-app"]
+    build:
+      context: ../server
+    restart: unless-stopped
+    extra_hosts:
+      - "${S3_DOMAIN:?S3_DOMAIN is required}:host-gateway"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://host.docker.internal:5432/${POSTGRES_DB:-knowledge_match}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-match}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@host.docker.internal:6379
+      REALTIME_REDIS_ENABLED: "true"
+      MANAGEMENT_HEALTH_REDIS_ENABLED: "true"
+      S3_ENABLED: "true"
+      S3_ENDPOINT: https://${S3_DOMAIN:?S3_DOMAIN is required}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      S3_BUCKET: ${S3_BUCKET:-matrixlive-media}
+      S3_ADDRESSING_STYLE: PATH
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-knowledge-match}
+      JWT_REFRESH_COOKIE_SECURE: "true"
+      APP_BOOTSTRAP_PASSWORD: ${APP_BOOTSTRAP_PASSWORD:?APP_BOOTSTRAP_PASSWORD is required}
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+
+  web:
+    profiles: ["container-app"]
+    build:
+      context: ..
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${APP_PORT:-4173}:80"
+    depends_on:
+      - api

@@ -49,7 +49,7 @@ public class SecurityConfiguration {
             .requestMatchers("/api/admin/**").hasRole("SYSTEM_ADMIN")
             .requestMatchers("/api/activities/**").access(activityAuthorizationManager)
             // STOMP CONNECT is authenticated by StompJwtChannelInterceptor; browser handshakes cannot set Bearer headers.
-            .requestMatchers("/ws/**").permitAll()
+            .requestMatchers("/ws", "/ws/**").permitAll()
             .anyRequest().authenticated())
         .exceptionHandling(exceptions -> exceptions
             .authenticationEntryPoint((request, response, exception) -> writeError(response, 401, "Authentication is required"))

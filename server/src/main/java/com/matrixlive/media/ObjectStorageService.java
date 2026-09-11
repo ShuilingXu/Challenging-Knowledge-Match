@@ -49,7 +49,7 @@ public class ObjectStorageService {
       ensureBucket(storage, target.bucket());
       storage.putObject(PutObjectArgs.builder().bucket(target.bucket()).object(objectKey).stream(stream, file.getSize(), -1)
           .contentType(contentType).build());
-      return new StoredObject(objectKey, publicUrl(storage, target, objectKey), contentType, file.getSize());
+      return new StoredObject(objectKey, "/api/activities/" + activityId + "/media/" + objectKey.substring(37), contentType, file.getSize());
     } catch (DomainException exception) {
       throw exception;
     } catch (Exception exception) {
@@ -62,6 +62,16 @@ public class ObjectStorageService {
     String region = blank(settings.region()) ? "us-east-1" : settings.region().trim();
     return new StorageTarget(settings.enabled(), endpoint(settings.endpoint(), region), region, settings.bucket(), settings.accessKey(),
         settings.secretKey(), settings.sessionToken(), settings.publicBaseUrl(), normalizeAddressingStyle(settings.addressingStyle()));
+  }
+
+  public String accessUrl(UUID activityId, String category, String fileName) throws Exception {
+    if (!category.matches("[a-z0-9_-][a-z0-9._-]{0,119}")
+        || !fileName.matches("[0-9a-f-]{36}-[a-z0-9._-]+")) {
+      throw new DomainException(HttpStatus.BAD_REQUEST, "Invalid media path");
+    }
+    StorageTarget target = target();
+    validateTarget(target);
+    return publicUrl(client(target), target, activityId + "/" + category + "/" + fileName);
   }
 
   private MinioClient client(StorageTarget target) {

@@ -128,7 +128,8 @@ public class ScreenService {
     ensurePresetTemplates(activityId);
     String rawToken = generateToken();
     ScreenDevice device = new ScreenDevice(activityId, clean(request.name()), hashToken(rawToken), request.viewportWidth(), request.viewportHeight());
-    ScreenTemplate initialTemplate = templates.findByActivityIdOrderByUpdatedAtDesc(activityId).stream()
+    ScreenTemplate initialTemplate = request.templateId() != null ? requireTemplate(activityId, request.templateId())
+        : templates.findByActivityIdOrderByUpdatedAtDesc(activityId).stream()
         .filter(template -> "信息登记引导".equals(template.getName()))
         .findFirst()
         .orElse(null);
@@ -181,6 +182,16 @@ public class ScreenService {
   }
 
   @Transactional
+  public void deleteDevice(UUID activityId, UUID deviceId) {
+    requireActivity(activityId);
+    ScreenDevice device = requireDevice(activityId, deviceId);
+    devices.delete(device);
+    Map<String, Object> payload = Map.of("deviceId", deviceId);
+    broadcastDevice(activityId, device, "screen.device.deleted", payload);
+    broadcastActivity(activityId, "screen.device.deleted", payload);
+  }
+
+  @Transactional
   public List<ScreenDisplayResponse> applyTemplate(UUID activityId, UUID templateId, ApplyScreenTemplateRequest request) {
     requireActivity(activityId);
     ScreenTemplate template = requireTemplate(activityId, templateId);
@@ -223,6 +234,20 @@ public class ScreenService {
           "mode", mode.name(), "deviceIds", responses.stream().map(ScreenDisplayResponse::deviceId).toList()));
     }
     return responses;
+  }
+
+  @Transactional
+  public void refreshQuestionSubmissionCount(UUID activityId, UUID questionId, long submittedCount) {
+    requireActivity(activityId);
+    for (ScreenDevice device : devices.findByActivityIdOrderByLastSeenAtDesc(activityId)) {
+      ScreenDisplayMode mode = ScreenDisplayMode.valueOf(device.getDisplayMode());
+      if (mode != ScreenDisplayMode.QUESTION && mode != ScreenDisplayMode.RESULT) continue;
+      Map<String, Object> data = readMap(device.getDisplayPayloadJson());
+      if (!questionId.toString().equals(data.get("questionId"))) continue;
+      data.put("submittedCount", submittedCount);
+      device.updateDisplayPayload(writeJson(data));
+      broadcastDevice(activityId, device, "screen.submissions.updated", toDisplay(device));
+    }
   }
 
   @Transactional

@@ -42,6 +42,8 @@ public class AnswerSubmission {
 
   private Instant submittedAt;
   private Instant gradedAt;
+  private Long elapsedSeconds;
+  private int responseRank;
 
   @Version
   private long version;
@@ -79,6 +81,13 @@ public class AnswerSubmission {
   public Instant getSubmittedAt() { return submittedAt; }
   public Instant getGradedAt() { return gradedAt; }
   public long getVersion() { return version; }
+  public Long getElapsedSeconds() { return elapsedSeconds; }
+  public int getResponseRank() { return responseRank; }
+
+  public void recordTiming(Instant openedAt, int rank) {
+    elapsedSeconds = java.time.Duration.between(openedAt, submittedAt).getSeconds();
+    responseRank = rank;
+  }
 
   public void grade(int awardedPoints, String feedback) {
     this.awardedPoints = awardedPoints;

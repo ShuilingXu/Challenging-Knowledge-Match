@@ -27,7 +27,12 @@ public final class ScreenModels {
   public record RegisterScreenDeviceRequest(
       @NotBlank @Size(max = 120) String name,
       @Min(1) @Max(20000) Integer viewportWidth,
-      @Min(1) @Max(20000) Integer viewportHeight) { }
+      @Min(1) @Max(20000) Integer viewportHeight,
+      UUID templateId) {
+    public RegisterScreenDeviceRequest(String name, Integer viewportWidth, Integer viewportHeight) {
+      this(name, viewportWidth, viewportHeight, null);
+    }
+  }
 
   public record RenameScreenDeviceRequest(@NotBlank @Size(max = 120) String name) { }
 

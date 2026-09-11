@@ -39,9 +39,10 @@ class ScreenServiceIntegrationTest {
     assertNotEquals(null, template.id());
 
     ScreenDeviceRegistration registration = screens.registerDevice(activity.getId(),
-        new RegisterScreenDeviceRequest("South Hall", 1920, 1080));
+        new RegisterScreenDeviceRequest("South Hall", 1920, 1080, template.id()));
     assertTrue(registration.pairingToken().length() > 30);
     assertEquals(ScreenDisplayMode.TEMPLATE, registration.device().displayMode());
+    assertEquals(template.id(), registration.device().currentTemplateId());
 
     ScreenDisplayResponse applied = screens.applyTemplate(activity.getId(), template.id(),
         new ApplyScreenTemplateRequest(List.of(registration.device().id()), Map.of("headline", "Doors are open"))).getFirst();

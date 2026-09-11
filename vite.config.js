@@ -6,11 +6,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://127.0.0.1:8080',
+        target: (process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080').replace(/^http/, 'ws'),
         ws: true,
       },
     },

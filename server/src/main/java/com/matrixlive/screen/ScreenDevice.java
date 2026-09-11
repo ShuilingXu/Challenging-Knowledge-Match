@@ -96,6 +96,11 @@ public class ScreenDevice {
     touch();
   }
 
+  public void updateDisplayPayload(String displayPayloadJson) {
+    this.displayPayloadJson = displayPayloadJson;
+    touch();
+  }
+
   public void updateSettings(Integer fontScale, Integer volume, Integer scrollPosition, Boolean autoScroll) {
     if (fontScale != null) this.fontScale = fontScale;
     if (volume != null) this.volume = volume;
@@ -132,7 +137,9 @@ public class ScreenDevice {
   public int getVolume() { return volume; }
   public int getScrollPosition() { return scrollPosition; }
   public boolean isAutoScroll() { return autoScroll; }
-  public String getStatus() { return status; }
+  public String getStatus() {
+    return "ONLINE".equals(status) && lastSeenAt.isBefore(Instant.now().minusSeconds(90)) ? "OFFLINE" : status;
+  }
   public Instant getLastSeenAt() { return lastSeenAt; }
   public Instant getCreatedAt() { return createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }

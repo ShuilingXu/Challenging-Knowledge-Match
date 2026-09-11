@@ -296,6 +296,11 @@ public class ActivityController {
     return service.redeem(activityId, awardId, request == null ? "system" : request.operator());
   }
 
+  @PostMapping("/{activityId}/awards/redeem-batch")
+  public List<AwardResponse> redeemBatch(@PathVariable UUID activityId, @Valid @RequestBody BatchRedeemRequest request) {
+    return service.redeemBatch(activityId, request);
+  }
+
   @PostMapping("/{activityId}/awards/{awardId}/reverse-redemption")
   public AwardDetailResponse reverseRedemption(@PathVariable UUID activityId, @PathVariable UUID awardId) {
     return service.reverseRedemption(activityId, awardId);

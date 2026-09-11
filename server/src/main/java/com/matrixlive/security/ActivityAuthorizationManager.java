@@ -2,6 +2,7 @@ package com.matrixlive.security;
 
 import com.matrixlive.security.auth.ActivityMembershipRepository;
 import com.matrixlive.security.auth.UserRole;
+import com.matrixlive.repository.ActivityRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -18,8 +19,12 @@ import org.springframework.stereotype.Component;
 public class ActivityAuthorizationManager implements AuthorizationManager<RequestAuthorizationContext> {
   private static final Pattern ACTIVITY_PATH = Pattern.compile("^/api/activities/([0-9a-fA-F-]{36})(?:/(.*))?$");
   private final ActivityMembershipRepository memberships;
+  private final ActivityRepository activities;
 
-  public ActivityAuthorizationManager(ActivityMembershipRepository memberships) { this.memberships = memberships; }
+  public ActivityAuthorizationManager(ActivityMembershipRepository memberships, ActivityRepository activities) {
+    this.memberships = memberships;
+    this.activities = activities;
+  }
 
   @Override
   public AuthorizationDecision check(Supplier<Authentication> authentication, RequestAuthorizationContext context) {
@@ -43,6 +48,12 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
     if (principal.userId() == null) return new AuthorizationDecision(false);
     UserRole membershipRole = memberships.findByUserIdAndActivityId(principal.userId(), activityId)
         .map(item -> item.getRole()).orElse(null);
+    UUID parentId = activities.findById(activityId).map(item -> item.getParentActivityId()).orElse(null);
+    if (parentId != null) {
+      UserRole inherited = memberships.findByUserIdAndActivityId(principal.userId(), parentId)
+          .map(item -> item.getRole()).orElse(null);
+      if (membershipRole == null || inherited == UserRole.ACTIVITY_ADMIN) membershipRole = inherited;
+    }
     if (membershipRole == null) return new AuthorizationDecision(false);
     if (membershipRole == UserRole.ACTIVITY_ADMIN) return new AuthorizationDecision(true);
     return new AuthorizationDecision(allowsStaff(request, remainder));
@@ -50,9 +61,12 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
 
   private boolean allowsParticipant(HttpServletRequest request, String remainder, UUID activityId,
       AuthenticatedPrincipal principal) {
-    if (!activityId.equals(principal.activityId())) return false;
+    if (!activityId.equals(principal.activityId()) && !activities.findById(activityId)
+        .filter(item -> "LOTTERY".equals(item.getActivityType()) && principal.activityId().equals(item.getParentActivityId()))
+        .isPresent()) return false;
     String method = request.getMethod();
-    if ("questions".equals(remainder) || "scoreboard".equals(remainder) || "control".equals(remainder)) {
+    if ("questions".equals(remainder) || "scoreboard".equals(remainder) || "control".equals(remainder)
+        || "prize-pools".equals(remainder)) {
       return "GET".equals(method);
     }
     if ("answers".equals(remainder) || "draws".equals(remainder)) return "POST".equals(method);
@@ -88,6 +102,10 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
           && !remainder.startsWith("question-sets");
     }
     if ("control".equals(remainder)) return "POST".equals(method);
+    if ("scores/adjustments".equals(remainder)) return "POST".equals(method);
+    if ("awards/redeem-batch".equals(remainder)) return "POST".equals(method);
+    if (remainder.matches("submissions/[0-9a-fA-F-]{36}/grade")) return "POST".equals(method);
+    if (remainder.matches("prize-pools/[0-9a-fA-F-]{36}/ranking-awards")) return "POST".equals(method);
     if (remainder.matches("awards/[0-9a-fA-F-]{36}/redeem")) return "POST".equals(method);
     // Floor staff may correct participant details, but cannot change registration schema or event configuration.
     return "PATCH".equals(method) && remainder.matches("participants/[0-9a-fA-F-]{36}");

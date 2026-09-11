@@ -1,6 +1,7 @@
 package com.matrixlive.security;
 
 import com.matrixlive.security.JwtTokenService.TokenClaims;
+import com.matrixlive.screen.ScreenDeviceRepository;
 import com.matrixlive.security.auth.UserAccount;
 import com.matrixlive.security.auth.UserAccountRepository;
 import com.matrixlive.security.auth.UserRole;
@@ -23,11 +24,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private final JwtTokenService tokens;
   private final TokenRevocationService revocations;
   private final UserAccountRepository users;
+  private final ScreenDeviceRepository devices;
 
-  public JwtAuthenticationFilter(JwtTokenService tokens, TokenRevocationService revocations, UserAccountRepository users) {
+  public JwtAuthenticationFilter(JwtTokenService tokens, TokenRevocationService revocations, UserAccountRepository users,
+      ScreenDeviceRepository devices) {
     this.tokens = tokens;
     this.revocations = revocations;
     this.users = users;
+    this.devices = devices;
   }
 
   @Override
@@ -46,6 +50,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       }
       if (claims.kind() == PrincipalKind.ACCOUNT && !isEnabledAccount(claims)) {
         unauthorized(response, "Account is unavailable");
+        return;
+      }
+      if (claims.kind() == PrincipalKind.SCREEN_DEVICE && (claims.deviceId() == null || claims.activityId() == null
+          || devices.findByIdAndActivityId(claims.deviceId(), claims.activityId()).isEmpty())) {
+        unauthorized(response, "Screen device is unavailable");
         return;
       }
       AuthenticatedPrincipal principal = new AuthenticatedPrincipal(claims.tokenId(), claims.kind(), claims.userId(),

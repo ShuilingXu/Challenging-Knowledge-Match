@@ -19,6 +19,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
+import { activityActions, activityStatusLabels, availableActivities, activityEntry, participantActivityId, participantMatches } from "./activity-flow";
 import {
   Activity,
   ArrowDown,
@@ -116,6 +117,7 @@ function App() {
             }
           />
           <Route path="/join/demo" element={<ParticipantEntryRedirect />} />
+          <Route path="/join" element={<ParticipantEntryRedirect />} />
           <Route path="/join/:activityId" element={<ParticipantPortal />} />
           <Route
             path="/lottery/:activityId"
@@ -180,29 +182,31 @@ function RequireStaff({ children }) {
 }
 
 function ParticipantEntryRedirect() {
-  const navigate = useNavigate();
+  const [activities, setActivities] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let mounted = true;
     api.activities()
-      .then((activities) => {
-        const target =
-          activities.find((activity) => activity.status === "LIVE") ||
-          activities[0];
-        if (mounted && target?.id) navigate(`/join/${target.id}`, { replace: true });
-        else if (mounted) setError("当前没有可参加的活动");
-      })
+      .then((items) => mounted && setActivities(availableActivities(items)))
       .catch((cause) => mounted && setError(cause.message));
     return () => {
       mounted = false;
     };
-  }, [navigate]);
+  }, []);
 
   if (error) {
     return <BackendProblem message={error} onRetry={() => window.location.reload()} />;
   }
-  return <LoadingPage label="正在查找进行中的活动" />;
+  if (!activities) return <LoadingPage label="正在查找进行中的活动" />;
+  return <main className="activity-entry-page">
+    <h1>选择活动</h1>
+    {activities.filter((item) => !item.parentActivityId).map((activity) => <section className="activity-entry-group" key={activity.id}>
+      <Link to={activityEntry(activity)}><CalendarDays size={22} /><div><strong>{activity.name}</strong><span>{activity.city} · {activityStatusLabels[activity.status]}</span></div><ChevronRight size={20} /></Link>
+      {activities.filter((item) => item.parentActivityId === activity.id).map((child) => <Link className="activity-entry-child" to={activityEntry(child)} key={child.id}><Gift size={19} /><div><strong>{child.name}</strong><span>{activityTypeLabel(child.activityType)} · {activityStatusLabels[child.status]}</span></div><ChevronRight size={20} /></Link>)}
+    </section>)}
+    {!activities.length && <EmptyState icon={CalendarDays} title="暂无开放活动" />}
+  </main>;
 }
 
 function LoadingPage({ label = "正在加载活动数据" }) {
@@ -256,17 +260,17 @@ function LoginPage() {
           <p>把登记、竞赛、抽奖和大屏控制汇聚到一套有秩序的实时系统。</p>
         </div>
         <div className="story-tile story-tile--signal">
-          <span>在线终端</span>
-          <strong>3,827</strong>
+          <span>多端连接</span>
+          <strong>协同互动</strong>
           <i>
             <Activity size={18} />
           </i>
         </div>
         <div className="story-tile story-tile--event">
           <span>
-            <i /> 活动正在进行
+            <i /> 活动体验
           </span>
-          <strong>信号跃迁 · 上海</strong>
+          <strong>登记 · 答题 · 领奖</strong>
         </div>
         <p className="login-copyright">Matrix Live · Secure workspace</p>
       </section>
@@ -340,7 +344,7 @@ function StaffApp() {
     setLoading(true);
     setError("");
     try {
-      const list = await api.activities();
+      const list = (await api.activities()).filter((item) => item.viewerRole);
       setActivities(list);
       setActivityId((current) =>
         current && list.some((item) => item.id === current)
@@ -366,6 +370,11 @@ function StaffApp() {
   if (loading) return <LoadingPage />;
   if (error)
     return <BackendProblem message={error} onRetry={reloadActivities} />;
+  const canManage = user?.role === "SYSTEM_ADMIN" || ["SYSTEM_ADMIN", "ACTIVITY_ADMIN"].includes(
+    activities.find((item) => item.id === activityId)?.viewerRole,
+  );
+  const currentActivity = activities.find((item) => item.id === activityId);
+  const lotteryActivity = currentActivity?.activityType === "LOTTERY";
   return (
     <div className="staff-shell">
       <button
@@ -376,6 +385,7 @@ function StaffApp() {
         onClick={() => setSidebarOpen(false)}
       />
       <StaffSidebar
+        canManage={canManage}
         user={user}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -408,11 +418,11 @@ function StaffApp() {
           />
           <Route
             path="control"
-            element={<ControlPage activityId={activityId} />}
+            element={lotteryActivity ? <RewardsPage key={activityId} activityId={activityId} canManage={canManage} /> : <ControlPage key={activityId} activityId={activityId} activity={currentActivity} reloadActivities={reloadActivities} canManage={canManage} />}
           />
           <Route
             path="questions"
-            element={<QuestionsPage activityId={activityId} />}
+            element={lotteryActivity ? <Navigate to="/app/rewards" replace /> : <QuestionsPage key={activityId} activityId={activityId} canManage={canManage} />}
           />
           <Route
             path="participants"
@@ -420,21 +430,21 @@ function StaffApp() {
           />
           <Route
             path="rewards"
-            element={<RewardsPage activityId={activityId} />}
+            element={<RewardsPage activityId={activityId} canManage={canManage} />}
           />
           <Route
             path="screens"
-            element={<ScreensPage activityId={activityId} />}
+            element={canManage ? <ScreensPage activityId={activityId} /> : <Navigate to="overview" replace />}
           />
           <Route
             path="settings"
             element={
-              <SettingsPage
+              canManage ? <SettingsPage
                 user={user}
                 activityId={activityId}
                 activity={activities.find((item) => item.id === activityId)}
                 reloadActivities={reloadActivities}
-              />
+              /> : <Navigate to="overview" replace />
             }
           />
           <Route path="*" element={<Navigate to="overview" replace />} />
@@ -444,7 +454,7 @@ function StaffApp() {
   );
 }
 
-function StaffSidebar({ user, open, onClose, onSignOut }) {
+function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
   const location = useLocation();
   const navigate = useNavigate();
   const active = location.pathname.split("/").pop();
@@ -477,7 +487,7 @@ function StaffSidebar({ user, open, onClose, onSignOut }) {
         </small>
       </div>
       <nav>
-        {navItems.map((item) => {
+        {navItems.filter((item) => canManage || !["activities", "screens", "settings"].includes(item.id)).map((item) => {
           const Icon = item.icon;
           return (
             <button
@@ -579,20 +589,23 @@ function PageHeader({ eyebrow, title, description, action }) {
 
 function OverviewPage({ activityId, activities }) {
   const [participants, setParticipants] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [scores, setScores] = useState([]);
   const [control, setControl] = useState(null);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     if (!activityId) return;
     try {
-      const [people, board, state] = await Promise.all([
+      const [people, board, state, screens] = await Promise.all([
         api.participants(activityId),
         api.scoreboard(activityId),
         api.controlState(activityId),
+        api.devices(activityId),
       ]);
       setParticipants(people);
       setScores(board);
       setControl(state);
+      setDevices(screens);
     } catch (cause) {
       setError(cause.message);
     }
@@ -600,7 +613,8 @@ function OverviewPage({ activityId, activities }) {
   useEffect(() => {
     load();
   }, [load]);
-  useActivityStream(activityId, load);
+  useActivityStream(activityId, load, undefined, setError);
+  const remaining = useLiveCountdown(control);
   const activity = activities.find((item) => item.id === activityId);
   return (
     <div className="page-content">
@@ -629,7 +643,7 @@ function OverviewPage({ activityId, activities }) {
           label="当前阶段"
           value={stageLabel(control?.stage || "LOBBY")}
           sub={
-            control?.seconds ? `剩余 ${control.seconds} 秒` : "等待工作人员开场"
+            control?.stage === "QUESTION_OPEN" ? `剩余 ${remaining} 秒` : "等待工作人员开场"
           }
           tone="violet"
         />
@@ -643,7 +657,7 @@ function OverviewPage({ activityId, activities }) {
         <Metric
           icon={Monitor}
           label="已连接大屏"
-          value="--"
+          value={devices.filter((device) => device.status === "ONLINE").length}
           sub="由设备服务实时上报"
           tone="rose"
         />
@@ -790,6 +804,12 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
       setBusy("");
     }
   };
+  const changeStatus = async (activity, status) => {
+    setBusy(`status-${activity.id}`); setError("");
+    try { await api.changeActivityStatus(activity.id, status); await reload(); }
+    catch (cause) { setError(cause.message); }
+    finally { setBusy(""); }
+  };
   return (
     <div className="page-content">
       <PageHeader
@@ -805,10 +825,10 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
       />
       <InlineError text={error} onRetry={reload} />
       <section className="activity-list">
-        {activities.map((activity) => (
+        {activities.filter((item) => !item.parentActivityId).flatMap((parent) => [parent, ...activities.filter((child) => child.parentActivityId === parent.id)]).concat(activities.filter((item) => item.parentActivityId && !activities.some((parent) => parent.id === item.parentActivityId))).map((activity) => (
           <article
             key={activity.id}
-            className="activity-list-row activity-list-row--detailed"
+            className={`activity-list-row activity-list-row--detailed ${activity.parentActivityId ? "activity-list-row--child" : ""}`}
           >
             <div className="activity-list-icon">
               <CalendarDays size={21} />
@@ -831,15 +851,10 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
             <span
               className={`status-pill status-pill--${activity.status?.toLowerCase()}`}
             >
-              {activity.status === "LIVE"
-                ? "进行中"
-                : activity.status === "FINISHED"
-                  ? "已结束"
-                  : activity.status === "CANCELLED"
-                    ? "已终止"
-                    : "草稿"}
+              {activityStatusLabels[activity.status] || activity.status}
             </span>
             <div className="activity-row-actions">
+              {!activity.parentActivityId && <button className="toolbar-icon" type="button" title="添加抽奖子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "LOTTERY" }); setError(""); setDialog("create"); }}><Gift size={16} /></button>}
               <button
                 className="toolbar-icon"
                 type="button"
@@ -848,7 +863,12 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
               >
                 <Pencil size={16} />
               </button>
-              {activity.status !== "CANCELLED" && (
+              {activityActions(activity.status).map(([status, label]) => (
+                <button className="text-button" type="button" key={status}
+                  disabled={busy === `status-${activity.id}`}
+                  onClick={() => changeStatus(activity, status)}>{label}</button>
+              ))}
+              {activity.status !== "CANCELLED" && activity.status !== "FINISHED" && (
                 <button
                   className="text-button"
                   type="button"
@@ -859,7 +879,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 </button>
               )}
               <Link
-                to="/app/overview"
+                to={activity.activityType === "LOTTERY" ? "/app/rewards" : "/app/overview"}
                 className="row-action"
                 onClick={() => setActivityId(activity.id)}
               >
@@ -1053,9 +1073,11 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
   );
 }
 
-function ControlPage({ activityId }) {
+function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const [questions, setQuestions] = useState([]);
   const [state, setState] = useState(null);
+  const [scoreboard, setScoreboard] = useState([]);
+  const remaining = useLiveCountdown(state);
   const [responseStats, setResponseStats] = useState(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1077,15 +1099,16 @@ function ControlPage({ activityId }) {
   const load = useCallback(async () => {
     if (!activityId) return;
     try {
-      const [allQuestions, control] = await Promise.all([
+      const [allQuestions, control, board] = await Promise.all([
         api.questionsControl(activityId),
         api.controlState(activityId),
+        api.scoreboard(activityId),
       ]);
       setQuestions(allQuestions);
       setState(control);
+      setScoreboard(board);
       const nextQuestionId = control.questionId || allQuestions[0]?.id || "";
       setSelectedQuestionId((current) =>
-        control.questionId ||
         (allQuestions.some((item) => item.id === current)
           ? current
           : nextQuestionId),
@@ -1098,34 +1121,34 @@ function ControlPage({ activityId }) {
   useEffect(() => {
     load();
   }, [load]);
-  useActivityStream(activityId, load);
-  const controlledQuestionId = ["QUESTION_OPEN", "ANSWER_REVEALED"].includes(
-    state?.stage,
-  )
-    ? state?.questionId
-    : selectedQuestionId;
-  const current =
-    questions.find((question) => question.id === controlledQuestionId) ||
-    questions[0];
+  useActivityStream(activityId, load, undefined, setError);
+  const current = questions.find((question) => question.id === selectedQuestionId) || questions[0];
   const enabledQuestions = questions
     .filter((item) => item.enabled)
     .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
   const currentIndex = enabledQuestions.findIndex((item) => item.id === current?.id);
+  const previousQuestion = currentIndex > 0 ? enabledQuestions[currentIndex - 1] : null;
   const nextQuestion = currentIndex >= 0 ? enabledQuestions[currentIndex + 1] : enabledQuestions[0];
   const selectQuestion = (questionId) => {
     setSelectedQuestionId(questionId);
-    loadStats(questionId);
   };
   const update = async (stage, overrides = {}) => {
     if (["QUESTION_OPEN", "ANSWER_REVEALED"].includes(stage) && !current)
       return;
     setBusy(true);
     try {
+      if (stage === "WINNERS") {
+        const [board, pools] = await Promise.all([api.scoreboard(activityId), api.prizePools(activityId)]);
+        const preview = pools.filter((pool) => pool.enabled && pool.purpose === "RANKING").flatMap((pool) =>
+          board.filter((person) => person.rank >= pool.rankFrom && person.rank <= pool.rankTo && person.score >= pool.minScore)
+            .slice(0, pool.remainingQuantity)
+            .map((person) => `${person.rank}. ${person.name} · ${person.score} 分 · ${pool.name}`),
+        );
+        if (!window.confirm(`确认当前积分与获奖名单并发奖上屏？\n\n${preview.length ? preview.join("\n") : "当前没有可发放的排名奖励"}`)) return;
+      }
       const questionId =
         overrides.questionId ??
-        (["QUESTION_OPEN", "ANSWER_REVEALED"].includes(stage)
-          ? current?.id
-          : state?.questionId || null);
+        (stage === "QUESTION_OPEN" ? current?.id : state?.questionId || null);
       const next = await api.control(activityId, {
         stage,
         questionId,
@@ -1148,6 +1171,7 @@ function ControlPage({ activityId }) {
         title="实时控场"
         description="选择题目、设定倒计时，并将流程同步给参与者和受控大屏。"
       />
+      <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reloadActivities} />
       <InlineError text={error} onRetry={load} />
       <div className="control-layout-new">
         <section>
@@ -1181,8 +1205,8 @@ function ControlPage({ activityId }) {
               </Link>
             </div>
             <h2>{current?.title || "请先在题库中创建并启用题目"}</h2>
-            <ScreenMedia
-              src={current?.mediaUrl}
+            <QuestionMedia
+              question={current}
               className="control-question-media"
             />
             <div className="control-option-grid">
@@ -1208,7 +1232,7 @@ function ControlPage({ activityId }) {
             <div className="control-question-footer">
               <span>
                 <Clock3 size={16} />
-                {state?.seconds ? formatSeconds(state.seconds) : "未开始计时"}
+                {state?.stage === "QUESTION_OPEN" ? formatSeconds(remaining) : "未开放答题"}
               </span>
               <span>
                 <Users size={16} />
@@ -1304,6 +1328,16 @@ function ControlPage({ activityId }) {
           </div>
         </section>
         <aside className="control-aside">
+          <article className="control-guide">
+            <h3>当前积分表</h3>
+            <ScoreList items={scoreboard} />
+          </article>
+          {[ ["上一题", previousQuestion], ["下一题", nextQuestion] ].map(([label, preview]) => (
+            <article className="control-guide" key={label}>
+              <h3>{label}</h3>
+              {preview ? <><p>{preview.title}</p><QuestionMedia question={preview} className="control-question-media" /><p>{asOptions(preview).join(" / ")}</p></> : <p>暂无{label}</p>}
+            </article>
+          ))}
           <ControlTimer
             state={state}
             onRestart={() => update("QUESTION_OPEN", { seconds: 30 })}
@@ -1338,7 +1372,10 @@ function ControlPage({ activityId }) {
   );
 }
 
-function QuestionsPage({ activityId }) {
+function QuestionsPage({ activityId, canManage }) {
+  const mediaUrlsFor = (question) => Array.isArray(question.mediaUrls)
+    ? question.mediaUrls
+    : question.mediaUrl ? [question.mediaUrl] : [];
   const emptyQuestion = (questionType = "SINGLE") => ({
     type: questionType,
     title: "",
@@ -1348,7 +1385,7 @@ function QuestionsPage({ activityId }) {
     partialCreditPercent: 40,
     textAcceptedAnswers: "",
     textMatchMode: "FUZZY",
-    mediaUrl: "",
+    mediaUrls: [],
     enabled: true,
   });
   const [questions, setQuestions] = useState([]);
@@ -1366,8 +1403,8 @@ function QuestionsPage({ activityId }) {
     if (!activityId) return;
     try {
       const [questionList, setList, people] = await Promise.all([
-        api.questionsAdmin(activityId),
-        api.questionSets(activityId),
+        canManage ? api.questionsAdmin(activityId) : api.questionsControl(activityId),
+        canManage ? api.questionSets(activityId) : Promise.resolve([]),
         api.participants(activityId),
       ]);
       setQuestions(questionList);
@@ -1380,11 +1417,11 @@ function QuestionsPage({ activityId }) {
     } catch (cause) {
       setError(cause.message);
     }
-  }, [activityId]);
+  }, [activityId, canManage]);
   useEffect(() => {
     load();
   }, [load]);
-  useActivityStream(activityId, load);
+  useActivityStream(activityId, load, undefined, setError);
   const openCreate = () => {
     setError("");
     setForm(emptyQuestion());
@@ -1395,6 +1432,7 @@ function QuestionsPage({ activityId }) {
     setForm({
       ...emptyQuestion(question.type),
       ...question,
+      mediaUrls: mediaUrlsFor(question),
       options: asOptions(question).join("\n"),
       answers: answerSet(question).size
         ? [...answerSet(question)].join(", ")
@@ -1499,22 +1537,37 @@ function QuestionsPage({ activityId }) {
         type === "TEXT" ? current.textMatchMode || "FUZZY" : "FUZZY",
     }));
   const uploadMedia = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const input = event.target;
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
+    if (form.mediaUrls.length + files.length > 20) {
+      setError("每道题最多添加 20 个媒体文件");
+      input.value = "";
+      return;
+    }
     setBusy("question-media");
     setError("");
     try {
-      const uploaded = await api.uploadMedia(activityId, file, "questions");
-      setForm((current) => ({ ...current, mediaUrl: uploaded.url }));
+      for (const file of files) {
+        const uploaded = await api.uploadMedia(activityId, file, "questions");
+        setForm((current) => ({ ...current, mediaUrls: [...current.mediaUrls, uploaded.url] }));
+      }
     } catch (cause) {
       setError(cause.message);
     } finally {
-      event.target.value = "";
+      input.value = "";
       setBusy("");
     }
   };
   const submit = async (event) => {
     event.preventDefault();
+    if (busy === "question-media") return;
+    const fullScore = Number(form.fullScore);
+    if (!Number.isInteger(fullScore) || fullScore < 1 || fullScore > 100000) {
+      setError("题目分值需为 1 至 100000 的整数");
+      return;
+    }
+    const mediaUrls = [...new Set(form.mediaUrls.map((url) => url.trim()).filter(Boolean))];
     setBusy("question-form");
     setError("");
     const options =
@@ -1551,13 +1604,12 @@ function QuestionsPage({ activityId }) {
       ...form,
       options,
       answers,
-      fullScore: Number(form.fullScore),
+      fullScore,
       partialCreditPercent: Number(form.partialCreditPercent),
       textAcceptedAnswers,
       textMatchMode: form.type === "TEXT" ? form.textMatchMode : null,
-      // Empty string is the explicit "remove media" value; null remains the
-      // server-side convention for a partial update that leaves it unchanged.
-      mediaUrl: form.mediaUrl || "",
+      mediaUrl: mediaUrls[0] || "",
+      mediaUrls,
     };
     try {
       if (dialog === "create") await api.createQuestion(activityId, payload);
@@ -1628,7 +1680,7 @@ function QuestionsPage({ activityId }) {
         eyebrow="QUESTION LIBRARY"
         title="题库与组卷"
         description="维护题型、媒体和计分规则；文本题可自动匹配，未命中时进入人工评分队列。"
-        action={
+        action={canManage &&
           <button className="primary-button" onClick={openCreate}>
             <FilePlus2 size={17} />
             新建题目
@@ -1657,11 +1709,11 @@ function QuestionsPage({ activityId }) {
               <div>
                 <strong>{question.title}</strong>
                 <small>
-                  {typeLabel(question.type)} · {question.fullScore || 100} 分 ·{" "}
+                  {typeLabel(question.type)} · {question.fullScore ?? 100} 分 ·{" "}
                   {question.type === "TEXT"
                     ? `${textMatchLabel(question.textMatchMode)} · ${textAcceptedAnswers(question).length} 项标准答案`
                     : `${asOptions(question).length} 个选项`}
-                  {question.mediaUrl ? " · 含媒体" : ""}
+                  {mediaUrlsFor(question).length ? ` · ${mediaUrlsFor(question).length} 个媒体` : ""}
                 </small>
               </div>
               <span className="type-chip">
@@ -1672,6 +1724,7 @@ function QuestionsPage({ activityId }) {
                   className="toolbar-icon"
                   type="button"
                   title="编辑题目"
+                  disabled={!canManage}
                   onClick={() => openEdit(question)}
                 >
                   <Pencil size={16} />
@@ -1680,7 +1733,7 @@ function QuestionsPage({ activityId }) {
                   className="toolbar-icon"
                   type="button"
                   title="删除题目"
-                  disabled={busy === `delete-${question.id}`}
+                  disabled={!canManage || busy === `delete-${question.id}`}
                   onClick={() => deleteQuestion(question)}
                 >
                   <X size={16} />
@@ -1697,7 +1750,7 @@ function QuestionsPage({ activityId }) {
           )}
         </div>
       </section>
-      <section className="data-panel question-set-panel">
+      {canManage && <section className="data-panel question-set-panel">
         <div className="data-panel__toolbar">
           <div>
             <p className="eyebrow">QUESTION SETS</p>
@@ -1757,6 +1810,7 @@ function QuestionsPage({ activityId }) {
           )}
         </div>
       </section>
+      }
       <section className="data-panel review-panel">
         <div className="data-panel__toolbar">
           <div>
@@ -1817,9 +1871,10 @@ function QuestionsPage({ activityId }) {
               ? "新建活动题目"
               : `编辑题目 · ${typeLabel(form.type)}`
           }
-          onClose={() => setDialog(null)}
+          onClose={() => { if (busy !== "question-media") setDialog(null); }}
         >
           <form className="dialog-form" onSubmit={submit}>
+            <InlineError text={error} />
             <fieldset className="segmented">
               <legend>题目类型</legend>
               {[
@@ -1837,6 +1892,39 @@ function QuestionsPage({ activityId }) {
                 </button>
               ))}
             </fieldset>
+            <div className="form-grid">
+              <label>
+                题目分值
+                <input
+                  required
+                  name="fullScore"
+                  type="number"
+                  min="1"
+                  max="100000"
+                  step="1"
+                  value={form.fullScore}
+                  onChange={(event) =>
+                    setForm({ ...form, fullScore: event.target.value })
+                  }
+                />
+              </label>
+              {form.type === "MULTIPLE" && (
+                <label>
+                  部分得分 %
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={form.partialCreditPercent}
+                    onChange={(event) =>
+                      setForm({ ...form, partialCreditPercent: event.target.value })
+                    }
+                  />
+                </label>
+              )}
+            </div>
             <label>
               题干
               <textarea
@@ -1915,73 +2003,62 @@ function QuestionsPage({ activityId }) {
                 </label>
               </>
             )}
-            <div className="form-grid">
-              <label>
-                满分
-                <input
-                  required
-                  type="number"
-                  min="1"
-                  value={form.fullScore}
-                  onChange={(event) =>
-                    setForm({ ...form, fullScore: Number(event.target.value) })
-                  }
-                />
-              </label>
-              {form.type === "MULTIPLE" && (
-                <label>
-                  部分得分 %
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={form.partialCreditPercent}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        partialCreditPercent: Number(event.target.value),
-                      })
-                    }
-                  />
-                </label>
-              )}
-            </div>
-            <label>
-              媒体地址（图片、音频或视频）
-              <input
-                type="url"
-                value={form.mediaUrl || ""}
-                onChange={(event) =>
-                  setForm({ ...form, mediaUrl: event.target.value })
-                }
-                placeholder="https://..."
-              />
-            </label>
+            {form.mediaUrls.map((url, index) => (
+              <div className="question-media-item" key={index}>
+                <div className="media-upload-control">
+                  <label>
+                    媒体地址 {index + 1}
+                    <input
+                      aria-label={`媒体地址 ${index + 1}`}
+                      value={url}
+                      maxLength="2048"
+                      disabled={busy === "question-media"}
+                      onChange={(event) => setForm((current) => ({
+                        ...current,
+                        mediaUrls: current.mediaUrls.map((item, itemIndex) => itemIndex === index ? event.target.value : item),
+                      }))}
+                      placeholder="https://..."
+                    />
+                  </label>
+                  <button
+                    className="toolbar-icon"
+                    type="button"
+                    title={`移除媒体 ${index + 1}`}
+                    disabled={busy === "question-media"}
+                    onClick={() => setForm((current) => ({
+                      ...current,
+                      mediaUrls: current.mediaUrls.filter((_, itemIndex) => itemIndex !== index),
+                    }))}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                <ScreenMedia src={url} className="question-editor-media" />
+              </div>
+            ))}
             <div className="media-upload-control">
               <label className="secondary-button">
                 <FilePlus2 size={16} />
-                {busy === "question-media" ? "正在上传" : "上传媒体"}
+                {busy === "question-media" ? "正在上传" : "上传图片或媒体"}
                 <input
                   type="file"
                   accept="image/*,audio/*,video/*"
-                  disabled={busy === "question-media"}
+                  multiple
+                  disabled={busy === "question-media" || form.mediaUrls.length >= 20}
                   onChange={uploadMedia}
                 />
               </label>
-              {form.mediaUrl && (
-                <button
-                  className="toolbar-icon"
-                  type="button"
-                  title="移除题目媒体"
-                  onClick={() => setForm({ ...form, mediaUrl: "" })}
-                >
-                  <X size={16} />
-                </button>
-              )}
-              <span>{form.mediaUrl ? "媒体已关联到本题" : "支持图片、音频和视频"}</span>
+              <button
+                className="toolbar-icon"
+                type="button"
+                title="添加媒体地址"
+                disabled={busy === "question-media" || form.mediaUrls.length >= 20}
+                onClick={() => setForm((current) => ({ ...current, mediaUrls: [...current.mediaUrls, ""] }))}
+              >
+                <Plus size={16} />
+              </button>
+              <span>{form.mediaUrls.length} / 20 个媒体</span>
             </div>
-            <ScreenMedia src={form.mediaUrl} className="question-editor-media" />
             <label className="toggle-control">
               <input
                 type="checkbox"
@@ -1994,7 +2071,7 @@ function QuestionsPage({ activityId }) {
             </label>
             <button
               className="primary-button"
-              disabled={busy === "question-form"}
+              disabled={busy === "question-form" || busy === "question-media"}
             >
               {busy === "question-form" ? "正在保存" : "保存题目"}
               <Check size={17} />
@@ -2118,7 +2195,6 @@ function QuestionsPage({ activityId }) {
                 name="points"
                 required
                 type="number"
-                min="0"
                 max={questionById.get(dialog.questionId)?.fullScore || 100}
                 defaultValue={dialog.awardedPoints || 0}
               />
@@ -2167,7 +2243,7 @@ function ParticipantsPage({ activityId }) {
   const refreshParticipants = useCallback(
     (event) => {
       if (
-        event.type?.startsWith("participant") ||
+        !event || event.type?.startsWith("participant") ||
         event.type?.startsWith("answer") ||
         event.type?.startsWith("score") ||
         event.type?.startsWith("lottery") ||
@@ -2180,7 +2256,7 @@ function ParticipantsPage({ activityId }) {
   useEffect(() => {
     load();
   }, [load]);
-  useActivityStream(activityId, refreshParticipants);
+  useActivityStream(activityId, refreshParticipants, undefined, setError);
   const openDetail = async (person) => {
     setBusy(`detail-${person.id}`);
     setError("");
@@ -2231,14 +2307,7 @@ function ParticipantsPage({ activityId }) {
       setBusy("");
     }
   };
-  const normalizedQuery = query.trim().toLowerCase();
-  const visible = participants.filter(
-    (person) =>
-      !normalizedQuery ||
-      `${person.name} ${person.contact || ""} ${person.id}`
-        .toLowerCase()
-        .includes(normalizedQuery),
-  );
+  const visible = participants.filter((person) => participantMatches(person, query));
   return (
     <div className="page-content">
       <PageHeader
@@ -2260,7 +2329,9 @@ function ParticipantsPage({ activityId }) {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索姓名、ID 或联系方式"
+              type="search"
+              aria-label="检索参与人信息"
+              placeholder="搜索姓名、联系方式、组织或登记信息"
             />
           </div>
           <span>
@@ -2297,6 +2368,7 @@ function ParticipantsPage({ activityId }) {
                 className="toolbar-icon"
                 type="button"
                 title="查看并编辑参与者"
+                aria-label={`查看参与者 ${person.name}`}
                 disabled={busy === `detail-${person.id}`}
                 onClick={() => openDetail(person)}
               >
@@ -2462,7 +2534,7 @@ function ParticipantsPage({ activityId }) {
   );
 }
 
-function RewardsPage({ activityId }) {
+function RewardsPage({ activityId, canManage }) {
   const emptyPool = () => ({
     code: "",
     name: "",
@@ -2481,6 +2553,7 @@ function RewardsPage({ activityId }) {
   const [participants, setParticipants] = useState([]);
   const [venues, setVenues] = useState([]);
   const [awards, setAwards] = useState([]);
+  const [selectedAwardIds, setSelectedAwardIds] = useState([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [poolDialog, setPoolDialog] = useState(null);
@@ -2512,6 +2585,7 @@ function RewardsPage({ activityId }) {
       setPools(nextPools);
       setParticipants(nextParticipants);
       setAwards(nextAwards);
+      setSelectedAwardIds((current) => current.filter((id) => nextAwards.some((award) => award.id === id && award.status === "PENDING")));
       setVenues(nextVenues || []);
     } catch (cause) {
       setError(cause.message);
@@ -2520,6 +2594,7 @@ function RewardsPage({ activityId }) {
   useEffect(() => {
     load();
   }, [load]);
+  useActivityStream(activityId, load, undefined, setError);
   const openCreate = () => {
     setError("");
     setNotice("");
@@ -2631,16 +2706,7 @@ function RewardsPage({ activityId }) {
     );
   };
   const redeemAll = () =>
-    run(
-      "redeem-all",
-      () =>
-        Promise.all(
-          awards
-            .filter((award) => award.status === "PENDING")
-            .map((award) => api.redeem(activityId, award.id)),
-        ),
-      "所有待核销奖品已处理。",
-    );
+    run("redeem-all", () => api.redeemBatch(activityId, selectedAwardIds), "所选奖品已核销。");
   const openLottery = (pool) => {
     setChanceForm({ participantId: "", draws: 1, reason: "" });
     setLotteryVenue((venues.find((venue) => venue.enabled) || venues[0])?.code || "");
@@ -2673,7 +2739,7 @@ function RewardsPage({ activityId }) {
         eyebrow="PRIZE OPERATIONS"
         title="奖品与核销"
         description="为排名、抽奖和人工发放配置独立奖池，并在现场完成可审计的奖品核销。"
-        action={
+        action={canManage &&
           <button className="primary-button" type="button" onClick={openCreate}>
             <Plus size={17} />
             创建奖池
@@ -2725,6 +2791,7 @@ function RewardsPage({ activityId }) {
               <button
                 className="secondary-button"
                 type="button"
+                disabled={!canManage}
                 onClick={() => openEdit(pool)}
               >
                 配置
@@ -2744,7 +2811,7 @@ function RewardsPage({ activityId }) {
                   {busy === `ranking-${pool.id}` ? "正在生成" : "按排行发奖"}
                 </button>
               )}
-              {pool.purpose === "LOTTERY" && (
+              {canManage && pool.purpose === "LOTTERY" && (
                 <button
                   className="accent-button"
                   type="button"
@@ -2758,7 +2825,7 @@ function RewardsPage({ activityId }) {
               <button
                 className="text-button"
                 type="button"
-                disabled={busy === `delete-${pool.id}`}
+                disabled={!canManage || busy === `delete-${pool.id}`}
                 onClick={() => deletePool(pool)}
               >
                 删除
@@ -2805,7 +2872,7 @@ function RewardsPage({ activityId }) {
               setIssueOpen(true);
               setRedemptionOpen(true);
             }}
-            disabled={!participants.length || !issueablePools.length}
+            disabled={!canManage || !participants.length || !issueablePools.length}
           >
             <Gift size={16} />
             人工发奖
@@ -2814,10 +2881,10 @@ function RewardsPage({ activityId }) {
             className="secondary-button"
             type="button"
             onClick={redeemAll}
-            disabled={!pendingAwards.length || busy === "redeem-all"}
+            disabled={!selectedAwardIds.length || busy === "redeem-all"}
           >
             <ClipboardList size={16} />
-            {busy === "redeem-all" ? "正在批量核销" : "批量核销待领奖品"}
+            {busy === "redeem-all" ? "正在批量核销" : `核销已选奖品（${selectedAwardIds.length}）`}
           </button>
         </div>
       </section>
@@ -2852,6 +2919,11 @@ function RewardsPage({ activityId }) {
               return (
                 <article key={award.id}>
                   <div>
+                    {award.status === "PENDING" && <label className="award-selection">
+                      <input type="checkbox" aria-label={`选择 ${award.participantName} 的 ${award.prizeName}`} checked={selectedAwardIds.includes(award.id)}
+                        onChange={(event) => setSelectedAwardIds((current) => event.target.checked ? [...current, award.id] : current.filter((id) => id !== award.id))} />
+                      选择核销
+                    </label>}
                     <strong>
                       {award.participantName ||
                         participant?.name ||
@@ -2899,14 +2971,14 @@ function RewardsPage({ activityId }) {
                         <button
                           className="text-button"
                           type="button"
-                          disabled={busy === `void-${award.id}`}
+                          disabled={!canManage || busy === `void-${award.id}`}
                           onClick={() => voidPending(award)}
                         >
                           作废
                         </button>
                       </>
                     )}
-                    {award.status === "REDEEMED" && (
+                    {canManage && award.status === "REDEEMED" && (
                       <button
                         className="text-button"
                         type="button"
@@ -3294,8 +3366,10 @@ function ScreensPage({ activityId }) {
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [pairing, setPairing] = useState(null);
   const [renamingDevice, setRenamingDevice] = useState(null);
+  const [deviceBusy, setDeviceBusy] = useState(false);
   const [deviceForm, setDeviceForm] = useState({
     name: "",
+    templateId: "",
     viewportWidth: 1920,
     viewportHeight: 1080,
   });
@@ -3322,7 +3396,7 @@ function ScreensPage({ activityId }) {
   useEffect(() => {
     load();
   }, [load]);
-  useActivityStream(activityId, load);
+  useActivityStream(activityId, load, undefined, setError);
   const selected = devices.find((item) => item.id === selectedDeviceId);
   const pairingUrl = pairing
     ? window.location.origin +
@@ -3463,13 +3537,32 @@ function ScreensPage({ activityId }) {
   };
   const rename = async (event) => {
     event.preventDefault();
-    if (!renamingDevice) return;
+    if (!renamingDevice || deviceBusy) return;
+    setDeviceBusy(true);
+    setError("");
     try {
       await api.renameScreen(activityId, renamingDevice.id, deviceNameForm);
       setRenamingDevice(null);
       await load();
     } catch (cause) {
       setError(cause.message);
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+  const deleteDevice = async (device) => {
+    if (deviceBusy || !window.confirm(`删除大屏“${device.name}”？该设备的配对链接和登录凭据将立即失效。`)) return;
+    setDeviceBusy(true);
+    setError("");
+    try {
+      await api.deleteScreen(activityId, device.id);
+      setRenamingDevice(null);
+      setPairing((current) => current?.device.id === device.id ? null : current);
+      await load();
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      setDeviceBusy(false);
     }
   };
   const rotatePairing = async () => {
@@ -3597,6 +3690,7 @@ function ScreensPage({ activityId }) {
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
+                    setError("");
                     setRenamingDevice(device);
                     setDeviceNameForm({ name: device.name });
                   }}
@@ -3764,6 +3858,13 @@ function ScreensPage({ activityId }) {
                 }
                 placeholder="例如：主舞台 LED 屏"
               />
+            </label>
+            <label>
+              初始展示模板
+              <select required value={deviceForm.templateId} onChange={(event) => setDeviceForm({ ...deviceForm, templateId: event.target.value })}>
+                <option value="">请选择模板</option>
+                {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              </select>
             </label>
             <div className="form-grid">
               <label>
@@ -3937,8 +4038,9 @@ function ScreensPage({ activityId }) {
         </Dialog>
       )}
       {renamingDevice && (
-        <Dialog title="管理大屏设备" onClose={() => setRenamingDevice(null)}>
+        <Dialog title="管理大屏设备" onClose={() => !deviceBusy && setRenamingDevice(null)}>
           <form className="dialog-form" onSubmit={rename}>
+            <InlineError text={error} />
             <label>
               设备名称
               <input
@@ -3949,9 +4051,13 @@ function ScreensPage({ activityId }) {
                 }
               />
             </label>
-            <button className="primary-button">
+            <button className="primary-button" disabled={deviceBusy}>
               保存设备名称
               <Check size={17} />
+            </button>
+            <button className="secondary-button" type="button" disabled={deviceBusy} onClick={() => deleteDevice(renamingDevice)}>
+              <X size={17} />
+              删除大屏设备
             </button>
           </form>
         </Dialog>
@@ -3982,6 +4088,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
   const [siteSettings, setSiteSettings] = useState(null);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [accountError, setAccountError] = useState("");
   const [editingAccount, setEditingAccount] = useState(null);
   const [accountEditForm, setAccountEditForm] = useState({
     username: "",
@@ -4027,24 +4134,11 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
   );
   const canManageUsers = isSystemAdmin || isActivityAdmin;
   const load = useCallback(async () => {
-    if (!activityId) return;
     try {
-      const [memberList, venueList, fieldList, nextSiteSettings] = await Promise.all([
-        api.memberships(activityId),
-        api.venues(activityId),
-        api.registrationFields(activityId),
+      const [accountList, nextSiteSettings] = await Promise.all([
+        isSystemAdmin ? api.users() : Promise.resolve([]),
         isSystemAdmin ? api.adminSiteSettings() : Promise.resolve(null),
       ]);
-      const accountList = isSystemAdmin
-        ? await api.users()
-        : memberList.some(
-              (member) => member.userId === user?.id && member.role === "ACTIVITY_ADMIN",
-            )
-          ? await api.membershipUsers(activityId)
-          : [];
-      setMembers(memberList);
-      setVenues(venueList);
-      setRegistrationFields(fieldList);
       setUsers(accountList);
       setSiteSettings(nextSiteSettings);
       if (nextSiteSettings) {
@@ -4064,6 +4158,19 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
           storageAddressingStyle: nextSiteSettings.storageAddressingStyle || "AUTO",
           clearStorageCredentials: false,
         });
+      }
+      const [memberList, venueList, fieldList] = activityId ? await Promise.all([
+        api.memberships(activityId),
+        api.venues(activityId),
+        api.registrationFields(activityId),
+      ]) : [[], [], []];
+      setMembers(memberList);
+      setVenues(venueList);
+      setRegistrationFields(fieldList);
+      if (!isSystemAdmin && memberList.some(
+        (member) => member.userId === user?.id && member.role === "ACTIVITY_ADMIN",
+      )) {
+        setUsers(await api.membershipUsers(activityId));
       }
       setError("");
     } catch (cause) {
@@ -4089,35 +4196,43 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
   ]);
   const grant = async (event) => {
     event.preventDefault();
+    if (!activityId || busy) return;
+    setBusy("grant");
+    setError("");
     try {
       await api.upsertMembership(activityId, form);
       setForm({ userId: "", role: "STAFF" });
       await load();
     } catch (cause) {
       setError(cause.message);
+    } finally {
+      setBusy("");
     }
+  };
+  const openCreateAccount = (role) => {
+    setAccountError("");
+    setAccount({ username: "", displayName: "", password: "", systemRole: role });
+    setCreating(true);
   };
   const createUser = async (event) => {
     event.preventDefault();
+    if (busy) return;
+    setAccountError("");
+    if (account.systemRole !== "SYSTEM_ADMIN" && !activityId) {
+      setAccountError("请先选择一个活动，再创建活动管理员或工作人员。");
+      return;
+    }
+    setBusy("create-account");
     try {
-      let created;
       if (account.systemRole === "SYSTEM_ADMIN") {
-        created = await api.createUser({ ...account, systemRole: "SYSTEM_ADMIN" });
+        await api.createUser({ ...account, systemRole: "SYSTEM_ADMIN" });
       } else {
-        if (isSystemAdmin) {
-          created = await api.createUser({ ...account, systemRole: null });
-          await api.upsertMembership(activityId, {
-            userId: created.id,
-            role: account.systemRole,
-          });
-        } else {
-          await api.createMembershipUser(activityId, {
-            username: account.username,
-            displayName: account.displayName,
-            password: account.password,
-            role: account.systemRole,
-          });
-        }
+        await api.createMembershipUser(activityId, {
+          username: account.username,
+          displayName: account.displayName,
+          password: account.password,
+          role: account.systemRole,
+        });
       }
       setCreating(false);
       setAccount({
@@ -4128,11 +4243,13 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
       });
       await load();
     } catch (cause) {
-      setError(cause.message);
+      setAccountError(cause.message);
+    } finally {
+      setBusy("");
     }
   };
   const openAccountEdit = (item) => {
-    setError("");
+    setAccountError("");
     setEditingAccount(item);
     setAccountEditForm({
       username: item.username || "",
@@ -4142,8 +4259,9 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
   };
   const updateAccount = async (event) => {
     event.preventDefault();
+    if (busy) return;
     setBusy("account");
-    setError("");
+    setAccountError("");
     try {
       const payload = {
         username: accountEditForm.username,
@@ -4158,7 +4276,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
       setEditingAccount(null);
       await load();
     } catch (cause) {
-      setError(cause.message);
+      setAccountError(cause.message);
     } finally {
       setBusy("");
     }
@@ -4314,13 +4432,14 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
         description="维护当前活动的登记会场、报名字段和工作人员访问权限。"
         action={
             canManageUsers ? (
-              <button
-                className="primary-button"
-                onClick={() => setCreating(true)}
-              >
-                <Plus size={17} />
-                新增用户
-              </button>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {isSystemAdmin && <button className="secondary-button" onClick={() => openCreateAccount("SYSTEM_ADMIN")}>
+                  <Plus size={17} /> 新增系统管理员
+                </button>}
+                <button className="primary-button" disabled={!activityId} onClick={() => openCreateAccount("ACTIVITY_ADMIN")}>
+                  <Plus size={17} /> 新增活动管理员
+                </button>
+              </div>
           ) : null
         }
       />
@@ -4531,35 +4650,27 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
               }
             />
           </label>
-          <label>
-            头图地址
-            <input
-              type="url"
-              value={brandForm.clientHeroImageUrl || ""}
-              onChange={(event) =>
-                setBrandForm({
-                  ...brandForm,
-                  clientHeroImageUrl: event.target.value,
-                })
-              }
-              placeholder="https://..."
-            />
-          </label>
-          <label>
-            背景图地址
-            <input
-              type="url"
-              value={brandForm.clientBackgroundImageUrl || ""}
-              onChange={(event) =>
-                setBrandForm({
-                  ...brandForm,
-                  clientBackgroundImageUrl: event.target.value,
-                })
-              }
-              placeholder="https://..."
-            />
-          </label>
-          <button className="primary-button" disabled={busy === "brand"}>
+          {[["clientHeroImageUrl", "头图"], ["clientBackgroundImageUrl", "背景图"]].map(([key, label]) => (
+            <label key={key}>
+              {label}地址 / 上传图片
+              <input type="url" value={brandForm[key]} onChange={(event) => setBrandForm({ ...brandForm, [key]: event.target.value })} placeholder="https://..." />
+              <input type="file" accept="image/*" disabled={busy !== ""} onChange={async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                setBusy("brand-upload");
+                setError("");
+                try {
+                  const uploaded = await api.uploadMedia(activityId, file, "branding");
+                  setBrandForm((current) => ({ ...current, [key]: uploaded.url }));
+                } catch (cause) {
+                  setError(cause.message);
+                } finally {
+                  setBusy("");
+                }
+              }} />
+            </label>
+          ))}
+          <button className="primary-button" disabled={busy === "brand" || busy === "brand-upload"}>
             {busy === "brand" ? "正在保存" : "保存参与端品牌"}
             <Check size={16} />
           </button>
@@ -4763,7 +4874,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
             <option value="ACTIVITY_ADMIN">活动管理员</option>
             <option value="STAFF">活动工作人员</option>
           </select>
-          <button className="secondary-button" disabled={!form.userId}>
+          <button className="secondary-button" disabled={!form.userId || !activityId || Boolean(busy)}>
             <Plus size={16} />
             授予
           </button>
@@ -4851,14 +4962,16 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
       )}
       {creating && (
         <Dialog
-          title={isSystemAdmin ? "创建账户" : "新增活动成员"}
-          onClose={() => setCreating(false)}
+          title={account.systemRole === "SYSTEM_ADMIN" ? "新增系统管理员" : "新增活动成员"}
+          onClose={() => !busy && setCreating(false)}
         >
           <form className="dialog-form" onSubmit={createUser}>
+            <InlineError text={accountError} />
             <label>
               登录名
               <input
                 required
+                maxLength="120"
                 value={account.username}
                 onChange={(event) =>
                   setAccount({ ...account, username: event.target.value })
@@ -4869,6 +4982,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
               显示名称
               <input
                 required
+                maxLength="100"
                 value={account.displayName}
                 onChange={(event) =>
                   setAccount({ ...account, displayName: event.target.value })
@@ -4881,6 +4995,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
                 required
                 type="password"
                 minLength="8"
+                maxLength="200"
                 value={account.password}
                 onChange={(event) =>
                   setAccount({ ...account, password: event.target.value })
@@ -4888,7 +5003,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
               />
             </label>
             <label>
-              {isSystemAdmin ? "系统角色" : "活动角色"}
+              账户角色
               <select
                 value={account.systemRole}
                 onChange={(event) =>
@@ -4896,20 +5011,21 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
                 }
               >
                 {isSystemAdmin && <option value="SYSTEM_ADMIN">系统管理员</option>}
-                <option value="ACTIVITY_ADMIN">活动管理员</option>
-                <option value="STAFF">活动工作人员</option>
+                <option value="ACTIVITY_ADMIN" disabled={!activityId}>活动管理员</option>
+                <option value="STAFF" disabled={!activityId}>活动工作人员</option>
               </select>
             </label>
-            <button className="primary-button">
-              创建账户
+            <button className="primary-button" disabled={Boolean(busy)}>
+              {busy === "create-account" ? "正在创建" : "创建账户"}
               <Check size={17} />
             </button>
           </form>
         </Dialog>
       )}
       {editingAccount && (
-        <Dialog title="编辑用户账户" onClose={() => setEditingAccount(null)}>
+        <Dialog title="编辑用户账户" onClose={() => !busy && setEditingAccount(null)}>
           <form className="dialog-form" onSubmit={updateAccount}>
+            <InlineError text={accountError} />
             <label>
               登录名
               <input
@@ -5152,19 +5268,39 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
 
 function ParticipantPortal({ lotteryMode = false }) {
   const { activityId } = useParams();
-  const location = useLocation();
+  const [activities, setActivities] = useState(null);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try { setActivities(await api.activities()); setError(""); }
+    catch (cause) { setError(cause.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (error) return <BackendProblem message={error} onRetry={load} />;
+  if (!activities) return <LoadingPage />;
+  const activity = activities.find((item) => item.id === activityId);
+  if (!activity) return <BackendProblem message="活动不存在" onRetry={load} />;
+  const options = availableActivities(activities);
+  if (!options.some((item) => item.id === activityId)) return <main className="activity-entry-page"><h1>{activity.name}</h1><p>{activityStatusLabels[activity.status] || "活动暂未开放"}</p><Link className="secondary-button" to="/join">选择其他活动</Link></main>;
+  return <ParticipantSessionPortal key={activityId} activityInfo={activity} activities={options} lotteryMode={lotteryMode || activity.activityType === "LOTTERY"} />;
+}
+
+function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
+  const activityId = activityInfo.id;
+  const identityActivityId = participantActivityId(activityInfo);
   const navigate = useNavigate();
+  const location = useLocation();
   const requestedVenue =
     new URLSearchParams(location.search).get("venue") || "";
   const lotteryPoolId =
     new URLSearchParams(location.search).get("pool") || null;
+  const [sessionActivityId, setSessionActivityId] = useState(activityId);
   const [venue, setVenue] = useState(requestedVenue);
   const [venues, setVenues] = useState([]);
   const [participant, setParticipant] = useState(() =>
-    readParticipant(activityId),
+    readParticipant(identityActivityId),
   );
   const [participantToken, setLocalParticipantToken] = useState(() =>
-    getParticipantToken(activityId),
+    getParticipantToken(identityActivityId),
   );
   const [fields, setFields] = useState([]);
   const [questions, setQuestions] = useState([]);
@@ -5176,17 +5312,27 @@ function ParticipantPortal({ lotteryMode = false }) {
   const [tab, setTab] = useState(lotteryMode ? "rewards" : "play");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  if (sessionActivityId !== activityId) {
+    setSessionActivityId(activityId);
+    setParticipant(readParticipant(identityActivityId));
+    setLocalParticipantToken(getParticipantToken(identityActivityId));
+    setVenue(requestedVenue);
+    setLoading(true);
+    setTab(lotteryMode ? "rewards" : "play");
+    setQuestions([]);
+  }
   const applyPublicBrand = (activityInfo, siteInfo) => {
     setActivity(activityInfo);
     setSiteSettings(siteInfo);
   };
   const load = useCallback(async () => {
+    setError("");
     if (!participantToken) {
       try {
         const [registrationFields, venueList, activityInfo, siteInfo] =
           await Promise.all([
-            api.registrationFields(activityId),
-            api.venues(activityId),
+            api.registrationFields(identityActivityId),
+            api.venues(identityActivityId),
             api.activity(activityId),
             api.siteSettings(),
           ]);
@@ -5199,20 +5345,6 @@ function ParticipantPortal({ lotteryMode = false }) {
         );
         applyPublicBrand(activityInfo, siteInfo);
       } catch (cause) {
-        if (cause instanceof ApiError && cause.status === 404) {
-          try {
-            const activities = await api.activities();
-            const target =
-              activities.find((item) => item.status === "LIVE") ||
-              activities[0];
-            if (target?.id && target.id !== activityId) {
-              navigate(`/join/${target.id}`, { replace: true });
-              return;
-            }
-          } catch {
-            // Keep the original activity error when the fallback list is unavailable.
-          }
-        }
         setFields([]);
         setVenues([]);
         setError(cause.message);
@@ -5224,11 +5356,11 @@ function ParticipantPortal({ lotteryMode = false }) {
     try {
       const [questionList, control, board, answerList, activityInfo, siteInfo] =
         await Promise.all([
-          api.questions(activityId, participantToken),
-          api.controlState(activityId, participantToken),
-          api.scoreboard(activityId, participantToken),
-          participant?.id
-            ? api.submissions(activityId, participant.id, participantToken)
+          lotteryMode ? Promise.resolve([]) : api.questions(activityId, participantToken),
+          api.controlState(identityActivityId, participantToken),
+          api.scoreboard(identityActivityId, participantToken),
+          participant?.id && !lotteryMode
+            ? api.submissions(identityActivityId, participant.id, participantToken)
             : Promise.resolve([]),
           api.activity(activityId),
           api.siteSettings(),
@@ -5245,15 +5377,20 @@ function ParticipantPortal({ lotteryMode = false }) {
         return score === undefined ? current : { ...current, score };
       });
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) {
+        setParticipantToken(identityActivityId, null);
+        setLocalParticipantToken(null);
+        setParticipant(null);
+      }
       setError(cause.message);
     } finally {
       setLoading(false);
     }
-  }, [activityId, navigate, participant?.id, participantToken, requestedVenue]);
+  }, [activityId, identityActivityId, lotteryMode, participant?.id, participantToken, requestedVenue]);
   useEffect(() => {
     load();
   }, [load]);
-  useActivityStream(activityId, load, participantToken);
+  useActivityStream(activityId, load, participantToken, setError);
   if (loading) return <LoadingPage label="正在连接活动现场" />;
   if (error && !questions.length)
     return <BackendProblem message={error} onRetry={load} />;
@@ -5261,11 +5398,11 @@ function ParticipantPortal({ lotteryMode = false }) {
     .filter((item) => item.enabled !== false)
     .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
   const question =
-    questions.find((item) => item.id === state?.questionId) || orderedQuestions[0];
+    questions.find((item) => item.id === state?.questionId);
   const questionIndex = Math.max(0, orderedQuestions.findIndex((item) => item.id === question?.id));
   const brandName = activity?.clientDisplayName || activity?.name || "活动现场";
   const pageStyle = {
-    "--client-theme": activity?.clientThemeColor || "#168F7C",
+    "--client-theme": activity?.clientThemeColor || "#b84f79",
     backgroundImage: activity?.clientBackgroundImageUrl
       ? `url("${activity.clientBackgroundImageUrl}")`
       : undefined,
@@ -5279,6 +5416,11 @@ function ParticipantPortal({ lotteryMode = false }) {
       />
       <section className="participant-workspace" aria-label="活动参与区">
         <div className="participant-workspace__content">
+          <label className="participant-activity-picker">当前活动
+            <select aria-label="选择参与活动" value={activityId} onChange={(event) => navigate(activityEntry(activities.find((item) => item.id === event.target.value)))}>
+              {activities.map((item) => <option key={item.id} value={item.id}>{item.parentActivityId ? `${activities.find((parent) => parent.id === item.parentActivityId)?.name || "主活动"} / ` : ""}{item.name}</option>)}
+            </select>
+          </label>
           {activity?.clientHeroImageUrl && (
             <img
               className="participant-brand-hero"
@@ -5300,16 +5442,17 @@ function ParticipantPortal({ lotteryMode = false }) {
             </div>
             <Trophy size={26} />
           </div>
-          {!participant ? (
+          <InlineError text={error} onRetry={load} />
+          {!participant || !participantToken ? (
             <RegistrationCard
-              activityId={activityId}
+              activityId={identityActivityId}
               venue={venue}
               venues={venues}
               setVenue={setVenue}
               fields={fields}
               onRegistered={(person, token) => {
-                persistParticipant(activityId, person);
-                setParticipantToken(activityId, token);
+                persistParticipant(identityActivityId, person);
+                setParticipantToken(identityActivityId, token);
                 setLocalParticipantToken(token);
                 setParticipant(person);
                 setTab(lotteryMode ? "rewards" : "play");
@@ -5317,7 +5460,7 @@ function ParticipantPortal({ lotteryMode = false }) {
             />
           ) : (
             <>
-              {tab === "play" && (
+              {tab === "play" && !lotteryMode && (
                 <AnswerCard
                   activityId={activityId}
                   participant={participant}
@@ -5346,20 +5489,22 @@ function ParticipantPortal({ lotteryMode = false }) {
                   participant={participant}
                   participantToken={participantToken}
                   preferredPoolId={lotteryPoolId}
+                  entryVenue={requestedVenue}
                 />
               )}
+              {tab === "profile" && <ParticipantProfile activityId={identityActivityId} participant={participant} participantToken={participantToken} />}
             </>
           )}
         </div>
         {participant && (
           <nav className="participant-nav" aria-label="参与者功能导航">
-            <button
+            {!lotteryMode && <button
               className={tab === "play" ? "is-active" : ""}
               onClick={() => setTab("play")}
             >
               <CircleHelp size={18} />
               答题
-            </button>
+            </button>}
             <button
               className={tab === "rank" ? "is-active" : ""}
               onClick={() => setTab("rank")}
@@ -5374,35 +5519,34 @@ function ParticipantPortal({ lotteryMode = false }) {
               <Gift size={18} />
               奖励
             </button>
+            <button className={tab === "profile" ? "is-active" : ""} onClick={() => setTab("profile")}><Users size={18} />我的信息</button>
           </nav>
         )}
       </section>
       <div className="participant-sidecopy">
         <span className="eyebrow">
-          {lotteryMode ? "LOTTERY ACCESS" : "PARTICIPANT EXPERIENCE"}
+          {lotteryMode ? "幸運のルーレット" : "ようこそ、会場へ"}
         </span>
         <h1>{brandName}</h1>
         <p>
           {lotteryMode
-            ? "转动幸运轮盘，领取由活动奖池服务端确认的现场惊喜。"
-            : "登记信息只作用于当前活动与会场。答题结果、得分和奖励均由服务端确认。"}
+            ? "转动幸运轮盘，把今天的惊喜带回家。"
+            : "选好会场，写下你的名字。和现场的伙伴一起答题，收集积分与惊喜。"}
         </p>
         <div>
           <BadgeCheck size={17} />
-          活动级身份鉴别
+          相聚在此刻
         </div>
         <div>
           <Radio size={17} />
-          实时状态同步
+          一起挑战
         </div>
         <div>
           <Gift size={17} />
-          安全领奖核销
+          领取你的惊喜
         </div>
         {siteSettings?.footerCode && (
-          <small className="participant-site-footer">
-            {siteSettings.footerCode}
-          </small>
+          <iframe className="participant-site-footer" title="站点页脚" sandbox="allow-scripts" srcDoc={siteSettings.footerCode} />
         )}
       </div>
     </main>
@@ -5434,11 +5578,23 @@ function ParticipantHeader({ state, activity, siteSettings }) {
         </strong>
         <span>{stageLabel(state?.stage || "LOBBY")}</span>
       </div>
-      <button type="button" aria-label="活动说明">
-        <CircleHelp size={19} />
-      </button>
+      <Link to="/join" aria-label="选择其他活动" title="选择其他活动"><CalendarDays size={19} /></Link>
     </header>
   );
+}
+
+function ParticipantProfile({ activityId, participant, participantToken }) {
+  const [detail, setDetail] = useState(participant);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try { setDetail(await api.participant(activityId, participant.id, participantToken)); setError(""); }
+    catch (cause) { setError(cause.message); }
+  }, [activityId, participant.id, participantToken]);
+  useEffect(() => { load(); }, [load]);
+  return <article className="participant-profile"><div className="workspace-heading"><h2>我的参与信息</h2><button className="toolbar-icon" title="刷新参与信息" onClick={load}><RefreshCw size={18} /></button></div>
+    <InlineError text={error} onRetry={load} />
+    <dl>{[["姓名", detail.name], ["联系方式", detail.contact], ["组织", detail.organization], ["会场", detail.venue], ["参与人 ID", detail.id], ["积分", detail.score], ...Object.entries(detail.customFields || {})].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? ""}</dd></div>)}</dl>
+  </article>;
 }
 
 function RegistrationCard({
@@ -5449,6 +5605,7 @@ function RegistrationCard({
   fields,
   onRegistered,
 }) {
+  const [returning, setReturning] = useState(false);
   const [values, setValues] = useState({
     name: "",
     contact: "",
@@ -5475,12 +5632,15 @@ function RegistrationCard({
     setError("");
     try {
       const payload = buildRegistrationPayload(values, customValues);
-      const person = await api.register(activityId, venue, payload);
+      const registered = returning ? null : await api.register(activityId, venue, payload);
       const session = await api.participantToken({
         activityId,
         venue,
         contact: values.contact,
       });
+      const person = returning
+        ? await api.participant(activityId, session.participantId, session.accessToken)
+        : registered;
       onRegistered(person, session.accessToken);
     } catch (cause) {
       setError(cause.message);
@@ -5491,7 +5651,7 @@ function RegistrationCard({
   return (
     <form className="registration-card" onSubmit={submit}>
       <p className="eyebrow">WELCOME TO THE EVENT</p>
-      <h2>先确认你的现场身份</h2>
+      <h2>{returning ? "查询我的参与信息" : "先确认你的现场身份"}</h2>
       <p>联系方式会在当前活动与会场内唯一识别你。</p>
       <label>
         会场
@@ -5501,6 +5661,7 @@ function RegistrationCard({
           disabled={!activeVenues.length}
           onChange={(event) => setVenue(event.target.value)}
         >
+          {activeVenues.length > 0 && <option value="">请选择所在会场</option>}
           {activeVenues.length ? (
             activeVenues.map((item) => (
               <option key={item.id} value={item.code}>
@@ -5512,7 +5673,7 @@ function RegistrationCard({
           )}
         </select>
       </label>
-      <label>
+      {!returning && <label>
         姓名
         <input
           required
@@ -5522,7 +5683,7 @@ function RegistrationCard({
           }
           placeholder="输入真实姓名"
         />
-      </label>
+      </label>}
       <label>
         联系方式
         <input
@@ -5534,7 +5695,7 @@ function RegistrationCard({
           placeholder="手机号或邮箱"
         />
       </label>
-      <label>
+      {!returning && <label>
         所属组织（可选）
         <input
           value={values.organization}
@@ -5543,8 +5704,8 @@ function RegistrationCard({
           }
           placeholder="公司或团队"
         />
-      </label>
-      {dynamic.map((field) => (
+      </label>}
+      {!returning && dynamic.map((field) => (
         <RegistrationFieldInput
           key={field.id || registrationFieldKey(field)}
           field={field}
@@ -5564,8 +5725,11 @@ function RegistrationCard({
         </p>
       )}
       <button className="primary-button" disabled={busy || !venue}>
-        {busy ? "正在提交" : "完成登记"}
+        {busy ? "正在提交" : returning ? "查询并继续参与" : "完成登记"}
         <ArrowRight size={17} />
+      </button>
+      <button type="button" className="text-button" onClick={() => { setReturning(!returning); setError(""); }}>
+        {returning ? "首次参与，填写登记" : "查询已登记的参与信息"}
       </button>
     </form>
   );
@@ -5687,7 +5851,7 @@ function AnswerCard({
   const multi = question.type === "MULTIPLE";
   const text = question.type === "TEXT";
   const revealed = state?.stage === "ANSWER_REVEALED";
-  const canAnswer = state?.stage === "QUESTION_OPEN" && !result;
+  const canAnswer = state?.stage === "QUESTION_OPEN" && remaining > 0 && !result;
   const choose = (answer) => {
     if (!canAnswer) return;
     setAnswers((current) =>
@@ -5750,7 +5914,7 @@ function AnswerCard({
           {remaining
             ? formatSeconds(remaining)
             : state?.stage === "QUESTION_OPEN"
-              ? "进行中"
+              ? "答题时间已结束"
               : stageLabel(state?.stage || "LOBBY")}
         </strong>
       </div>
@@ -5758,7 +5922,7 @@ function AnswerCard({
         {typeLabel(question.type)} · {question.fullScore || 100} 分
       </span>
       <h2>{question.title}</h2>
-      <ScreenMedia src={question.mediaUrl} className="answer-question-media" />
+      <QuestionMedia question={question} className="answer-question-media" />
       {text ? (
         <textarea
           className="text-answer"
@@ -5856,6 +6020,7 @@ function RewardsCard({
   participant,
   participantToken,
   preferredPoolId = null,
+  entryVenue = "",
 }) {
   const [awards, setAwards] = useState([]);
   const [chance, setChance] = useState(null);
@@ -5877,6 +6042,7 @@ function RewardsCard({
   useEffect(() => {
     load();
   }, [load]);
+  useActivityStream(activityId, load, participantToken, setError);
   const draw = async () => {
     setDrawing(true);
     setError("");
@@ -5886,7 +6052,7 @@ function RewardsCard({
         {
           participantId: participant.id,
           prizePoolId: preferredPoolId || null,
-          venue: participant.venue || null,
+          venue: entryVenue || participant.venue,
           idempotencyKey: createIdempotencyKey(),
         },
         participantToken,
@@ -5902,19 +6068,22 @@ function RewardsCard({
   return (
     <article className="mobile-rewards">
       <p className="eyebrow">MY REWARDS</p>
-      <h2>待领取奖励</h2>
+      <h2>我的奖励</h2>
       {awards.map((award) => (
         <div className="mobile-award" key={award.id}>
           <Gift size={19} />
           <div>
             <strong>{award.prizeName}</strong>
             <span>
-              {award.deliveryType === "DIGITAL"
-                ? award.redemptionCode
-                : award.status === "REDEEMED"
-                  ? "已核销"
-                  : "现场领取"}
+              {award.status === "VOID" ? "已作废" : award.status === "REDEEMED" ? "已核销"
+                : award.deliveryType === "PHYSICAL" ? "待领取 · 请前往现场领奖处" : "待兑换"}
             </span>
+            {award.status !== "VOID" && award.deliveryType !== "PHYSICAL" && (
+              <>
+                <code>{award.redemptionCode}</code>
+                {award.redemptionUrl && <a href={award.redemptionUrl} target="_blank" rel="noreferrer">前往兑换</a>}
+              </>
+            )}
           </div>
           <ChevronRight size={17} />
         </div>
@@ -5934,7 +6103,7 @@ function RewardsCard({
           onClick={draw}
         >
           {drawing
-            ? "正在校验结果"
+            ? "转盘转动中"
             : chance?.remainingDraws > 0
               ? "开始抽奖"
               : "暂无抽奖机会"}
@@ -5946,7 +6115,7 @@ function RewardsCard({
           <div>
             <strong>{result.prizeName}</strong>
             <span>
-              {result.deliveryType === "DIGITAL"
+              {result.deliveryType !== "PHYSICAL"
                 ? `兑换码：${result.redemptionCode}`
                 : "奖品已加入待核销列表，请前往现场领取。"}
             </span>
@@ -5979,6 +6148,10 @@ function PublicScreen() {
   const [display, setDisplay] = useState(null);
   const [status, setStatus] = useState(deviceId ? "pairing" : "missing-device");
   const [error, setError] = useState("");
+  const clearDeletedSession = useCallback(() => {
+    sessionStorage.removeItem(`matrix.screen-token.${activityId}.${deviceId}`);
+    setSession(null); setDisplay(null); setStatus("pairing-required");
+  }, [activityId, deviceId]);
   useEffect(() => {
     if (!deviceId) {
       setStatus("missing-device");
@@ -6040,12 +6213,12 @@ function PublicScreen() {
           viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
         })
-        .catch(() => {});
+        .catch((cause) => { setError(cause.message); setStatus("offline"); });
     sendHeartbeat();
     const interval = window.setInterval(sendHeartbeat, 30000);
     return () => window.clearInterval(interval);
   }, [activityId, deviceId, session?.accessToken]);
-  useScreenStream(deviceId, load, session?.accessToken);
+  useScreenStream(deviceId, load, session?.accessToken, setError, clearDeletedSession);
   if (
     !deviceId ||
     !session?.accessToken ||
@@ -6129,6 +6302,7 @@ function ScreenDisplay({ activityId, display, mode }) {
           options: payload.options,
           answers: payload.answers,
           mediaUrl: payload.mediaUrl,
+          mediaUrls: payload.mediaUrls,
         }}
         state={{
           stage: mode === "RESULT" ? "ANSWER_REVEALED" : "QUESTION_OPEN",
@@ -6137,6 +6311,7 @@ function ScreenDisplay({ activityId, display, mode }) {
         }}
         result={mode === "RESULT"}
         responses={payload.responses || payload.submissions || payload.response || []}
+        submittedCount={payload.submittedCount ?? 0}
         volume={display.volume}
       />
     );
@@ -6210,6 +6385,8 @@ function TemplateScreen({ activityId, display }) {
                 alt={config.alt || "大屏图片"}
               />
             );
+          if (item.type === "FILE" && /\.pdf(?:[?#]|$)/i.test(config.url))
+            return <object className="template-file-preview" key={item.id} data={config.url} type="application/pdf"><a href={config.url} target="_blank" rel="noreferrer">打开 PDF 文件</a></object>;
           if (item.type === "FILE")
             return (
               <a
@@ -6234,7 +6411,7 @@ function TemplateScreen({ activityId, display }) {
   );
 }
 
-function ScreenQuestion({ question, state, result, responses = [], volume }) {
+function ScreenQuestion({ question, state, result, responses = [], submittedCount = 0, volume }) {
   const remaining = useLiveCountdown(state);
   const resultResponses = Array.isArray(responses)
     ? responses
@@ -6244,7 +6421,8 @@ function ScreenQuestion({ question, state, result, responses = [], volume }) {
   return (
     <div className="screen-question-new">
       <div className="screen-question-new__meta">
-        <span>2025 知识挑战赛 · {typeLabel(question?.type || "SINGLE")}</span>
+        <span>{typeLabel(question?.type || "SINGLE")}</span>
+        <span className="screen-submitted-count"><Users size={20} />已提交 {submittedCount} 人</span>
         <strong>
           {result
             ? "答案已公布"
@@ -6254,8 +6432,8 @@ function ScreenQuestion({ question, state, result, responses = [], volume }) {
         </strong>
       </div>
       <h1>{question?.title || "现场即将开始"}</h1>
-      <ScreenMedia
-        src={question?.mediaUrl}
+      <QuestionMedia
+        question={question}
         className="screen-question-media"
         volume={volume}
       />
@@ -6302,6 +6480,30 @@ function ScreenQuestion({ question, state, result, responses = [], volume }) {
       </footer>
     </div>
   );
+}
+
+function QuestionMedia({ question, className, volume }) {
+  const sources = Array.isArray(question?.mediaUrls) ? question.mediaUrls : question?.mediaUrl ? [question.mediaUrl] : [];
+  if (!sources.length) return null;
+  if (sources.length === 1) return <ScreenMedia src={sources[0]} className={className} volume={volume} />;
+  return <div className={`question-media-gallery ${className || ""}`}>
+    {sources.map((src, index) => <ScreenMedia src={src} key={`${src}-${index}`} volume={volume} />)}
+  </div>;
+}
+
+function ActivityLifecycle({ activity, canManage, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const change = async (status) => {
+    setBusy(true); setError("");
+    try { await api.changeActivityStatus(activity.id, status); await onChanged?.(); }
+    catch (cause) { setError(cause.message); }
+    finally { setBusy(false); }
+  };
+  return <div className="activity-lifecycle"><strong>{activityStatusLabels[activity?.status]}</strong>
+    {canManage && activityActions(activity?.status).map(([status, label]) => <button className="secondary-button" type="button" key={status} disabled={busy} onClick={() => change(status)}>{label}</button>)}
+    <InlineError text={error} />
+  </div>;
 }
 
 function ScreenMedia({ src, className, volume = 100 }) {
@@ -6407,51 +6609,51 @@ function ScreenWinners({ winners, display }) {
   );
 }
 
-function useActivityStream(activityId, onEvent, token) {
+function useActivityStream(activityId, onEvent, token, onError) {
   useEffect(() => {
-    if (!activityId) return undefined;
-    let client;
-    try {
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const accessToken = token || getAccessToken();
-      client = new Client({
-        brokerURL: `${protocol}://${window.location.host}/ws`,
-        reconnectDelay: 2500,
-        connectHeaders: accessToken
-          ? { Authorization: `Bearer ${accessToken}` }
-          : {},
-        onConnect: () =>
-          client.subscribe(`/topic/activities/${activityId}`, (message) => {
-            try {
-              onEvent(JSON.parse(message.body));
-            } catch {
-              onEvent({});
-            }
-          }),
-      });
-      client.activate();
-    } catch {}
-    return () => client?.deactivate();
-  }, [activityId, onEvent, token]);
+    const accessToken = token || getAccessToken();
+    if (!activityId || !accessToken) return undefined;
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const client = new Client({
+      brokerURL: `${protocol}://${window.location.host}/ws`,
+      reconnectDelay: 2500,
+      connectHeaders: { Authorization: `Bearer ${accessToken}` },
+      onStompError: (frame) => onError(frame.headers.message + ": " + frame.body),
+      onWebSocketError: () => onError("实时连接异常，正在重新连接"),
+      onConnect: () => {
+        client.subscribe(`/topic/activities/${activityId}`, (message) => onEvent(JSON.parse(message.body)));
+        onEvent();
+      },
+    });
+    client.activate();
+    return () => client.deactivate();
+  }, [activityId, onEvent, token, onError]);
 }
 
-function useScreenStream(deviceId, onEvent, token) {
+function useScreenStream(deviceId, onEvent, token, onError, onDeleted) {
   useEffect(() => {
     if (!deviceId || !token) return undefined;
-    let client;
-    try {
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      client = new Client({
-        brokerURL: `${protocol}://${window.location.host}/ws`,
-        reconnectDelay: 2500,
-        connectHeaders: { Authorization: `Bearer ${token}` },
-        onConnect: () =>
-          client.subscribe(`/topic/screens/${deviceId}`, () => onEvent()),
-      });
-      client.activate();
-    } catch {}
-    return () => client?.deactivate();
-  }, [deviceId, onEvent, token]);
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const client = new Client({
+      brokerURL: `${protocol}://${window.location.host}/ws`,
+      reconnectDelay: 2500,
+      connectHeaders: { Authorization: `Bearer ${token}` },
+      onStompError: (frame) => onError(frame.headers.message + ": " + frame.body),
+      onWebSocketError: () => onError("大屏实时连接异常，正在重新连接"),
+      onConnect: () => {
+        client.subscribe(`/topic/screens/${deviceId}`, (message) => {
+          try {
+            const event = JSON.parse(message.body);
+            if (event?.type === "screen.device.deleted") { onDeleted?.(); return; }
+          } catch { /* fall back to a state refresh */ }
+          onEvent();
+        });
+        onEvent();
+      },
+    });
+    client.activate();
+    return () => client.deactivate();
+  }, [deviceId, onEvent, token, onError, onDeleted]);
 }
 
 function useLiveCountdown(state) {

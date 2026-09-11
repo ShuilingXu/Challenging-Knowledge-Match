@@ -50,7 +50,7 @@ public final class ApiModels {
   public record ActivityResponse(UUID id, String name, String city, String status, Instant startsAt,
       Instant endsAt, String description, String clientDisplayName, String clientThemeColor,
       String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt,
-      UUID parentActivityId, String activityType, UUID activeQuestionSetId) { }
+      UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole) { }
 
   /** Settings safe to expose on participant-facing routes. */
   public record SiteSettingsResponse(String domain, String siteName, String logoUrl, String footerCode) { }
@@ -140,24 +140,53 @@ public final class ApiModels {
       @Min(0) @Max(100) Integer partialCreditPercent,
       @Size(max = 50) List<@NotBlank @Size(max = 2000) String> textAcceptedAnswers,
       @Size(max = 24) String textMatchMode,
-      Boolean enabled) {
+      Boolean enabled,
+      @Size(max = 20) List<@NotBlank @Size(max = 2048) String> mediaUrls) {
+    public QuestionWriteRequest(String type, String title, List<String> options, Set<String> answers,
+        Integer fullScore, Integer displayOrder, String mediaUrl, Integer partialCreditPercent,
+        List<String> textAcceptedAnswers, String textMatchMode, Boolean enabled) {
+      this(type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent,
+          textAcceptedAnswers, textMatchMode, enabled, null);
+    }
+
     public QuestionWriteRequest(String type, String title, List<String> options, Set<String> answers,
         Integer fullScore, Integer displayOrder, String mediaUrl, Integer partialCreditPercent, Boolean enabled) {
-      this(type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent, null, null, enabled);
+      this(type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent, null, null, enabled, null);
     }
   }
 
   public record QuestionResponse(UUID id, String type, String title, List<String> options, int fullScore,
-      int displayOrder, String mediaUrl, boolean enabled) { }
+      int displayOrder, String mediaUrl, boolean enabled, List<String> mediaUrls) {
+    public QuestionResponse(UUID id, String type, String title, List<String> options, int fullScore,
+        int displayOrder, String mediaUrl, boolean enabled) {
+      this(id, type, title, options, fullScore, displayOrder, mediaUrl, enabled,
+          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl));
+    }
+  }
 
   /** Staff-only question view used by the live control room. Text answer keys are intentionally
    * excluded from the participant-facing QuestionResponse. */
   public record QuestionControlResponse(UUID id, String type, String title, List<String> options, int fullScore,
-      int displayOrder, String mediaUrl, List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) { }
+      int displayOrder, String mediaUrl, List<String> textAcceptedAnswers, String textMatchMode, boolean enabled,
+      List<String> mediaUrls) {
+    public QuestionControlResponse(UUID id, String type, String title, List<String> options, int fullScore,
+        int displayOrder, String mediaUrl, List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) {
+      this(id, type, title, options, fullScore, displayOrder, mediaUrl, textAcceptedAnswers, textMatchMode, enabled,
+          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl));
+    }
+  }
 
   public record QuestionAdminResponse(UUID id, String type, String title, List<String> options,
       List<String> answers, int fullScore, int displayOrder, String mediaUrl, int partialCreditPercent,
-      List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) { }
+      List<String> textAcceptedAnswers, String textMatchMode, boolean enabled, List<String> mediaUrls) {
+    public QuestionAdminResponse(UUID id, String type, String title, List<String> options,
+        List<String> answers, int fullScore, int displayOrder, String mediaUrl, int partialCreditPercent,
+        List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) {
+      this(id, type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent,
+          textAcceptedAnswers, textMatchMode, enabled,
+          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl));
+    }
+  }
 
   public record QuestionSetRequest(
       @NotBlank @Size(max = 180) String name,
@@ -181,10 +210,10 @@ public final class ApiModels {
     }
   }
 
-  public record GradeSubmissionRequest(@Min(0) @NotNull Integer awardedPoints, @Size(max = 1000) String feedback) { }
+  public record GradeSubmissionRequest(@NotNull Integer awardedPoints, @Size(max = 1000) String feedback) { }
 
   public record SubmissionResponse(UUID id, UUID participantId, UUID questionId, List<String> answers,
-      int awardedPoints, String status, String feedback, Instant submittedAt, Instant gradedAt) { }
+      int awardedPoints, String status, String feedback, Instant submittedAt, Instant gradedAt, int responseRank) { }
 
   public record ScoreLedgerResponse(UUID id, UUID participantId, UUID questionId, UUID submissionId, int points,
       String entryType, String note, Instant createdAt) { }
@@ -231,7 +260,8 @@ public final class ApiModels {
       String description, String redemptionUrl, int totalQuantity, int claimedQuantity, int remainingQuantity,
       int minScore, int drawWeight, Integer rankFrom, Integer rankTo, boolean enabled) { }
 
-  public record AwardResponse(UUID id, String prizeName, String deliveryType, String status, String redemptionCode) { }
+  public record AwardResponse(UUID id, String prizeName, String deliveryType, String status, String redemptionCode,
+      String redemptionUrl) { }
 
   public record AwardDetailResponse(UUID id, UUID participantId, UUID prizePoolId, String prizeName,
       String deliveryType, String status, String redemptionCode, String redemptionUrl, String fulfillmentNote,
@@ -241,6 +271,7 @@ public final class ApiModels {
       @Size(max = 600) String fulfillmentNote) { }
 
   public record RedeemAwardRequest(@Size(max = 120) String operator) { }
+  public record BatchRedeemRequest(@NotEmpty @Size(max = 100) List<@NotNull UUID> awardIds) { }
   public record VoidAwardRequest(@Size(max = 600) String note) { }
   public record GrantLotteryChancesRequest(@NotNull @Min(1) Integer draws, @Size(max = 200) String reason) { }
   public record LotteryChanceResponse(UUID participantId, int remainingDraws, int grantedDraws,

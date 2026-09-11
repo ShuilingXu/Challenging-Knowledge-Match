@@ -94,6 +94,12 @@ public class ScreenController {
     return service.renameDevice(activityId, deviceId, request);
   }
 
+  @DeleteMapping("/devices/{deviceId}")
+  public ResponseEntity<Void> deleteDevice(@PathVariable UUID activityId, @PathVariable UUID deviceId) {
+    service.deleteDevice(activityId, deviceId);
+    return ResponseEntity.noContent().build();
+  }
+
   @PostMapping("/devices/{deviceId}/pairing-token")
   public ScreenDeviceRegistration rotatePairingToken(@PathVariable UUID activityId, @PathVariable UUID deviceId) {
     return service.rotatePairingToken(activityId, deviceId);

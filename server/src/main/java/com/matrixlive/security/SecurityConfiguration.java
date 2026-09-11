@@ -43,7 +43,7 @@ public class SecurityConfiguration {
             .requestMatchers(HttpMethod.POST, "/api/activities/*/screens/devices/*/session").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/activities").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/activities/*", "/api/activities/*/venues",
-                "/api/activities/*/registration-fields").permitAll()
+                "/api/activities/*/registration-fields", "/api/activities/*/media/*/*").permitAll()
             .requestMatchers(HttpMethod.POST, "/api/activities/*/venues/*/registrations").permitAll()
             .requestMatchers(HttpMethod.POST, "/api/activities").access(activityCreationAuthorizationManager)
             .requestMatchers("/api/admin/**").hasRole("SYSTEM_ADMIN")

@@ -55,7 +55,8 @@ export function getParticipantToken(activityId) {
 }
 
 export function setParticipantToken(activityId, token) {
-  sessionStorage.setItem(`${PARTICIPANT_TOKEN_PREFIX}${activityId}`, token)
+  if (token === null) sessionStorage.removeItem(`${PARTICIPANT_TOKEN_PREFIX}${activityId}`)
+  else sessionStorage.setItem(`${PARTICIPANT_TOKEN_PREFIX}${activityId}`, token)
 }
 
 export function getScreenSession(activityId, deviceId) {
@@ -168,7 +169,10 @@ export const api = {
     const suffix = params.size ? `?${params.toString()}` : ''
     return request(`/api/activities/${id}/participants${suffix}`)
   },
-  participant: (id, participantId) => request(`/api/activities/${id}/participants/${participantId}`),
+  participant: (id, participantId, participantToken) => request(`/api/activities/${id}/participants/${participantId}`, {
+    auth: !participantToken,
+    headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {},
+  }),
   updateParticipant: (id, participantId, payload) => request(`/api/activities/${id}/participants/${participantId}`, { method: 'PATCH', body: payload }),
   participantToken: (payload) => request('/api/auth/participant-token', { method: 'POST', auth: false, body: payload }),
   questions: (id, participantToken) => request(`/api/activities/${id}/questions`, { auth: !participantToken, headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {} }),
@@ -200,6 +204,7 @@ export const api = {
   updatePrizePool: (id, poolId, payload) => request(`/api/activities/${id}/prize-pools/${poolId}`, { method: 'PATCH', body: payload }),
   deletePrizePool: (id, poolId) => request(`/api/activities/${id}/prize-pools/${poolId}`, { method: 'DELETE' }),
   awards: (id, participantId, participantToken) => request(`/api/activities/${id}/awards?participantId=${participantId}`, { auth: !participantToken, headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {} }),
+  redeemBatch: (id, awardIds) => request(`/api/activities/${id}/awards/redeem-batch`, { method: 'POST', body: { awardIds } }),
   awardsAdmin: (id, status = '') => request(`/api/activities/${id}/awards/admin${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   issueAward: (id, payload) => request(`/api/activities/${id}/awards`, { method: 'POST', body: payload }),
   issueRankingAwards: (id, poolId) => request(`/api/activities/${id}/prize-pools/${poolId}/ranking-awards`, { method: 'POST' }),
@@ -217,6 +222,7 @@ export const api = {
   applyTemplate: (id, templateId, payload) => request(`/api/activities/${id}/screens/templates/${templateId}/apply`, { method: 'POST', body: payload }),
   devices: (id) => request(`/api/activities/${id}/screens/devices`),
   registerScreen: (id, payload) => request(`/api/activities/${id}/screens/devices/register`, { method: 'POST', body: payload }),
+  deleteScreen: (id, deviceId) => request(`/api/activities/${id}/screens/devices/${deviceId}`, { method: 'DELETE' }),
   renameScreen: (id, deviceId, payload) => request(`/api/activities/${id}/screens/devices/${deviceId}`, { method: 'PATCH', body: payload }),
   rotateScreenPairing: (id, deviceId) => request(`/api/activities/${id}/screens/devices/${deviceId}/pairing-token`, { method: 'POST' }),
   updateScreenSettings: (id, deviceId, payload) => request(`/api/activities/${id}/screens/devices/${deviceId}/settings`, { method: 'PUT', body: payload }),

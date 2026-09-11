@@ -14,14 +14,15 @@ describe('registration request mapping', () => {
     })
   })
 
-  it('keeps a requested enabled venue and otherwise chooses the first enabled venue', () => {
+  it('keeps an enabled entry venue and requires selection for an absent or disabled venue', () => {
     const venues = [
       { code: 'north', enabled: false },
       { code: 'south', enabled: true },
       { code: 'west', enabled: true },
     ]
     expect(activeVenueCode(venues, 'west')).toBe('west')
-    expect(activeVenueCode(venues, 'north')).toBe('south')
+    expect(activeVenueCode(venues, 'north')).toBe('')
+    expect(activeVenueCode(venues, '')).toBe('')
     expect(activeVenueCode([], 'south')).toBe('')
   })
 

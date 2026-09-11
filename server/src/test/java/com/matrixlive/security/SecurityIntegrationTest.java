@@ -24,6 +24,50 @@ class SecurityIntegrationTest {
   @Autowired private MockMvc mvc;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private ActivityRepository activities;
+  @Autowired private com.matrixlive.service.ActivityService service;
+
+  @Test
+  void floorStaffCanAdjustAndGradeScoresButCannotReverseOrVoidAwards() throws Exception {
+    UUID activityId = activities.findAll().getFirst().getId();
+    String path = "/api/activities/" + activityId;
+    String staffToken = accessToken(login("event-staff", "ChangeMe!2026"));
+    var person = service.register(activityId, "south", new com.matrixlive.api.ApiModels.RegisterParticipantRequest(
+        "Staff score test", UUID.randomUUID() + "@test.example", null));
+    var question = service.createQuestion(activityId, new com.matrixlive.api.ApiModels.QuestionWriteRequest("TEXT", "Explain",
+        java.util.List.of(), java.util.Set.of(), 100, 20, null, 40, true));
+    service.control(activityId, new com.matrixlive.api.ApiModels.ControlRequest("QUESTION_OPEN", question.id(), 30));
+    var submission = service.submitAnswer(activityId, new com.matrixlive.api.ApiModels.SubmitAnswerRequest(person.id(),
+        question.id(), java.util.Set.of("My answer"), UUID.randomUUID().toString()));
+    mvc.perform(post(path + "/scores/adjustments").header("Authorization", "Bearer " + staffToken)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"participantId\":\"" + person.id() + "\",\"points\":-10}"))
+        .andExpect(status().isOk());
+    mvc.perform(post(path + "/submissions/" + submission.submissionId() + "/grade").header("Authorization", "Bearer " + staffToken)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"awardedPoints\":-5,\"feedback\":\"Penalty\"}"))
+        .andExpect(status().isOk());
+    org.junit.jupiter.api.Assertions.assertEquals(-15, service.participant(activityId, person.id()).score());
+    service.adjustScore(activityId, new com.matrixlive.api.ApiModels.ManualScoreRequest(person.id(), 15, "Restore test score"));
+    var pool = service.createPrizePool(activityId, new com.matrixlive.api.ApiModels.PrizePoolRequest("batch-" + UUID.randomUUID(),
+        "Batch prize", "MANUAL", "PHYSICAL", "", null, 2, 0, 1, null, null, true));
+    var first = service.issueAward(activityId, new com.matrixlive.api.ApiModels.IssueAwardRequest(person.id(), pool.id(), ""));
+    var second = service.issueAward(activityId, new com.matrixlive.api.ApiModels.IssueAwardRequest(person.id(), pool.id(), ""));
+    mvc.perform(post(path + "/awards/redeem-batch").header("Authorization", "Bearer " + staffToken)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"awardIds\":[\"" + first.id() + "\",\"ffffffff-ffff-ffff-ffff-ffffffffffff\"]}"))
+        .andExpect(status().isNotFound());
+    org.junit.jupiter.api.Assertions.assertTrue(service.awards(activityId, person.id()).stream().allMatch(award -> "PENDING".equals(award.status())));
+    mvc.perform(post(path + "/awards/redeem-batch").header("Authorization", "Bearer " + staffToken)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"awardIds\":[\"" + first.id() + "\",\"" + second.id() + "\"]}"))
+        .andExpect(status().isOk());
+    org.junit.jupiter.api.Assertions.assertTrue(service.awards(activityId, person.id()).stream().allMatch(award -> "REDEEMED".equals(award.status())));
+    mvc.perform(post(path + "/awards/" + UUID.randomUUID() + "/reverse-redemption")
+            .header("Authorization", "Bearer " + staffToken)).andExpect(status().isForbidden());
+    mvc.perform(post(path + "/awards/" + UUID.randomUUID() + "/void")
+            .header("Authorization", "Bearer " + staffToken).contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isForbidden());
+    mvc.perform(post("/api/activities/" + UUID.randomUUID() + "/scores/adjustments")
+            .header("Authorization", "Bearer " + staffToken).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"participantId\":\"" + person.id() + "\",\"points\":10}"))
+        .andExpect(status().isForbidden());
+  }
 
   @Test
   void exposesOnlyTheHealthProbeWithoutAuthentication() throws Exception {
@@ -73,7 +117,7 @@ class SecurityIntegrationTest {
     String activityPath = "/api/activities/" + activityId;
 
     mvc.perform(post(activityPath + "/control").contentType(MediaType.APPLICATION_JSON)
-            .content("{\"stage\":\"QUESTION\",\"seconds\":30}"))
+            .content("{\"stage\":\"LOBBY\",\"seconds\":30}"))
         .andExpect(status().isUnauthorized());
 
     MvcResult participantSession = mvc.perform(post("/api/auth/participant-token").contentType(MediaType.APPLICATION_JSON)
@@ -88,7 +132,7 @@ class SecurityIntegrationTest {
     mvc.perform(get(activityPath + "/questions/control").header("Authorization", "Bearer " + participantToken))
         .andExpect(status().isForbidden());
     mvc.perform(post(activityPath + "/control").header("Authorization", "Bearer " + participantToken)
-            .contentType(MediaType.APPLICATION_JSON).content("{\"stage\":\"QUESTION\",\"seconds\":30}"))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"stage\":\"LOBBY\",\"seconds\":30}"))
         .andExpect(status().isForbidden());
 
     String staffToken = accessToken(login("event-staff", "ChangeMe!2026"));
@@ -97,7 +141,7 @@ class SecurityIntegrationTest {
     mvc.perform(get(activityPath + "/questions/admin").header("Authorization", "Bearer " + staffToken))
         .andExpect(status().isForbidden());
     mvc.perform(post(activityPath + "/control").header("Authorization", "Bearer " + staffToken)
-            .contentType(MediaType.APPLICATION_JSON).content("{\"stage\":\"QUESTION\",\"seconds\":30}"))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"stage\":\"LOBBY\",\"seconds\":30}"))
         .andExpect(status().isOk());
     mvc.perform(post(activityPath + "/questions").header("Authorization", "Bearer " + staffToken)
             .contentType(MediaType.APPLICATION_JSON).content("{}"))

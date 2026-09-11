@@ -5,6 +5,8 @@ import com.matrixlive.security.auth.ActivityMembershipRepository;
 import com.matrixlive.security.auth.UserAccount;
 import com.matrixlive.security.auth.UserAccountRepository;
 import com.matrixlive.security.auth.UserRole;
+import com.matrixlive.repository.ActivityRepository;
+import com.matrixlive.screen.ScreenDeviceRepository;
 import io.jsonwebtoken.JwtException;
 import java.util.List;
 import java.util.UUID;
@@ -31,19 +33,27 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
   private final TokenRevocationService revocations;
   private final ActivityMembershipRepository memberships;
   private final UserAccountRepository users;
+  private final ActivityRepository activities;
+  private final ScreenDeviceRepository devices;
 
   public StompJwtChannelInterceptor(JwtTokenService tokens, TokenRevocationService revocations,
-      ActivityMembershipRepository memberships, UserAccountRepository users) {
+      ActivityMembershipRepository memberships, UserAccountRepository users, ActivityRepository activities,
+      ScreenDeviceRepository devices) {
     this.tokens = tokens;
     this.revocations = revocations;
     this.memberships = memberships;
     this.users = users;
+    this.activities = activities;
+    this.devices = devices;
   }
 
   @Override
   public Message<?> preSend(Message<?> message, MessageChannel channel) {
     StompHeaderAccessor headers = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
     if (headers == null) return message;
+    if (StompCommand.SEND.equals(headers.getCommand())) {
+      throw new AccessDeniedException("Clients cannot publish server events");
+    }
     if (StompCommand.CONNECT.equals(headers.getCommand())) {
       headers.setUser(authenticate(headers));
       return message;
@@ -68,6 +78,10 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
       if (claims.kind() == PrincipalKind.ACCOUNT && !isEnabledAccount(claims)) {
         throw new AccessDeniedException("Account is unavailable");
       }
+      if (claims.kind() == PrincipalKind.SCREEN_DEVICE && (claims.deviceId() == null || claims.activityId() == null
+          || devices.findByIdAndActivityId(claims.deviceId(), claims.activityId()).isEmpty())) {
+        throw new AccessDeniedException("Screen device is unavailable");
+      }
       AuthenticatedPrincipal principal = new AuthenticatedPrincipal(claims.tokenId(), claims.kind(), claims.userId(),
           claims.participantId(), claims.deviceId(), claims.activityId(), claims.role(), claims.username(), claims.expiresAt());
       return new UsernamePasswordAuthenticationToken(principal, null,
@@ -88,12 +102,21 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     if (destination == null) return false;
     Matcher device = DEVICE_TOPIC.matcher(destination);
     if (device.matches()) return principal.isScreenDevice() && principal.deviceId() != null
-        && principal.deviceId().toString().equals(device.group(1));
+        && principal.deviceId().toString().equals(device.group(1))
+        && devices.findByIdAndActivityId(principal.deviceId(), principal.activityId()).isPresent();
     Matcher activity = ACTIVITY_TOPIC.matcher(destination);
     if (!activity.matches()) return false;
     UUID activityId = UUID.fromString(activity.group(1));
     if (principal.isSystemAdmin()) return true;
-    if (principal.isParticipant()) return activityId.equals(principal.activityId());
-    return principal.userId() != null && memberships.findByUserIdAndActivityId(principal.userId(), activityId).isPresent();
+    if (principal.isParticipant()) {
+      boolean permittedActivity = activityId.equals(principal.activityId()) || activities.findById(activityId)
+          .filter(item -> "LOTTERY".equals(item.getActivityType()) && principal.activityId().equals(item.getParentActivityId()))
+          .isPresent();
+      return permittedActivity && !destination.endsWith("/screens");
+    }
+    if (principal.userId() == null) return false;
+    if (memberships.findByUserIdAndActivityId(principal.userId(), activityId).isPresent()) return true;
+    return activities.findById(activityId).map(item -> item.getParentActivityId())
+        .flatMap(parentId -> memberships.findByUserIdAndActivityId(principal.userId(), parentId)).isPresent();
   }
 }

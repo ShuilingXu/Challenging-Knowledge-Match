@@ -1,6 +1,8 @@
 package com.matrixlive.security.auth;
 
 import com.matrixlive.repository.ParticipantRepository;
+import com.matrixlive.repository.ActivityRepository;
+import com.matrixlive.domain.Activity;
 import com.matrixlive.security.JwtProperties;
 import com.matrixlive.security.JwtTokenService;
 import com.matrixlive.security.JwtTokenService.IssuedAccessToken;
@@ -24,6 +26,7 @@ public class AuthService {
   private static final SecureRandom RANDOM = new SecureRandom();
   private final UserAccountRepository users;
   private final ParticipantRepository participants;
+  private final ActivityRepository activities;
   private final RefreshTokenRepository refreshTokens;
   private final JwtTokenService jwt;
   private final JwtProperties properties;
@@ -31,11 +34,12 @@ public class AuthService {
   private final SecurityAuditService audit;
   private final RequestMetadata requestMetadata;
 
-  public AuthService(UserAccountRepository users, ParticipantRepository participants, RefreshTokenRepository refreshTokens,
+  public AuthService(UserAccountRepository users, ParticipantRepository participants, ActivityRepository activities, RefreshTokenRepository refreshTokens,
       JwtTokenService jwt, JwtProperties properties, PasswordEncoder passwordEncoder, SecurityAuditService audit,
       RequestMetadata requestMetadata) {
     this.users = users;
     this.participants = participants;
+    this.activities = activities;
     this.refreshTokens = refreshTokens;
     this.jwt = jwt;
     this.properties = properties;
@@ -86,7 +90,10 @@ public class AuthService {
   public AuthModels.ParticipantTokenResponse participantToken(AuthModels.ParticipantTokenRequest request,
       HttpServletRequest servletRequest) {
     String contact = normalizeContact(request.contact());
-    var participant = participants.findByActivityIdAndVenueAndContact(request.activityId(), request.venue(), contact)
+    UUID participantScope = activities.findById(request.activityId())
+        .filter(activity -> "LOTTERY".equals(activity.getActivityType()))
+        .map(Activity::getParentActivityId).orElse(request.activityId());
+    var participant = participants.findByActivityIdAndVenueAndContact(participantScope, request.venue(), contact)
         .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "Registration was not found"));
     IssuedAccessToken token = jwt.issueParticipantToken(request.activityId(), participant.getId());
     audit.record("PARTICIPANT_SESSION_ISSUED", "PARTICIPANT", participant.getId(), request.activityId(), true,

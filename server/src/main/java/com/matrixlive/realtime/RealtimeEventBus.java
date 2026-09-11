@@ -1,11 +1,14 @@
 package com.matrixlive.realtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import java.time.Instant;
 import java.util.Map;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Bridges local STOMP brokers through Redis so WebSocket clients can be connected to any API node. */
 @Service
@@ -24,13 +27,23 @@ public class RealtimeEventBus {
   }
 
   public void send(String destination, Object payload) {
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override public void afterCommit() { publish(destination, payload); }
+      });
+    } else {
+      publish(destination, payload);
+    }
+  }
+
+  private void publish(String destination, Object payload) {
     if (!properties.isRedisEnabled()) {
       messaging.convertAndSend(destination, payload);
       return;
     }
     try {
       redis.convertAndSend(properties.getChannel(), mapper.writeValueAsString(new Envelope(destination, payload, Instant.now())));
-    } catch (Exception exception) {
+    } catch (JsonProcessingException exception) {
       throw new IllegalStateException("Redis real-time publishing failed", exception);
     }
   }
@@ -39,7 +52,7 @@ public class RealtimeEventBus {
     try {
       Envelope event = mapper.readValue(value, Envelope.class);
       messaging.convertAndSend(event.destination(), event.payload());
-    } catch (Exception exception) {
+    } catch (JsonProcessingException exception) {
       throw new IllegalArgumentException("Invalid Redis real-time event", exception);
     }
   }

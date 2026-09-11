@@ -1,11 +1,18 @@
 package com.matrixlive.domain;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Converter;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -41,6 +48,10 @@ public class Question {
 
   @Column(length = 2048)
   private String mediaUrl;
+
+  @Convert(converter = MediaUrlsConverter.class)
+  @Column(name = "media_urls", columnDefinition = "text")
+  private List<String> mediaUrls;
 
   @Column(nullable = false)
   private int partialCreditPercent;
@@ -86,6 +97,12 @@ public class Question {
   public int getDisplayOrder() { return displayOrder; }
   public boolean isEnabled() { return enabled; }
   public String getMediaUrl() { return mediaUrl; }
+  public List<String> getMediaUrls() {
+    if (mediaUrls == null) {
+      return mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl);
+    }
+    return List.copyOf(mediaUrls);
+  }
   public int getPartialCreditPercent() { return partialCreditPercent; }
   public String getTextAcceptedAnswers() { return textAcceptedAnswers; }
   public String getTextMatchMode() { return textMatchMode; }
@@ -99,10 +116,40 @@ public class Question {
     if (answers != null) this.answers = answers;
     if (fullScore != null) this.fullScore = fullScore;
     if (displayOrder != null) this.displayOrder = displayOrder;
-    if (mediaUrl != null) this.mediaUrl = mediaUrl;
+    if (mediaUrl != null) setMediaUrls(mediaUrl.isBlank() ? List.of() : List.of(mediaUrl));
     if (partialCreditPercent != null) this.partialCreditPercent = partialCreditPercent;
     if (textAcceptedAnswers != null) this.textAcceptedAnswers = textAcceptedAnswers;
     if (textMatchMode != null) this.textMatchMode = textMatchMode;
     if (enabled != null) this.enabled = enabled;
+  }
+
+  public void setMediaUrls(List<String> mediaUrls) {
+    this.mediaUrls = List.copyOf(mediaUrls);
+    this.mediaUrl = mediaUrls.isEmpty() ? "" : mediaUrls.get(0);
+  }
+
+  @Converter
+  public static class MediaUrlsConverter implements AttributeConverter<List<String>, String> {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    @Override
+    public String convertToDatabaseColumn(List<String> values) {
+      if (values == null) return null;
+      try {
+        return MAPPER.writeValueAsString(values);
+      } catch (JsonProcessingException exception) {
+        throw new IllegalArgumentException("Cannot serialize question media", exception);
+      }
+    }
+
+    @Override
+    public List<String> convertToEntityAttribute(String value) {
+      if (value == null || value.isBlank()) return null;
+      try {
+        return MAPPER.readValue(value, new TypeReference<List<String>>() { });
+      } catch (JsonProcessingException exception) {
+        throw new IllegalArgumentException("Cannot deserialize question media", exception);
+      }
+    }
   }
 }

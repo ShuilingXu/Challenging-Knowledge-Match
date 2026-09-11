@@ -52,7 +52,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.IntStream;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -97,7 +96,6 @@ public class ActivityService {
   private final RealtimeEventBus realtime;
   private final ObjectMapper objectMapper;
   private final ScreenService screens;
-  private final Map<UUID, ControlState> controls = new ConcurrentHashMap<>();
 
   public ActivityService(ActivityRepository activities, ActivityMembershipRepository memberships, VenueRepository venues,
       RegistrationFieldRepository registrationFields, ParticipantRepository participants,
@@ -175,7 +173,8 @@ public class ActivityService {
     String next = normalizeEnum(request.status(), ACTIVITY_STATUSES, "activity status");
     ensureStatusTransition(activity.getStatus(), next);
     activity.changeStatus(next);
-    broadcast(activityId, "activity.status_changed", toActivity(activity));
+    if ("FINISHED".equals(next) || "CANCELLED".equals(next)) closeSubActivities(activityId, next);
+    broadcast(activityId, "activity.status_changed");
     return toActivity(activity);
   }
 
@@ -185,40 +184,52 @@ public class ActivityService {
     Activity activity = requireActivity(activityId);
     if (!"CANCELLED".equals(activity.getStatus())) {
       activity.changeStatus("CANCELLED");
-      broadcast(activityId, "activity.status_changed", toActivity(activity));
+      closeSubActivities(activityId, "CANCELLED");
+      broadcast(activityId, "activity.status_changed");
     }
     return toActivity(activity);
+  }
+
+  private void closeSubActivities(UUID activityId, String status) {
+    for (Activity child : activities.findByParentActivityId(activityId)) {
+      if ("CANCELLED".equals(child.getStatus()) || "FINISHED".equals(child.getStatus())) continue;
+      child.changeStatus(status);
+      broadcast(child.getId(), "activity.status_changed");
+    }
   }
 
   @Transactional(readOnly = true)
   public List<VenueResponse> listVenues(UUID activityId) {
     requireActivity(activityId);
-    return venues.findByActivityIdOrderByNameAsc(activityId).stream().map(this::toVenue).toList();
+    UUID scopeId = participantScopeActivity(activityId);
+    return venues.findByActivityIdOrderByNameAsc(scopeId).stream().map(this::toVenue).toList();
   }
 
   @Transactional
   public VenueResponse createVenue(UUID activityId, VenueRequest request) {
     requireActivity(activityId);
+    UUID scopeId = participantScopeActivity(activityId);
     String code = normalizeVenue(request.code());
-    if (venues.findByActivityIdAndCode(activityId, code).isPresent()) {
+    if (venues.findByActivityIdAndCode(scopeId, code).isPresent()) {
       throw conflict("Venue code already exists in this activity");
     }
-    Venue venue = venues.save(new Venue(activityId, code, cleanRequired(request.name(), "Venue name"), request.capacity()));
+    Venue venue = venues.save(new Venue(scopeId, code, cleanRequired(request.name(), "Venue name"), request.capacity()));
     venue.update(null, null, request.enabled());
     return toVenue(venue);
   }
 
   @Transactional
   public VenueResponse updateVenue(UUID activityId, UUID venueId, UpdateVenueRequest request) {
-    Venue venue = requireVenue(activityId, venueId);
+    Venue venue = requireVenue(participantScopeActivity(activityId), venueId);
     venue.update(cleanOptional(request.name()), request.capacity(), request.enabled());
     return toVenue(venue);
   }
 
   @Transactional
   public void deleteVenue(UUID activityId, UUID venueId) {
-    Venue venue = requireVenue(activityId, venueId);
-    if (participants.countByActivityIdAndVenue(activityId, venue.getCode()) > 0) {
+    UUID scopeId = participantScopeActivity(activityId);
+    Venue venue = requireVenue(scopeId, venueId);
+    if (participants.countByActivityIdAndVenue(scopeId, venue.getCode()) > 0) {
       throw conflict("Venue with participant records cannot be deleted; disable it instead");
     }
     venues.delete(venue);
@@ -227,20 +238,22 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public List<RegistrationFieldResponse> registrationFields(UUID activityId) {
     requireActivity(activityId);
-    return registrationFields.findByActivityIdOrderByDisplayOrderAsc(activityId).stream()
+    UUID scopeId = participantScopeActivity(activityId);
+    return registrationFields.findByActivityIdOrderByDisplayOrderAsc(scopeId).stream()
         .map(this::toRegistrationField).toList();
   }
 
   @Transactional
   public RegistrationFieldResponse createRegistrationField(UUID activityId, RegistrationFieldRequest request) {
     requireActivity(activityId);
+    UUID scopeId = participantScopeActivity(activityId);
     String fieldKey = normalizeFieldKey(request.fieldKey());
     if (RESERVED_FIELD_KEYS.contains(fieldKey)) throw badRequest("Registration field key is reserved");
-    if (registrationFields.findByActivityIdAndFieldKey(activityId, fieldKey).isPresent()) {
+    if (registrationFields.findByActivityIdAndFieldKey(scopeId, fieldKey).isPresent()) {
       throw conflict("Registration field key already exists");
     }
     FieldValues values = fieldValues(request.type(), request.options());
-    RegistrationField field = registrationFields.save(new RegistrationField(activityId, fieldKey,
+    RegistrationField field = registrationFields.save(new RegistrationField(scopeId, fieldKey,
         cleanRequired(request.label(), "Field label"), values.type(), joinPipe(values.options()), request.required(),
         request.displayOrder()));
     return toRegistrationField(field);
@@ -249,7 +262,7 @@ public class ActivityService {
   @Transactional
   public RegistrationFieldResponse updateRegistrationField(UUID activityId, UUID fieldId,
       UpdateRegistrationFieldRequest request) {
-    RegistrationField field = requireRegistrationField(activityId, fieldId);
+    RegistrationField field = requireRegistrationField(participantScopeActivity(activityId), fieldId);
     FieldValues values = fieldValues(request.type() == null ? field.getType() : request.type(),
         request.options() == null ? splitPipe(field.getOptions()) : request.options());
     field.update(cleanOptional(request.label()), values.type(), joinPipe(values.options()), request.required(),
@@ -259,31 +272,32 @@ public class ActivityService {
 
   @Transactional
   public void deleteRegistrationField(UUID activityId, UUID fieldId) {
-    RegistrationField field = requireRegistrationField(activityId, fieldId);
+    RegistrationField field = requireRegistrationField(participantScopeActivity(activityId), fieldId);
     registrationFields.delete(field);
   }
 
   @Transactional
   public ParticipantResponse register(UUID activityId, String venueCode, RegisterParticipantRequest request) {
     Activity activity = requireActivity(activityId);
-    ensureRegistrationAllowed(activity);
+    UUID scopeId = participantScopeActivity(activityId);
+    ensureRegistrationAllowed(requireActivity(scopeId));
     String venue = normalizeVenue(venueCode);
-    Venue venueEntity = venues.findByActivityIdAndCode(activityId, venue)
+    Venue venueEntity = venues.findByActivityIdAndCode(scopeId, venue)
         .orElseThrow(() -> badRequest("Venue is not configured in this activity"));
     if (!venueEntity.isEnabled()) throw conflict("Venue is disabled");
     if (venueEntity.getCapacity() != null
-        && participants.countByActivityIdAndVenue(activityId, venue) >= venueEntity.getCapacity()) {
+        && participants.countByActivityIdAndVenue(scopeId, venue) >= venueEntity.getCapacity()) {
       throw conflict("Venue registration capacity has been reached");
     }
     String contact = normalizeContact(request.contact());
-    participants.findByActivityIdAndVenueAndContact(activityId, venue, contact).ifPresent(existing -> {
+    participants.findByActivityIdAndVenueAndContact(scopeId, venue, contact).ifPresent(existing -> {
       throw conflict("This contact is already registered in the selected venue");
     });
-    Map<String, String> customFields = validateCustomFields(activityId, request.customFields());
-    Participant participant = participants.save(new Participant(activityId, venue, contact,
+    Map<String, String> customFields = validateCustomFields(scopeId, request.customFields());
+    Participant participant = participants.save(new Participant(scopeId, venue, contact,
         cleanRequired(request.name(), "Participant name"), cleanOptional(request.organization()),
         writeFields(customFields)));
-    broadcast(activityId, "participant.registered", toParticipant(participant));
+    broadcast(activityId, "participant.registered");
     return toParticipant(participant);
   }
 
@@ -295,9 +309,10 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public List<ParticipantResponse> listParticipants(UUID activityId, String venue, String query) {
     requireActivity(activityId);
+    UUID scopeId = participantScopeActivity(activityId);
     List<Participant> found = venue == null || venue.isBlank()
-        ? participants.findByActivityId(activityId)
-        : participants.findByActivityIdAndVenue(activityId, normalizeVenue(venue));
+        ? participants.findByActivityId(scopeId)
+        : participants.findByActivityIdAndVenue(scopeId, normalizeVenue(venue));
     String term = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
     return found.stream().filter(participant -> term.isBlank()
             || participant.getName().toLowerCase(Locale.ROOT).contains(term)
@@ -308,37 +323,38 @@ public class ActivityService {
 
   @Transactional(readOnly = true)
   public ParticipantDetailResponse participant(UUID activityId, UUID participantId) {
-    return toParticipantDetail(requireParticipant(activityId, participantId));
+    return toParticipantDetail(requireParticipant(activityId, participantId), activityId);
   }
 
   @Transactional
   public ParticipantDetailResponse updateParticipant(UUID activityId, UUID participantId,
       UpdateParticipantRequest request) {
+    UUID scopeId = participantScopeActivity(activityId);
     Participant participant = requireParticipantForUpdate(activityId, participantId);
     String venue = request.venue() == null ? participant.getVenue() : normalizeVenue(request.venue());
     String contact = request.contact() == null ? participant.getContact() : normalizeContact(request.contact());
     if (!venue.equals(participant.getVenue()) || !contact.equals(participant.getContact())) {
-      participants.findByActivityIdAndVenueAndContact(activityId, venue, contact)
+      participants.findByActivityIdAndVenueAndContact(scopeId, venue, contact)
           .filter(existing -> !existing.getId().equals(participantId))
           .ifPresent(existing -> { throw conflict("This contact is already registered in the selected venue"); });
     }
     if (!venue.equals(participant.getVenue())) {
-      Venue venueEntity = venues.findByActivityIdAndCode(activityId, venue)
+      Venue venueEntity = venues.findByActivityIdAndCode(scopeId, venue)
           .orElseThrow(() -> notFound("Venue does not exist in this activity"));
       if (!venueEntity.isEnabled()) throw conflict("Venue is disabled");
       if (venueEntity.getCapacity() != null
-          && participants.countByActivityIdAndVenue(activityId, venue) >= venueEntity.getCapacity()) {
+          && participants.countByActivityIdAndVenue(scopeId, venue) >= venueEntity.getCapacity()) {
         throw conflict("Venue registration capacity has been reached");
       }
     }
     Map<String, String> fields = request.customFields() == null ? readFields(participant.getRegistrationData())
-        : validateCustomFields(activityId, request.customFields());
+        : validateCustomFields(scopeId, request.customFields());
     participant.updateProfile(cleanOptional(request.name()), contact, cleanOptional(request.organization()), writeFields(fields), venue);
     if (request.status() != null) {
       String status = normalizeEnum(request.status(), Set.of("ACTIVE", "DISABLED"), "participant status");
       participant.changeStatus(status);
     }
-    return toParticipantDetail(participant);
+    return toParticipantDetail(participant, activityId);
   }
 
   @Transactional(readOnly = true)
@@ -379,7 +395,7 @@ public class ActivityService {
     replaceQuestionSetItems(set, questionIds);
     if (active) activateQuestionSet(set);
     QuestionSetResponse response = toQuestionSet(set);
-    broadcast(activityId, "question_set.created", response);
+    broadcast(activityId, "question_set.created");
     return response;
   }
 
@@ -405,7 +421,7 @@ public class ActivityService {
           .ifPresent(activity -> activity.activateQuestionSet(null));
     }
     QuestionSetResponse response = toQuestionSet(set);
-    broadcast(activityId, "question_set.updated", response);
+    broadcast(activityId, "question_set.updated");
     return response;
   }
 
@@ -417,7 +433,7 @@ public class ActivityService {
     }
     activateQuestionSet(set);
     QuestionSetResponse response = toQuestionSet(set);
-    broadcast(activityId, "question_set.activated", response);
+    broadcast(activityId, "question_set.activated");
     return response;
   }
 
@@ -428,19 +444,20 @@ public class ActivityService {
     questionSets.delete(set);
     activities.findById(activityId).filter(activity -> questionSetId.equals(activity.getActiveQuestionSetId()))
         .ifPresent(activity -> activity.activateQuestionSet(null));
-    broadcast(activityId, "question_set.deleted", Map.of("questionSetId", questionSetId));
+    broadcast(activityId, "question_set.deleted");
   }
 
   @Transactional
   public QuestionAdminResponse createQuestion(UUID activityId, QuestionWriteRequest request) {
     requireActivity(activityId);
     QuestionValues values = questionValues(request.type(), request.title(), request.options(), request.answers(),
-        request.fullScore(), request.displayOrder(), request.mediaUrl(), request.partialCreditPercent(),
+        request.fullScore(), request.displayOrder(), questionMediaUrls(request, List.of()), request.partialCreditPercent(),
         request.textAcceptedAnswers(), request.textMatchMode(), request.enabled(),
         (int) questions.countByActivityId(activityId));
     Question question = questions.save(new Question(activityId, values.type(), values.title(), joinPipe(values.options()),
-        joinComma(values.answers()), values.fullScore(), values.displayOrder(), values.mediaUrl(),
+        joinComma(values.answers()), values.fullScore(), values.displayOrder(), null,
         values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()), values.textMatchMode()));
+    question.setMediaUrls(values.mediaUrls());
     question.update(null, null, null, null, null, null, null, null, null, null, values.enabled());
     return toQuestionAdmin(question);
   }
@@ -454,17 +471,15 @@ public class ActivityService {
         request.answers() == null ? new HashSet<>(splitComma(question.getAnswers())) : request.answers(),
         request.fullScore() == null ? question.getFullScore() : request.fullScore(),
         request.displayOrder() == null ? question.getDisplayOrder() : request.displayOrder(),
-        // PUT receives an empty string when the editor explicitly removes a
-        // media asset; null keeps the existing value for partial API clients.
-        request.mediaUrl() == null ? question.getMediaUrl() : request.mediaUrl(),
+        questionMediaUrls(request, question.getMediaUrls()),
         request.partialCreditPercent() == null ? question.getPartialCreditPercent() : request.partialCreditPercent(),
         request.textAcceptedAnswers() == null ? readTextAnswers(question.getTextAcceptedAnswers()) : request.textAcceptedAnswers(),
         request.textMatchMode() == null ? question.getTextMatchMode() : request.textMatchMode(),
         request.enabled() == null ? question.isEnabled() : request.enabled(), question.getDisplayOrder());
-    String mediaUrl = request.mediaUrl() != null && request.mediaUrl().isBlank() ? "" : values.mediaUrl();
     question.update(values.type(), values.title(), joinPipe(values.options()), joinComma(values.answers()), values.fullScore(),
-        values.displayOrder(), mediaUrl, values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()),
+        values.displayOrder(), null, values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()),
         values.textMatchMode(), values.enabled());
+    question.setMediaUrls(values.mediaUrls());
     return toQuestionAdmin(question);
   }
 
@@ -485,14 +500,15 @@ public class ActivityService {
     if (previous != null) {
       ensureMatchingReplay(previous, request);
       Participant replayParticipant = requireParticipant(activityId, previous.getParticipantId());
-      return toAnswerResult(previous, replayParticipant.getScore(), true, 0);
+      return toAnswerResult(previous, replayParticipant.getScore(), true, previous.getResponseRank());
     }
     Participant participant = requireParticipantForUpdate(activityId, request.participantId());
     if (!"ACTIVE".equals(participant.getStatus())) throw conflict("Participant is disabled");
-    Question question = requireQuestion(activityId, request.questionId());
+    Question question = questions.findForAnswer(request.questionId(), activityId)
+        .orElseThrow(() -> notFound("Question does not belong to this activity"));
     if (!question.isEnabled()) throw conflict("Question is disabled");
-    ControlState state = controls.get(activityId);
-    if (state == null || !"QUESTION_OPEN".equals(state.stage()) || !question.getId().equals(state.questionId())) {
+    ControlState state = controlState(activityId);
+    if (!"QUESTION_OPEN".equals(state.stage()) || !question.getId().equals(state.questionId())) {
       throw conflict("This question is not currently open for answers");
     }
     if (remainingSeconds(state) <= 0) throw conflict("The answer window has closed");
@@ -518,16 +534,17 @@ public class ActivityService {
         : points > 0 ? "PARTIAL" : "INCORRECT";
     AnswerSubmission submission = submissions.save(new AnswerSubmission(activityId, participant.getId(), question.getId(),
         idempotencyKey, encodeSubmittedAnswers(question, answers), points, outcome, null));
+    submission.recordTiming(activity.getQuestionOpenedAt(), responseRank);
     if (requiresManualReview) {
-      broadcast(activityId, "answer.submitted", Map.of("participantId", participant.getId(), "questionId", question.getId(),
-          "submissionId", submission.getId(), "status", submission.getStatus()));
+      broadcast(activityId, "answer.submitted");
     } else {
       participant.addScore(points);
       scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), question.getId(), submission.getId(), points,
           "ANSWER", "Auto-scored answer"));
-      broadcast(activityId, "answer.scored", Map.of("participantId", participant.getId(), "questionId", question.getId(),
-          "points", points, "score", participant.getScore(), "status", outcome, "responseRank", responseRank));
+      broadcast(activityId, "answer.scored");
     }
+    screens.refreshQuestionSubmissionCount(activityId, question.getId(),
+        submissions.countByActivityIdAndQuestionId(activityId, question.getId()));
     return toAnswerResult(submission, participant.getScore(), false, responseRank);
   }
 
@@ -544,8 +561,7 @@ public class ActivityService {
       scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), question.getId(), submission.getId(), delta,
           "GRADE_ADJUSTMENT", "Manual grading adjustment"));
     }
-    broadcast(activityId, "answer.graded", Map.of("participantId", participant.getId(), "submissionId", submission.getId(),
-        "points", submission.getAwardedPoints(), "score", participant.getScore()));
+    broadcast(activityId, "answer.graded");
     return toSubmission(submission);
   }
 
@@ -563,8 +579,7 @@ public class ActivityService {
     participant.addScore(request.points());
     ScoreLedger entry = scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), null, null, request.points(),
         "MANUAL_ADJUSTMENT", cleanOptional(request.note())));
-    broadcast(activityId, "score.adjusted", Map.of("participantId", participant.getId(), "points", request.points(),
-        "score", participant.getScore()));
+    broadcast(activityId, "score.adjusted");
     return toScoreLedger(entry);
   }
 
@@ -616,22 +631,36 @@ public class ActivityService {
 
   @Transactional
   public ControlState control(UUID activityId, ControlRequest request) {
-    requireActivity(activityId);
+    Activity activity = requireActivity(activityId);
+    String stage = normalizeEnum(request.stage(), Set.of("LOBBY", "QUESTION_OPEN", "ANSWER_REVEALED", "SCOREBOARD", "WINNERS", "ENDED"), "Control stage");
+    if (Set.of("QUESTION_OPEN", "ANSWER_REVEALED").contains(stage) && request.questionId() == null) {
+      throw badRequest("A question is required for this stage");
+    }
+    if ("ANSWER_REVEALED".equals(stage) && (!request.questionId().equals(activity.getControlQuestionId())
+        || activity.getQuestionOpenedAt() == null)) {
+      throw conflict("Open this question before revealing its answer");
+    }
     if (request.questionId() != null) requireQuestion(activityId, request.questionId());
     int seconds = request.seconds() == null ? 30 : request.seconds();
     if (seconds < 0 || seconds > 86_400) throw badRequest("Control timer must be between 0 and 86400 seconds");
-    ControlState state = new ControlState(request.stage().trim().toUpperCase(Locale.ROOT), request.questionId(), seconds,
+    ControlState state = new ControlState(stage, request.questionId(), seconds,
         Instant.now());
-    controls.put(activityId, state);
-    broadcast(activityId, "control.updated", state);
+    activity.updateControl(stage, state.questionId(), seconds, state.updatedAt());
+    if ("WINNERS".equals(stage)) {
+      for (PrizePool pool : prizePools.findByActivityIdAndPurposeAndEnabledTrue(activityId, "RANKING")) {
+        issueRankingAwards(activityId, pool.getId());
+      }
+    }
+    broadcast(activityId, "control.updated");
     synchronizeControlledScreens(activityId, state);
     return state;
   }
 
   @Transactional(readOnly = true)
   public ControlState controlState(UUID activityId) {
-    requireActivity(activityId);
-    return liveControlState(controls.getOrDefault(activityId, new ControlState("LOBBY", null, 0, Instant.now())));
+    Activity activity = requireActivity(activityId);
+    return new ControlState(activity.getControlStage(), activity.getControlQuestionId(), activity.getControlSeconds(),
+        activity.getControlUpdatedAt());
   }
 
   private void synchronizeControlledScreens(UUID activityId, ControlState state) {
@@ -645,10 +674,13 @@ public class ActivityService {
         payload.put("headline", "等待工作人员选择题目");
         payload.put("message", "当前活动尚未下发可展示的题目。");
       } else {
+        payload.put("questionId", question.getId().toString());
         payload.put("title", question.getTitle());
+        payload.put("questionId", question.getId());
         payload.put("options", splitPipe(question.getOptions()));
         payload.put("mediaUrl", question.getMediaUrl());
-        payload.put("seconds", remainingSeconds(state));
+        payload.put("mediaUrls", question.getMediaUrls());
+        payload.put("seconds", state.seconds());
         payload.put("updatedAt", state.updatedAt());
         payload.put("questionType", question.getType());
         if ("ANSWER_REVEALED".equals(stage)) {
@@ -663,12 +695,12 @@ public class ActivityService {
                 response.put("awardedPoints", item.getAwardedPoints());
                 response.put("status", item.getStatus());
                 response.put("submittedAt", item.getSubmittedAt());
-                response.put("elapsedSeconds", Math.max(0L,
-                    Duration.between(state.updatedAt(), item.getSubmittedAt()).getSeconds()));
+                response.put("elapsedSeconds", item.getElapsedSeconds());
                 return response;
               }).toList();
           payload.put("responses", responses);
         }
+        payload.put("submittedCount", submissions.countByActivityIdAndQuestionId(activityId, question.getId()));
       }
       mode = "ANSWER_REVEALED".equals(stage) ? ScreenDisplayMode.RESULT : ScreenDisplayMode.QUESTION;
     } else if ("SCOREBOARD".equals(stage)) {
@@ -695,11 +727,6 @@ public class ActivityService {
       payload.put("message", "工作人员将在控场台下发下一步内容。");
     }
     screens.publishActivityDisplay(activityId, mode, payload);
-  }
-
-  private ControlState liveControlState(ControlState state) {
-    if (!"QUESTION_OPEN".equals(state.stage()) || state.seconds() <= 0) return state;
-    return new ControlState(state.stage(), state.questionId(), remainingSeconds(state), state.updatedAt());
   }
 
   private int remainingSeconds(ControlState state) {
@@ -773,16 +800,16 @@ public class ActivityService {
     Participant participant = requireParticipantForUpdate(activityId, request.participantId());
     PrizePool pool = requirePrizePoolForUpdate(activityId, request.prizePoolId());
     PrizeAward award = issuePoolAward(activityId, participant, pool, cleanOptional(request.fulfillmentNote()));
-    broadcast(activityId, "award.issued", toAwardDetail(award));
+    broadcast(activityId, "award.issued");
     return toAwardDetail(award);
   }
 
   @Transactional
   public List<AwardDetailResponse> issueRankingAwards(UUID activityId, UUID poolId) {
     Activity activity = requireActivity(activityId);
-    ControlState controlState = controls.get(activityId);
+    ControlState controlState = controlState(activityId);
     if (!"FINISHED".equals(activity.getStatus())
-        && (controlState == null || !"WINNERS".equals(controlState.stage()))) {
+        && !"WINNERS".equals(controlState.stage())) {
       throw conflict("Ranking awards can only be issued after the activity ends or during winner confirmation");
     }
     PrizePool pool = requirePrizePoolForUpdate(activityId, poolId);
@@ -797,7 +824,7 @@ public class ActivityService {
       PrizeAward award = issuePoolAward(activityId, participant, pool, "Ranking #" + (index + 1));
       result.add(toAwardDetail(award));
     }
-    if (!result.isEmpty()) broadcast(activityId, "awards.ranking_issued", result);
+    if (!result.isEmpty()) broadcast(activityId, "awards.ranking_issued");
     return result;
   }
 
@@ -810,7 +837,7 @@ public class ActivityService {
         .orElseGet(() -> lotteryChances.save(new LotteryChance(activityId, participantId, 0, null)));
     chance.grant(request.draws(), cleanOptional(request.reason()));
     LotteryChanceResponse response = toLotteryChance(chance);
-    broadcast(activityId, "lottery.chance_granted", response);
+    broadcast(activityId, "lottery.chance_granted");
     return response;
   }
 
@@ -824,13 +851,14 @@ public class ActivityService {
 
   @Transactional
   public DrawResult draw(UUID activityId, DrawRequest request) {
-    requireActivity(activityId);
+    Activity activity = requireActivity(activityId);
     String idempotencyKey = normalizeIdempotencyKey(request.idempotencyKey());
     LotteryDraw previous = lotteryDraws.findByActivityIdAndIdempotencyKey(activityId, idempotencyKey).orElse(null);
     if (previous != null) {
       if (!previous.getParticipantId().equals(request.participantId())) throw conflict("Idempotency key belongs to another participant");
       return drawResult(requireAward(activityId, previous.getPrizeAwardId()), true);
     }
+    ensureLotteryAllowed(activity);
     Participant participant = requireParticipantForUpdate(activityId, request.participantId());
     if (!"ACTIVE".equals(participant.getStatus())) throw conflict("Participant is disabled");
     if (request.venue() != null && !request.venue().isBlank()
@@ -845,7 +873,7 @@ public class ActivityService {
     PrizeAward award = issuePoolAward(activityId, participant, pool, "Lottery draw");
     lotteryDraws.save(new LotteryDraw(activityId, participant.getId(), pool.getId(), award.getId(), idempotencyKey));
     DrawResult result = drawResult(award, false);
-    broadcast(activityId, "lottery.completed", result);
+    broadcast(activityId, "lottery.completed");
     return result;
   }
 
@@ -855,13 +883,20 @@ public class ActivityService {
   }
 
   @Transactional
+  public List<AwardResponse> redeemBatch(UUID activityId, BatchRedeemRequest request) {
+    if (new HashSet<>(request.awardIds()).size() != request.awardIds().size()) throw badRequest("Duplicate award IDs");
+    String operator = ((AuthenticatedPrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal()).username();
+    return request.awardIds().stream().sorted().map(id -> redeem(activityId, id, operator)).toList();
+  }
+
+  @Transactional
   public AwardResponse redeem(UUID activityId, UUID awardId, String operator) {
     requireActivity(activityId);
     PrizeAward award = requireAwardForUpdate(activityId, awardId);
     if ("VOID".equals(award.getStatus())) throw conflict("Voided award cannot be redeemed");
     if (!"REDEEMED".equals(award.getStatus())) award.redeem(cleanOptional(operator) == null ? "system" : cleanOptional(operator));
     AwardResponse response = toAward(award);
-    broadcast(activityId, "award.redeemed", response);
+    broadcast(activityId, "award.redeemed");
     return response;
   }
 
@@ -872,7 +907,7 @@ public class ActivityService {
     if (!"REDEEMED".equals(award.getStatus())) throw conflict("Award has not been redeemed");
     award.reverseRedemption();
     AwardDetailResponse response = toAwardDetail(award);
-    broadcast(activityId, "award.redemption_reversed", response);
+    broadcast(activityId, "award.redemption_reversed");
     return response;
   }
 
@@ -885,7 +920,7 @@ public class ActivityService {
     award.voidAward(cleanOptional(request.note()));
     if (award.getPrizePoolId() != null) requirePrizePoolForUpdate(activityId, award.getPrizePoolId()).release();
     AwardDetailResponse response = toAwardDetail(award);
-    broadcast(activityId, "award.voided", response);
+    broadcast(activityId, "award.voided");
     return response;
   }
 
@@ -912,13 +947,21 @@ public class ActivityService {
   }
 
   private Participant requireParticipant(UUID activityId, UUID participantId) {
-    return participants.findById(participantId).filter(participant -> participant.getActivityId().equals(activityId))
+    UUID scopeId = participantScopeActivity(activityId);
+    return participants.findById(participantId).filter(participant -> participant.getActivityId().equals(scopeId))
         .orElseThrow(() -> notFound("Participant does not exist in this activity"));
   }
 
   private Participant requireParticipantForUpdate(UUID activityId, UUID participantId) {
-    return participants.findByIdForUpdate(participantId).filter(participant -> participant.getActivityId().equals(activityId))
+    UUID scopeId = participantScopeActivity(activityId);
+    return participants.findByIdForUpdate(participantId).filter(participant -> participant.getActivityId().equals(scopeId))
         .orElseThrow(() -> notFound("Participant does not exist in this activity"));
+  }
+
+  private UUID participantScopeActivity(UUID activityId) {
+    Activity activity = requireActivity(activityId);
+    return "LOTTERY".equals(activity.getActivityType()) && activity.getParentActivityId() != null
+        ? activity.getParentActivityId() : activityId;
   }
 
   private Question requireQuestion(UUID activityId, UUID questionId) {
@@ -1062,8 +1105,22 @@ public class ActivityService {
   }
 
   private void ensureAnsweringAllowed(Activity activity) {
+    if ("LOTTERY".equals(activity.getActivityType())) throw conflict("Lottery sub-activities do not accept quiz answers");
     if ("FINISHED".equals(activity.getStatus()) || "CANCELLED".equals(activity.getStatus())) {
       throw conflict("Answering is closed for this activity");
+    }
+  }
+
+  private void ensureLotteryAllowed(Activity activity) {
+    if (Set.of("PAUSED", "FINISHED", "CANCELLED").contains(activity.getStatus())) {
+      throw conflict("Lottery is closed for this activity");
+    }
+    if ("LOTTERY".equals(activity.getActivityType())) {
+      Activity parent = requireActivity(activity.getParentActivityId());
+      if (!"LIVE".equals(activity.getStatus())
+          || !("LIVE".equals(parent.getStatus()) || "REGISTRATION_OPEN".equals(parent.getStatus()))) {
+        throw conflict("The main activity and lottery sub-activity must be enabled before drawing");
+      }
     }
   }
 
@@ -1086,7 +1143,7 @@ public class ActivityService {
   }
 
   private QuestionValues questionValues(String rawType, String rawTitle, List<String> rawOptions, Set<String> rawAnswers,
-      Integer rawFullScore, Integer rawDisplayOrder, String rawMediaUrl, Integer rawPartialCreditPercent,
+      Integer rawFullScore, Integer rawDisplayOrder, List<String> rawMediaUrls, Integer rawPartialCreditPercent,
       List<String> rawTextAcceptedAnswers, String rawTextMatchMode, Boolean rawEnabled, int fallbackDisplayOrder) {
     String type = normalizeEnum(rawType, QUESTION_TYPES, "question type");
     String title = cleanRequired(rawTitle, "Question title");
@@ -1101,7 +1158,7 @@ public class ActivityService {
     int fullScore = rawFullScore == null ? 100 : rawFullScore;
     int displayOrder = rawDisplayOrder == null ? fallbackDisplayOrder : rawDisplayOrder;
     int partialCreditPercent = rawPartialCreditPercent == null ? 40 : rawPartialCreditPercent;
-    if (fullScore < 1 || displayOrder < 0 || partialCreditPercent < 0 || partialCreditPercent > 100) {
+    if (fullScore < 1 || fullScore > 100000 || displayOrder < 0 || partialCreditPercent < 0 || partialCreditPercent > 100) {
       throw badRequest("Question numeric values are out of range");
     }
     if ("TEXT".equals(type)) {
@@ -1116,8 +1173,20 @@ public class ActivityService {
       if (answers.isEmpty() || !new HashSet<>(options).containsAll(answers)) throw badRequest("Correct answer is not in options");
       if ("SINGLE".equals(type) && answers.size() != 1) throw badRequest("Single-choice questions require one correct answer");
     }
-    return new QuestionValues(type, title, options, answers, fullScore, displayOrder, cleanOptional(rawMediaUrl),
+    if (rawMediaUrls.size() > 20) throw badRequest("A question supports at most 20 media items");
+    List<String> mediaUrls = rawMediaUrls.stream().map(value -> {
+      String url = cleanRequired(value, "Question media URL");
+      if (url.length() > 2048) throw badRequest("Question media URL is too long");
+      return url;
+    }).distinct().toList();
+    return new QuestionValues(type, title, options, answers, fullScore, displayOrder, mediaUrls,
         partialCreditPercent, textAcceptedAnswers, textMatchMode, rawEnabled == null || rawEnabled);
+  }
+
+  private List<String> questionMediaUrls(QuestionWriteRequest request, List<String> fallback) {
+    if (request.mediaUrls() != null) return request.mediaUrls();
+    if (request.mediaUrl() == null) return fallback;
+    return request.mediaUrl().isBlank() ? List.of() : List.of(request.mediaUrl());
   }
 
   private FieldValues fieldValues(String rawType, List<String> rawOptions) {
@@ -1284,9 +1353,20 @@ public class ActivityService {
     }
     if (parentActivityId != null) {
       Activity parent = requireActivity(parentActivityId);
-      if (parent.getParentActivityId() != null) {
+      if (parent.getParentActivityId() != null || !"EVENT".equals(parent.getActivityType())) {
         throw badRequest("Only a top-level activity can own sub-activities");
       }
+      Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+      if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedPrincipal principal
+          && !principal.isSystemAdmin() && (principal.userId() == null
+          || memberships.findByUserIdAndActivityId(principal.userId(), parentActivityId)
+              .filter(member -> member.getRole() == UserRole.ACTIVITY_ADMIN).isEmpty())) {
+        throw new DomainException(HttpStatus.FORBIDDEN, "Only a main activity administrator can configure its sub-activities");
+      }
+    }
+    if (activity.getId() != null && !activities.findByParentActivityId(activity.getId()).isEmpty()
+        && !"EVENT".equals(type)) {
+      throw conflict("An activity with sub-activities must remain a main activity");
     }
     activity.configureHierarchy(parentActivityId, type);
   }
@@ -1362,17 +1442,32 @@ public class ActivityService {
   private DomainException conflict(String message) { return new DomainException(HttpStatus.CONFLICT, message); }
   private DomainException badRequest(String message) { return new DomainException(HttpStatus.BAD_REQUEST, message); }
 
-  private void broadcast(UUID activityId, String type, Object payload) {
+  private void broadcast(UUID activityId, String type) {
     realtime.send("/topic/activities/" + activityId,
-        Map.of("type", type, "payload", payload, "sentAt", Instant.now().toString()));
+        Map.of("type", type, "sentAt", Instant.now().toString()));
   }
 
   private ActivityResponse toActivity(Activity activity) {
+    String viewerRole = null;
+    Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+    if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedPrincipal principal) {
+      if (principal.isSystemAdmin()) viewerRole = "SYSTEM_ADMIN";
+      else if (principal.userId() != null) {
+        var membership = memberships.findByUserIdAndActivityId(principal.userId(), activity.getId());
+        if (activity.getParentActivityId() != null) {
+          var inherited = memberships.findByUserIdAndActivityId(principal.userId(), activity.getParentActivityId());
+          if (inherited.isPresent() && (membership.isEmpty() || inherited.get().getRole() == UserRole.ACTIVITY_ADMIN)) {
+            membership = inherited;
+          }
+        }
+        viewerRole = membership.map(item -> item.getRole().name()).orElse(null);
+      }
+    }
     return new ActivityResponse(activity.getId(), activity.getName(), activity.getCity(), activity.getStatus(),
         activity.getStartsAt(), activity.getEndsAt(), activity.getDescription(), activity.getClientDisplayName(),
         activity.getClientThemeColor(), activity.getClientHeroImageUrl(), activity.getClientBackgroundImageUrl(),
         activity.getCreatedAt(), activity.getUpdatedAt(), activity.getParentActivityId(), activity.getActivityType(),
-        activity.getActiveQuestionSetId());
+        activity.getActiveQuestionSetId(), viewerRole);
   }
 
   private VenueResponse toVenue(Venue venue) {
@@ -1392,25 +1487,29 @@ public class ActivityService {
   }
 
   private ParticipantDetailResponse toParticipantDetail(Participant participant) {
+    return toParticipantDetail(participant, participant.getActivityId());
+  }
+
+  private ParticipantDetailResponse toParticipantDetail(Participant participant, UUID activityId) {
     return new ParticipantDetailResponse(participant.getId(), participant.getName(), participant.getContact(),
         participant.getVenue(), participant.getOrganization(), participant.getScore(), participant.getStatus(),
         participant.getRegisteredAt(), participant.getLastScoreAt(), readFields(participant.getRegistrationData()),
-        awards.findByActivityIdAndParticipantId(participant.getActivityId(), participant.getId()).stream()
+        awards.findByActivityIdAndParticipantId(activityId, participant.getId()).stream()
             .map(this::toAward).toList(),
-        toLotteryChance(lotteryChances.findByActivityIdAndParticipantId(participant.getActivityId(), participant.getId())
-            .orElse(new LotteryChance(participant.getActivityId(), participant.getId(), 0, null))));
+        toLotteryChance(lotteryChances.findByActivityIdAndParticipantId(activityId, participant.getId())
+            .orElse(new LotteryChance(activityId, participant.getId(), 0, null))));
   }
 
   private QuestionResponse toQuestion(Question question) {
     return new QuestionResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
-        question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(), question.isEnabled());
+        question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(), question.isEnabled(), question.getMediaUrls());
   }
 
   private QuestionAdminResponse toQuestionAdmin(Question question) {
     return new QuestionAdminResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
         splitComma(question.getAnswers()), question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(),
         question.getPartialCreditPercent(), readTextAnswers(question.getTextAcceptedAnswers()), question.getTextMatchMode(),
-        question.isEnabled());
+        question.isEnabled(), question.getMediaUrls());
   }
 
   private QuestionSetResponse toQuestionSet(QuestionSet set) {
@@ -1430,7 +1529,7 @@ public class ActivityService {
     return new QuestionControlResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
         question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(),
         "TEXT".equals(question.getType()) ? readTextAnswers(question.getTextAcceptedAnswers()) : List.of(),
-        question.getTextMatchMode(), question.isEnabled());
+        question.getTextMatchMode(), question.isEnabled(), question.getMediaUrls());
   }
 
   private AnswerResult toAnswerResult(AnswerSubmission submission, int totalScore, boolean replayed, int responseRank) {
@@ -1441,7 +1540,7 @@ public class ActivityService {
   private SubmissionResponse toSubmission(AnswerSubmission submission) {
     return new SubmissionResponse(submission.getId(), submission.getParticipantId(), submission.getQuestionId(),
         readSubmittedAnswers(submission.getSubmittedAnswers()), submission.getAwardedPoints(), submission.getStatus(),
-        submission.getFeedback(), submission.getSubmittedAt(), submission.getGradedAt());
+        submission.getFeedback(), submission.getSubmittedAt(), submission.getGradedAt(), submission.getResponseRank());
   }
 
   private ScoreLedgerResponse toScoreLedger(ScoreLedger entry) {
@@ -1458,7 +1557,7 @@ public class ActivityService {
 
   private AwardResponse toAward(PrizeAward award) {
     return new AwardResponse(award.getId(), award.getPrizeName(), award.getDeliveryType(), award.getStatus(),
-        award.getRedemptionCode());
+        award.getRedemptionCode(), award.getRedemptionUrl());
   }
 
   private AwardDetailResponse toAwardDetail(PrizeAward award) {
@@ -1481,7 +1580,7 @@ public class ActivityService {
 
   private record FieldValues(String type, List<String> options) { }
   private record QuestionValues(String type, String title, List<String> options, Set<String> answers, int fullScore,
-      int displayOrder, String mediaUrl, int partialCreditPercent, List<String> textAcceptedAnswers, String textMatchMode,
+      int displayOrder, List<String> mediaUrls, int partialCreditPercent, List<String> textAcceptedAnswers, String textMatchMode,
       boolean enabled) { }
   private record PrizeValues(String purpose, String deliveryType, int totalQuantity, int minScore, int drawWeight,
       Integer rankFrom, Integer rankTo) { }

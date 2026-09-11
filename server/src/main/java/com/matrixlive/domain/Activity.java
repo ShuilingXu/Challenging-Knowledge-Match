@@ -56,6 +56,13 @@ public class Activity {
   private Instant createdAt;
   private Instant updatedAt;
 
+  @Column(nullable = false, length = 32)
+  private String controlStage = "LOBBY";
+  private UUID controlQuestionId;
+  private int controlSeconds;
+  private Instant controlUpdatedAt;
+  private Instant questionOpenedAt;
+
   @Version
   private long version;
 
@@ -104,6 +111,19 @@ public class Activity {
   public Instant getCreatedAt() { return createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }
   public long getVersion() { return version; }
+  public String getControlStage() { return controlStage; }
+  public UUID getControlQuestionId() { return controlQuestionId; }
+  public int getControlSeconds() { return controlSeconds; }
+  public Instant getControlUpdatedAt() { return controlUpdatedAt; }
+  public Instant getQuestionOpenedAt() { return questionOpenedAt; }
+
+  public void updateControl(String stage, UUID questionId, int seconds, Instant now) {
+    controlStage = stage;
+    controlQuestionId = questionId;
+    controlSeconds = seconds;
+    controlUpdatedAt = now;
+    if ("QUESTION_OPEN".equals(stage)) questionOpenedAt = now;
+  }
 
   public void update(String name, String city, Instant startsAt, Instant endsAt, String description) {
     if (name != null) this.name = name;

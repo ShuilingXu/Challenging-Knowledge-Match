@@ -19,7 +19,9 @@ public final class AuthModels {
                                          UUID participantId, UUID activityId) { }
   public record CurrentPrincipalResponse(String kind, UUID userId, UUID participantId, UUID activityId,
                                          String username, String role, Instant expiresAt) { }
-  public record CreateUserRequest(@NotBlank String username, @NotBlank String displayName, @NotBlank String password,
+  public record CreateUserRequest(@NotBlank @Size(max = 120) String username,
+                                  @NotBlank @Size(max = 100) String displayName,
+                                  @NotBlank @Size(min = 8, max = 200) String password,
                                   UserRole systemRole) { }
   /** Account edits keep the current username/display name and optionally replace the password. */
   public record UpdateUserRequest(@NotBlank String username, @NotBlank String displayName,
@@ -28,8 +30,9 @@ public final class AuthModels {
   public record UserResponse(UUID id, String username, String displayName, String systemRole,
                              boolean enabled, Instant createdAt) { }
   public record MembershipRequest(@NotNull UUID userId, @NotNull UserRole role) { }
-  public record CreateActivityMemberRequest(@NotBlank String username, @NotBlank String displayName,
-      @NotBlank String password, @NotNull UserRole role) { }
+  public record CreateActivityMemberRequest(@NotBlank @Size(max = 120) String username,
+      @NotBlank @Size(max = 100) String displayName,
+      @NotBlank @Size(min = 8, max = 200) String password, @NotNull UserRole role) { }
   public record MembershipResponse(UUID id, UUID activityId, UUID userId, String username, String displayName,
                                    String role, Instant createdAt) { }
 }

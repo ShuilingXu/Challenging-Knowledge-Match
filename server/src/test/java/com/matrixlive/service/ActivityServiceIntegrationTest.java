@@ -30,6 +30,97 @@ class ActivityServiceIntegrationTest {
   @Autowired private ActivityService service;
   @Autowired private QuestionRepository questions;
   @Autowired private ScreenService screens;
+  @Autowired private com.matrixlive.repository.ActivityRepository activities;
+  @Autowired private jakarta.persistence.EntityManager entityManager;
+
+  @Test
+  @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+  void concurrentAnswersReceiveDistinctPersistentRanks() throws Exception {
+    var activity = service.createActivity(new CreateActivityRequest("Concurrent answers", "Shanghai", Instant.now()));
+    service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
+    var people = new java.util.ArrayList<com.matrixlive.api.ApiModels.ParticipantResponse>();
+    for (int i = 0; i < 8; i++) {
+      people.add(service.register(activity.id(), "hall", new RegisterParticipantRequest("Player " + i, "concurrent-" + i, null)));
+    }
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
+        java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
+    service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+      var futures = people.stream().map(person -> executor.submit(() -> {
+        start.await();
+        return service.submitAnswer(activity.id(), new SubmitAnswerRequest(person.id(), question.id(), Set.of("A"), person.id().toString()));
+      })).toList();
+      start.countDown();
+      var ranks = new java.util.ArrayList<Integer>();
+      for (var future : futures) ranks.add(future.get(10, java.util.concurrent.TimeUnit.SECONDS).responseRank());
+      ranks.sort(Integer::compareTo);
+      assertEquals(java.util.List.of(1, 2, 3, 4, 5, 6, 7, 8), ranks);
+      for (var person : people) {
+        assertEquals(100, service.participant(activity.id(), person.id()).score());
+        assertTrue(service.submissions(activity.id(), person.id()).getFirst().responseRank() > 0);
+      }
+    }
+  }
+
+  @Test
+  void persistsControlAndMeasuresAnswerTimeFromOpeningInsteadOfReveal() {
+    var activity = service.createActivity(new CreateActivityRequest("Timing regression", "Shanghai", Instant.now()));
+    service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
+    var person = service.register(activity.id(), "hall", new RegisterParticipantRequest("Player", "timing@example.test", null));
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
+        java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
+    var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
+        "Timing screen", 1920, 1080)).device();
+    Instant openedAt = Instant.now().minusSeconds(12);
+    activities.findById(activity.id()).orElseThrow().updateControl("QUESTION_OPEN", question.id(), 30, openedAt);
+    entityManager.flush();
+    entityManager.clear();
+
+    var state = service.controlState(activity.id());
+    assertEquals(30, state.seconds());
+    assertTrue(java.time.Duration.between(state.updatedAt(), Instant.now()).getSeconds() >= 12);
+    var answer = service.submitAnswer(activity.id(), new SubmitAnswerRequest(person.id(), question.id(), Set.of("A"), "timing-key"));
+    service.control(activity.id(), new ControlRequest("ANSWER_REVEALED", question.id(), 0));
+    var responses = (java.util.List<?>) screens.currentDisplay(activity.id(), device.id()).data().get("responses");
+    var response = (java.util.Map<?, ?>) responses.getFirst();
+    assertTrue(((Number) response.get("elapsedSeconds")).longValue() >= 12);
+    assertEquals(1, service.submissions(activity.id(), person.id()).getFirst().responseRank());
+    assertEquals(answer.responseRank(), service.submitAnswer(activity.id(),
+        new SubmitAnswerRequest(person.id(), question.id(), Set.of("A"), "timing-key")).responseRank());
+  }
+
+  @Test
+  void winnerConfirmationIssuesRankingAwardsBeforePublishingAndDoesNotIssueTwice() {
+    var activity = service.createActivity(new CreateActivityRequest("Winner regression", "Shanghai", Instant.now()));
+    service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
+    var person = service.register(activity.id(), "hall", new RegisterParticipantRequest("Winner", "winner@example.test", null));
+    service.createPrizePool(activity.id(), new com.matrixlive.api.ApiModels.PrizePoolRequest("first", "First prize", "RANKING",
+        "DIGITAL", "", "https://example.test/redeem", 2, 0, 1, 1, 1, true));
+    var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
+        "Winners", 1920, 1080)).device();
+    service.control(activity.id(), new ControlRequest("WINNERS", null, 0));
+    assertEquals(1, service.awards(activity.id(), person.id()).size());
+    assertEquals("https://example.test/redeem", service.awards(activity.id(), person.id()).getFirst().redemptionUrl());
+    assertEquals(1, ((java.util.List<?>) screens.currentDisplay(activity.id(), device.id()).data().get("rows")).size());
+    service.control(activity.id(), new ControlRequest("WINNERS", null, 0));
+    assertEquals(1, service.awards(activity.id(), person.id()).size());
+  }
+
+  @Test
+  void rejectsInvalidControlInputAndClosedAnswerWindows() {
+    var activity = service.createActivity(new CreateActivityRequest("Control validation", "Shanghai", Instant.now()));
+    assertThrows(DomainException.class, () -> service.control(activity.id(), new ControlRequest("TYPO", null, 30)));
+    assertThrows(DomainException.class, () -> service.control(activity.id(), new ControlRequest("QUESTION_OPEN", null, 30)));
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
+        java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
+    assertThrows(DomainException.class, () -> service.control(activity.id(), new ControlRequest("ANSWER_REVEALED", question.id(), 0)));
+    service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
+    var person = service.register(activity.id(), "hall", new RegisterParticipantRequest("Late", "late@example.test", null));
+    activities.findById(activity.id()).orElseThrow().updateControl("QUESTION_OPEN", question.id(), 30, Instant.now().minusSeconds(31));
+    assertThrows(DomainException.class, () -> service.submitAnswer(activity.id(),
+        new SubmitAnswerRequest(person.id(), question.id(), Set.of("A"), "late-key")));
+  }
 
   @Test
   void isolatesRegistrationAndReplaysIdempotentAnswers() {

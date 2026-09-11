@@ -7,7 +7,7 @@ export function registrationFieldKey(field) {
 export function activeVenueCode(venues, requestedCode) {
   const activeVenues = (venues || []).filter((venue) => venue?.enabled)
   if (activeVenues.some((venue) => venue.code === requestedCode)) return requestedCode
-  return activeVenues[0]?.code || ''
+  return ''
 }
 
 export function splitRegistrationOptions(value) {

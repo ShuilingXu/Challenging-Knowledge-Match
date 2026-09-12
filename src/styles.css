@@ -1,5 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap');
-
+.page-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 :root { font-family: Manrope, 'Noto Sans SC', system-ui, sans-serif; color: #17293d; background: #f3f6f8; font-synthesis: none; text-rendering: optimizeLegibility; }
 * { box-sizing: border-box; } html, body, #root { min-width: 320px; min-height: 100%; margin: 0; } button, input, select, textarea { font: inherit; } button { cursor: pointer; } button:disabled { cursor: not-allowed; opacity: .62; } button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid rgba(26, 161, 141, .3); outline-offset: 2px; }
 a { color: inherit; text-decoration: none; }
@@ -450,4 +449,24 @@ a { color: inherit; text-decoration: none; }
   .screen-submitted-count svg { width: 14px; height: 14px; }
   .question-media-gallery.screen-question-media { max-height: 150px; }
   .question-media-gallery > * { max-height: 140px; }
+}
+
+
+
+
+.screen-scoreboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; min-width: 0; }
+.screen-scoreboard-column { min-width: 0; }
+.screen-scoreboard-column h2 { color: #d9f8f0; font-size: calc(15px * var(--screen-font-scale, 1)); margin: 0 0 8px; }
+.screen-scoreboard-column--incorrect h2 { color: #ffd1c5; }
+.screen-scoreboard-column article { grid-template-columns: 24px 32px 1fr auto; gap: 8px; }
+.screen-scoreboard-column article > div { min-width: 0; display: grid; gap: 2px; }
+.screen-scoreboard-column article em { white-space: nowrap; font-size: calc(12px * var(--screen-font-scale, 1)); }
+.screen-scoreboard-column--incorrect article em { color: #ffb09d; }
+.screen-scoreboard-empty { color: #a6bec7; font-size: 11px; padding: 14px; text-align: center; border: 1px dashed rgba(234,249,250,.23); }
+@media (max-width: 810px) {
+  .screen-scoreboard-columns { gap: 5px; }
+  .screen-scoreboard-column h2 { font-size: clamp(8px, 1.5vw, 13px); margin-bottom: 3px; }
+  .screen-scoreboard-column article { grid-template-columns: 12px 16px 1fr auto; gap: 3px; }
+  .screen-scoreboard-column article em { font-size: clamp(6px, 1.1vw, 9px); }
+  .screen-scoreboard-empty { font-size: 7px; padding: 5px; }
 }

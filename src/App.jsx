@@ -39,6 +39,7 @@ import {
   Clock3,
   Command,
   Copy,
+  Download,
   FilePlus2,
   Gift,
   Globe2,
@@ -64,6 +65,7 @@ import {
   Ticket,
   Timer,
   Trophy,
+  Upload,
   Users,
   Volume2,
   X,
@@ -89,6 +91,7 @@ import {
   registrationFieldKey,
   splitRegistrationOptions,
 } from "./registration";
+import { parseQuestionImport, questionImportTemplate } from "./question-import";
 
 const AuthContext = createContext(null);
 const navItems = [
@@ -116,7 +119,8 @@ function App() {
               </RequireStaff>
             }
           />
-          <Route path="/join/demo" element={<ParticipantEntryRedirect />} />
+          <Route path="/event_select" element={<ParticipantEntryRedirect />} />
+          <Route path="/join/demo" element={<Navigate to="/event_select" replace />} />
           <Route path="/join" element={<ParticipantEntryRedirect />} />
           <Route path="/join/:activityId" element={<ParticipantPortal />} />
           <Route
@@ -134,23 +138,37 @@ function App() {
 function AuthProvider({ children }) {
   const [user, setUser] = useState(getStoredIdentity);
   const [ready, setReady] = useState(false);
+  const location = useLocation();
+  const staffRoute = location.pathname === "/login"
+    || location.pathname === "/app"
+    || location.pathname.startsWith("/app/");
   useEffect(() => {
     let mounted = true;
-    if (!getAccessToken()) {
+    const tokenAtStart = getAccessToken();
+    if (!staffRoute || !tokenAtStart) {
+      if (staffRoute && !tokenAtStart) setUser(null);
       setReady(true);
       return undefined;
     }
+    setReady(false);
     refreshSession()
       .then((session) => mounted && setUser(session.user))
       .catch(() => {
-        clearSession();
-        mounted && setUser(null);
+        // Another tab may have completed the rotation while this request was
+        // in flight. Do not erase that newer session when this stale request
+        // fails.
+        if (getAccessToken() === tokenAtStart) {
+          clearSession();
+          mounted && setUser(null);
+        } else if (mounted) {
+          setUser(getStoredIdentity());
+        }
       })
       .finally(() => mounted && setReady(true));
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [staffRoute]);
   const value = useMemo(
     () => ({
       user,
@@ -229,6 +247,12 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [siteSettings, setSiteSettings] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+    api.siteSettings().then((settings) => mounted && setSiteSettings(settings)).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
   if (user) return <Navigate to="/app/overview" replace />;
   const submit = async (event) => {
     event.preventDefault();
@@ -248,16 +272,28 @@ function LoginPage() {
       <section className="login-story">
         <Link className="product-logo product-logo--light" to="/login">
           <Mark />
-          <span>矩阵现场</span>
+          <span>{siteSettings?.siteName || "Matrix Live"}</span>
         </Link>
         <div className="login-story__copy">
-          <span className="eyebrow">LIVE EVENT OPERATIONS</span>
+          <span className="eyebrow">SOYO PALETTE · LIVE EVENT</span>
           <h1>
-            让每一次
+            让每一次相遇
             <br />
-            现场参与都有回响
+            都成为新的乐章
           </h1>
-          <p>把登记、竞赛、抽奖和大屏控制汇聚到一套有秩序的实时系统。</p>
+          <p>把登记、竞赛、抽奖和大屏控制汇聚成一场温柔而有秩序的现场合奏。</p>
+          <div className="login-story__tags" aria-label="产品能力">
+            <span>QUIZ</span>
+            <span>LOTTERY</span>
+            <span>LIVE SCREEN</span>
+          </div>
+        </div>
+        <div className="soyo-visual" aria-hidden="true">
+          <span className="soyo-visual__halo" />
+          <span className="soyo-visual__disc">03</span>
+          <span className="soyo-visual__line soyo-visual__line--one" />
+          <span className="soyo-visual__line soyo-visual__line--two" />
+          <span className="soyo-visual__note">BASS / ENSEMBLE</span>
         </div>
         <div className="story-tile story-tile--signal">
           <span>多端连接</span>
@@ -272,11 +308,11 @@ function LoginPage() {
           </span>
           <strong>登记 · 答题 · 领奖</strong>
         </div>
-        <p className="login-copyright">Matrix Live · Secure workspace</p>
+        <p className="login-copyright">Matrix Live · SOYO COLOR EDITION</p>
       </section>
       <section className="login-form-side">
         <div className="login-card">
-          <span className="eyebrow">STAFF SIGN IN</span>
+          <span className="eyebrow">STAFF SIGN IN · スタッフ</span>
           <h2>进入活动工作台</h2>
           <p>使用受授权的工作人员账户登录。</p>
           <form onSubmit={submit}>
@@ -322,7 +358,7 @@ function LoginPage() {
             <span>登录行为将被记录并按活动范围授权</span>
           </div>
         </div>
-        <Link className="public-link" to="/join/demo">
+        <Link className="public-link" to="/event_select">
           <QrCode size={17} />
           参与者入口
         </Link>
@@ -467,7 +503,6 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
       <div className="staff-sidebar__header">
         <Link to="/app/overview" className="product-logo product-logo--sidebar" onClick={onClose}>
         <Mark />
-        <span>矩阵现场</span>
         </Link>
         <button
           className="staff-sidebar__close"
@@ -1080,6 +1115,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const remaining = useLiveCountdown(state);
   const [responseStats, setResponseStats] = useState(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState("");
+  const selectedQuestionRef = useRef("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const loadStats = useCallback(
@@ -1107,13 +1143,18 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
       setQuestions(allQuestions);
       setState(control);
       setScoreboard(board);
-      const nextQuestionId = control.questionId || allQuestions[0]?.id || "";
-      setSelectedQuestionId((current) =>
-        (allQuestions.some((item) => item.id === current)
-          ? current
-          : nextQuestionId),
-      );
-      await loadStats(nextQuestionId);
+      const nextQuestionId =
+        (control.questionId && allQuestions.some((item) => item.enabled && item.id === control.questionId)
+          ? control.questionId
+          : allQuestions.find((item) => item.enabled)?.id) || "";
+      const nextSelection = allQuestions.some(
+        (item) => item.enabled && item.id === selectedQuestionRef.current,
+      )
+        ? selectedQuestionRef.current
+        : nextQuestionId;
+      selectedQuestionRef.current = nextSelection;
+      setSelectedQuestionId(nextSelection);
+      await loadStats(nextSelection);
     } catch (cause) {
       setError(cause.message);
     }
@@ -1122,15 +1163,21 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
     load();
   }, [load]);
   useActivityStream(activityId, load, undefined, setError);
-  const current = questions.find((question) => question.id === selectedQuestionId) || questions[0];
   const enabledQuestions = questions
-    .filter((item) => item.enabled)
-    .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
-  const currentIndex = enabledQuestions.findIndex((item) => item.id === current?.id);
-  const previousQuestion = currentIndex > 0 ? enabledQuestions[currentIndex - 1] : null;
-  const nextQuestion = currentIndex >= 0 ? enabledQuestions[currentIndex + 1] : enabledQuestions[0];
+    .filter((item) => item.enabled);
+  const current = enabledQuestions.find((question) => question.id === selectedQuestionId) || enabledQuestions[0];
+  const navigationQuestion = enabledQuestions.find((item) => item.id === state?.questionId) || current;
+  const navigationIndex = enabledQuestions.findIndex((item) => item.id === navigationQuestion?.id);
+  const previousQuestion = navigationIndex > 0 ? enabledQuestions[navigationIndex - 1] : null;
+  const nextQuestion = navigationIndex >= 0 ? enabledQuestions[navigationIndex + 1] : enabledQuestions[0];
+  const selectionIsOpen = Boolean(
+    current && state?.stage === "QUESTION_OPEN" && state.questionId === current.id,
+  );
+  const canJumpToSelection = Boolean(current) && current.id !== state?.questionId;
   const selectQuestion = (questionId) => {
+    selectedQuestionRef.current = questionId;
     setSelectedQuestionId(questionId);
+    loadStats(questionId);
   };
   const update = async (stage, overrides = {}) => {
     if (["QUESTION_OPEN", "ANSWER_REVEALED"].includes(stage) && !current)
@@ -1199,6 +1246,11 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
                     </option>
                   ))}
               </select>
+              {current && (
+                <p className="question-selection-status" aria-live="polite">
+                  {selectionIsOpen ? "当前答题题目" : "已选题目，可跳题并开始"}
+                </p>
+              )}
               <Link className="text-button" to="/app/questions">
                 <Pencil size={15} />
                 题库
@@ -1290,11 +1342,25 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
               开题并计时
             </button>
             <button
+              className="accent-button"
+              disabled={busy || !canJumpToSelection}
+              onClick={() => {
+                selectQuestion(current.id);
+                update("QUESTION_OPEN", {
+                  questionId: current.id,
+                  seconds: 30,
+                });
+              }}
+            >
+              <ArrowRight size={17} />
+              跳题并开始
+            </button>
+            <button
               className="secondary-button"
               disabled={busy || !nextQuestion}
               onClick={() => {
                 if (!nextQuestion) return;
-                setSelectedQuestionId(nextQuestion.id);
+                selectQuestion(nextQuestion.id);
                 update("QUESTION_OPEN", { questionId: nextQuestion.id, seconds: 30 });
               }}
             >
@@ -1399,6 +1465,7 @@ function QuestionsPage({ activityId, canManage }) {
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const importInputRef = useRef(null);
   const load = useCallback(async () => {
     if (!activityId) return;
     try {
@@ -1422,6 +1489,34 @@ function QuestionsPage({ activityId, canManage }) {
     load();
   }, [load]);
   useActivityStream(activityId, load, undefined, setError);
+  const downloadImportTemplate = () => {
+    const csv = questionImportTemplate();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "question-bank-template.csv";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+  const importQuestions = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setBusy("question-import");
+    setError("");
+    try {
+      const rows = parseQuestionImport(await file.text());
+      for (const row of rows) await api.createQuestion(activityId, row);
+      await load();
+    } catch (cause) {
+      setError(cause.message || "批量导入失败");
+    } finally {
+      setBusy("");
+    }
+  };
   const openCreate = () => {
     setError("");
     setForm(emptyQuestion());
@@ -1680,12 +1775,21 @@ function QuestionsPage({ activityId, canManage }) {
         eyebrow="QUESTION LIBRARY"
         title="题库与组卷"
         description="维护题型、媒体和计分规则；文本题可自动匹配，未命中时进入人工评分队列。"
-        action={canManage &&
+        action={canManage && <div className="page-header-actions">
+          <button className="secondary-button" type="button" onClick={downloadImportTemplate}>
+            <Download size={16} />
+            下载导入模板
+          </button>
+          <button className="secondary-button" type="button" disabled={busy === "question-import"} onClick={() => importInputRef.current?.click()}>
+            <Upload size={16} />
+            {busy === "question-import" ? "导入中…" : "批量导入题目"}
+          </button>
+          <input ref={importInputRef} type="file" accept=".csv,text/csv" onChange={importQuestions} hidden />
           <button className="primary-button" onClick={openCreate}>
             <FilePlus2 size={17} />
             新建题目
           </button>
-        }
+        </div>}
       />
       <InlineError text={error} onRetry={load} />
       <section className="data-panel">
@@ -3350,7 +3454,7 @@ function ScreensPage({ activityId }) {
     name: "",
     description: "",
     headline: "",
-    background: "#163449",
+    background: "#836c67",
     backgroundImage: "",
     imageUrl: "",
     fileUrl: "",
@@ -5395,8 +5499,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
   if (error && !questions.length)
     return <BackendProblem message={error} onRetry={load} />;
   const orderedQuestions = [...questions]
-    .filter((item) => item.enabled !== false)
-    .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
+    .filter((item) => item.enabled !== false);
   const question =
     questions.find((item) => item.id === state?.questionId);
   const questionIndex = Math.max(0, orderedQuestions.findIndex((item) => item.id === question?.id));
@@ -6232,7 +6335,6 @@ function PublicScreen() {
       <header className="public-screen-toolbar">
         <span className="product-logo product-logo--light">
           <Mark />
-          <span>矩阵现场</span>
         </span>
         <div>
           <span
@@ -6356,7 +6458,7 @@ function TemplateScreen({ activityId, display }) {
       style={{
         background: background.imageUrl
           ? "center / cover no-repeat url(" + background.imageUrl + ")"
-          : background.color || "#132439",
+          : background.color || "#836c67",
       }}
     >
       {components
@@ -6422,7 +6524,7 @@ function ScreenQuestion({ question, state, result, responses = [], submittedCoun
     <div className="screen-question-new">
       <div className="screen-question-new__meta">
         <span>{typeLabel(question?.type || "SINGLE")}</span>
-        <span className="screen-submitted-count"><Users size={20} />已提交 {submittedCount} 人</span>
+        <span className="screen-submitted-count"><Users size={20} />{submittedCount} 人已提交</span>
         <strong>
           {result
             ? "答案已公布"
@@ -6551,30 +6653,49 @@ function ScreenMedia({ src, className, volume = 100 }) {
 function ScreenScoreboard({ board, display }) {
   const scrollRef = useRef(null);
   useScreenScroll(scrollRef, display, "scoreboard");
+  const entries = Array.isArray(board) ? board : [];
+  const answeredCorrectly = (item) => {
+    if (item?.correct === false || item?.isCorrect === false) return false;
+    const status = String(item?.status || item?.result || "").toUpperCase();
+    return !["INCORRECT", "WRONG", "FAIL", "FAILED"].includes(status);
+  };
+  const correct = entries.filter(answeredCorrectly);
+  const incorrect = entries.filter((item) => !answeredCorrectly(item));
+  const deltaFor = (item) => item?.scoreDelta ?? item?.pointsDelta ?? item?.delta ?? item?.change;
+  const scoreLabel = (item) => {
+    const delta = Number(deltaFor(item));
+    if (!Number.isFinite(delta)) return `${item?.score ?? 0} 分`;
+    return `${delta > 0 ? "+" : ""}${delta} 分 → ${item?.score ?? 0} 分`;
+  };
+  const renderColumn = (title, items, tone) => (
+    <section className={`screen-scoreboard-column screen-scoreboard-column--${tone}`}>
+      <h2>{title}</h2>
+      <div className="screen-scoreboard-list">
+        {items.map((item, index) => (
+          <article key={item.participantId || `${tone}-${index}`}>
+            <b>{item.rank ?? index + 1}</b>
+            <Avatar name={item.name} />
+            <div>
+              <strong>{item.name || "未命名参与者"}</strong>
+              <small>{item.venue || "活动现场"}</small>
+            </div>
+            <em>{scoreLabel(item)}</em>
+          </article>
+        ))}
+        {!items.length && <p className="screen-scoreboard-empty">暂无记录</p>}
+      </div>
+    </section>
+  );
   return (
     <div ref={scrollRef} className="screen-scoreboard-new screen-scrollable">
       <div>
         <span>LIVE SCOREBOARD</span>
-        <h1>
-          每一次思考
-          <br />
-          都在改变现场
-        </h1>
-        <p>实时积分将由已确认的得分流水计算。</p>
+        <h1>答题积分榜</h1>
+        <p>答对加分，答错扣分，积分变化实时同步。</p>
       </div>
-      <div className="screen-scoreboard-list">
-        {board.map((item) => (
-          <article key={item.participantId}>
-            <b>{item.rank}</b>
-            <Avatar name={item.name} />
-            <strong>{item.name}</strong>
-            <small>{item.venue}</small>
-            <em>
-              {item.score}
-              <i>分</i>
-            </em>
-          </article>
-        ))}
+      <div className="screen-scoreboard-columns">
+        {renderColumn("答对", correct, "correct")}
+        {renderColumn("答错", incorrect, "incorrect")}
       </div>
     </div>
   );
@@ -6969,3 +7090,7 @@ function readParticipant(activityId) {
 }
 
 export default App;
+
+
+
+

@@ -771,6 +771,9 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     clientBackgroundImageUrl: "",
     parentActivityId: "",
     activityType: "EVENT",
+    scoringMode: "SIMPLE",
+    correctScorePercent: 100,
+    incorrectScorePercent: 0,
   });
   const [dialog, setDialog] = useState(null);
   const [form, setForm] = useState(emptyActivity);
@@ -802,6 +805,9 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     clientBackgroundImageUrl: form.clientBackgroundImageUrl,
     parentActivityId: form.parentActivityId || null,
     activityType: form.activityType || "EVENT",
+    scoringMode: form.scoringMode || "SIMPLE",
+    correctScorePercent: Number(form.correctScorePercent ?? 100),
+    incorrectScorePercent: Number(form.incorrectScorePercent ?? 0),
   });
   const submit = async (event) => {
     event.preventDefault();
@@ -1030,6 +1036,28 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 placeholder="说明活动目标、议程或参与须知"
               />
             </label>
+            <fieldset className="brand-fieldset">
+              <legend>答题计分规则</legend>
+              <div className="form-grid">
+                <label>
+                  计分模式
+                  <select value={form.scoringMode || "SIMPLE"} onChange={(event) => setForm({ ...form, scoringMode: event.target.value })}>
+                    <option value="SIMPLE">简单模式（固定比例）</option>
+                    <option value="GENERAL">一般模式（按排名）</option>
+                    <option value="ADVANCED">高级模式（按排名）</option>
+                  </select>
+                </label>
+                <label>
+                  答对加分比例（%）
+                  <input type="number" min="0" max="100" step="1" value={form.correctScorePercent ?? 100} onChange={(event) => setForm({ ...form, correctScorePercent: event.target.value })} />
+                </label>
+                <label>
+                  答错扣分比例（%）
+                  <input type="number" min="0" max="100" step="1" value={form.incorrectScorePercent ?? 0} onChange={(event) => setForm({ ...form, incorrectScorePercent: event.target.value })} />
+                </label>
+              </div>
+              <small>所有积分按题目满分比例计算并取整数；答错时按扣分比例扣减。</small>
+            </fieldset>
             <fieldset className="brand-fieldset">
               <legend>参与端品牌</legend>
               <label>

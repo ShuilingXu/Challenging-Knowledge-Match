@@ -774,6 +774,8 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     scoringMode: "SIMPLE",
     correctScorePercent: 100,
     incorrectScorePercent: 0,
+    correctRankRules: [],
+    incorrectRankRules: [],
   });
   const [dialog, setDialog] = useState(null);
   const [form, setForm] = useState(emptyActivity);
@@ -808,6 +810,8 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     scoringMode: form.scoringMode || "SIMPLE",
     correctScorePercent: Number(form.correctScorePercent ?? 100),
     incorrectScorePercent: Number(form.incorrectScorePercent ?? 0),
+    correctRankRules: form.correctRankRules || [],
+    incorrectRankRules: form.incorrectRankRules || [],
   });
   const submit = async (event) => {
     event.preventDefault();
@@ -1057,6 +1061,14 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 </label>
               </div>
               <small>所有积分按题目满分比例计算并取整数；答错时按扣分比例扣减。</small>
+              {form.scoringMode !== "SIMPLE" && <div className="form-grid">
+                {[['correctRankRules','答对排名规则'],['incorrectRankRules','答错排名规则']].map(([key,label]) => <label key={key}>{label}（排名起止 / 比例%）
+                  <input placeholder="例如 1-10 / 100" value={(form[key] || []).map((r) => `${r.rankFrom}-${r.rankTo} / ${r.percent}`).join(', ')} onChange={(event) => {
+                    const rules = event.target.value.split(',').map((part) => { const m = part.trim().match(/(\d+)\s*-\s*(\d+)\s*\/\s*(\d+)/); return m ? { rankFrom: Number(m[1]), rankTo: Number(m[2]), percent: Number(m[3]) } : null; }).filter(Boolean);
+                    setForm({ ...form, [key]: rules });
+                  }} />
+                </label>)}
+              </div>}
             </fieldset>
             <fieldset className="brand-fieldset">
               <legend>参与端品牌</legend>

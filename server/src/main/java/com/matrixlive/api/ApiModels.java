@@ -26,9 +26,20 @@ public final class ApiModels {
       @Size(max = 1024) String clientHeroImageUrl,
       @Size(max = 1024) String clientBackgroundImageUrl,
       UUID parentActivityId,
-      @Size(max = 24) String activityType) {
+      @Size(max = 24) String activityType,
+      @Size(max = 16) String scoringMode,
+      @Min(0) @Max(100) Integer correctScorePercent,
+      @Min(0) @Max(100) Integer incorrectScorePercent,
+      List<ScoreRule> correctRankRules,
+      List<ScoreRule> incorrectRankRules) {
     public CreateActivityRequest(String name, String city, Instant startsAt) {
-      this(name, city, startsAt, null, null, null, null, null, null, null, null);
+      this(name, city, startsAt, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+    public CreateActivityRequest(String name, String city, Instant startsAt, Instant endsAt, String description,
+        String clientDisplayName, String clientThemeColor, String clientHeroImageUrl, String clientBackgroundImageUrl,
+        UUID parentActivityId, String activityType) {
+      this(name, city, startsAt, endsAt, description, clientDisplayName, clientThemeColor, clientHeroImageUrl,
+          clientBackgroundImageUrl, parentActivityId, activityType, null, null, null, null, null);
     }
   }
 
@@ -43,14 +54,33 @@ public final class ApiModels {
       @Size(max = 1024) String clientHeroImageUrl,
       @Size(max = 1024) String clientBackgroundImageUrl,
       UUID parentActivityId,
-      @Size(max = 24) String activityType) { }
+      @Size(max = 24) String activityType,
+      @Size(max = 16) String scoringMode,
+      @Min(0) @Max(100) Integer correctScorePercent,
+      @Min(0) @Max(100) Integer incorrectScorePercent,
+      List<ScoreRule> correctRankRules,
+      List<ScoreRule> incorrectRankRules) { }
+
+  public record ScoreRule(@Min(1) Integer rankFrom, @Min(1) Integer rankTo,
+      @Min(0) @Max(100) Integer percent) { }
 
   public record ChangeActivityStatusRequest(@NotBlank String status) { }
 
   public record ActivityResponse(UUID id, String name, String city, String status, Instant startsAt,
       Instant endsAt, String description, String clientDisplayName, String clientThemeColor,
       String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt,
-      UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole) { }
+      UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole,
+      String scoringMode, int correctScorePercent, int incorrectScorePercent,
+      List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules) {
+    public ActivityResponse(UUID id, String name, String city, String status, Instant startsAt, Instant endsAt,
+        String description, String clientDisplayName, String clientThemeColor, String clientHeroImageUrl,
+        String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt, UUID parentActivityId,
+        String activityType, UUID activeQuestionSetId, String viewerRole) {
+      this(id, name, city, status, startsAt, endsAt, description, clientDisplayName, clientThemeColor,
+          clientHeroImageUrl, clientBackgroundImageUrl, createdAt, updatedAt, parentActivityId, activityType,
+          activeQuestionSetId, viewerRole, "SIMPLE", 100, 0, List.of(), List.of());
+    }
+  }
 
   /** Settings safe to expose on participant-facing routes. */
   public record SiteSettingsResponse(String domain, String siteName, String logoUrl, String footerCode) { }

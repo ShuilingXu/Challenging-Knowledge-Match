@@ -142,6 +142,8 @@ public class ActivityService {
         request.endsAt(), cleanOptional(request.description()));
     activity.updateClientBrand(cleanOptional(request.clientDisplayName()), normalizeThemeColor(request.clientThemeColor()),
         cleanOptional(request.clientHeroImageUrl()), cleanOptional(request.clientBackgroundImageUrl()));
+    configureScoring(activity, request.scoringMode(), request.correctScorePercent(), request.incorrectScorePercent(),
+        request.correctRankRules(), request.incorrectRankRules());
     configureActivityHierarchy(activity, request.parentActivityId(), request.activityType());
     activities.save(activity);
     createInitiatorMembership(activity.getId());
@@ -164,6 +166,8 @@ public class ActivityService {
     configureActivityHierarchy(activity,
         request.parentActivityId() == null ? activity.getParentActivityId() : request.parentActivityId(),
         request.activityType() == null ? activity.getActivityType() : request.activityType());
+    configureScoring(activity, request.scoringMode(), request.correctScorePercent(), request.incorrectScorePercent(),
+        request.correctRankRules(), request.incorrectRankRules());
     return toActivity(activity);
   }
 
@@ -527,10 +531,11 @@ public class ActivityService {
         && AnswerScorer.matchesText(answers.iterator().next(), readTextAnswers(question.getTextAcceptedAnswers()),
             question.getTextMatchMode());
     boolean requiresManualReview = "TEXT".equals(question.getType()) && !autoTextCorrect;
-    int points = "TEXT".equals(question.getType()) ? (autoTextCorrect ? question.getFullScore() : 0)
+    int rawPoints = "TEXT".equals(question.getType()) ? (autoTextCorrect ? question.getFullScore() : 0)
         : AnswerScorer.score(question.getType(), answers, new HashSet<>(splitComma(question.getAnswers())),
             question.getFullScore(), question.getPartialCreditPercent());
-    String outcome = requiresManualReview ? "PENDING_REVIEW" : points >= question.getFullScore() ? "CORRECT"
+    int points = applyScoring(activity, question.getFullScore(), rawPoints, responseRank);
+    String outcome = requiresManualReview ? "PENDING_REVIEW" : rawPoints >= question.getFullScore() ? "CORRECT"
         : points > 0 ? "PARTIAL" : "INCORRECT";
     AnswerSubmission submission = submissions.save(new AnswerSubmission(activityId, participant.getId(), question.getId(),
         idempotencyKey, encodeSubmittedAnswers(question, answers), points, outcome, null));
@@ -550,12 +555,16 @@ public class ActivityService {
 
   @Transactional
   public SubmissionResponse gradeSubmission(UUID activityId, UUID submissionId, GradeSubmissionRequest request) {
+    Activity activity = requireActivity(activityId);
     AnswerSubmission submission = requireSubmission(activityId, submissionId);
     Question question = requireQuestion(activityId, submission.getQuestionId());
     if (request.awardedPoints() > question.getFullScore()) throw badRequest("Awarded points exceed question score");
     Participant participant = requireParticipantForUpdate(activityId, submission.getParticipantId());
-    int delta = request.awardedPoints() - submission.getAwardedPoints();
-    submission.grade(request.awardedPoints(), cleanOptional(request.feedback()));
+    int awarded = request.awardedPoints();
+    // A zero score is an explicitly incorrect answer; apply configured deduction rules.
+    if (awarded == 0) awarded = applyScoring(activity, question.getFullScore(), 0, submission.getResponseRank());
+    int delta = awarded - submission.getAwardedPoints();
+    submission.grade(awarded, cleanOptional(request.feedback()));
     if (delta != 0) {
       participant.addScore(delta);
       scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), question.getId(), submission.getId(), delta,
@@ -1463,11 +1472,70 @@ public class ActivityService {
         viewerRole = membership.map(item -> item.getRole().name()).orElse(null);
       }
     }
+    Map<String, List<ScoreRule>> rules = readScoringRules(activity.getScoringRules());
     return new ActivityResponse(activity.getId(), activity.getName(), activity.getCity(), activity.getStatus(),
         activity.getStartsAt(), activity.getEndsAt(), activity.getDescription(), activity.getClientDisplayName(),
         activity.getClientThemeColor(), activity.getClientHeroImageUrl(), activity.getClientBackgroundImageUrl(),
         activity.getCreatedAt(), activity.getUpdatedAt(), activity.getParentActivityId(), activity.getActivityType(),
-        activity.getActiveQuestionSetId(), viewerRole);
+        activity.getActiveQuestionSetId(), viewerRole, activity.getScoringMode(), activity.getCorrectScorePercent(),
+        activity.getIncorrectScorePercent(), rules.getOrDefault("correct", List.of()), rules.getOrDefault("incorrect", List.of()));
+  }
+
+  private void configureScoring(Activity activity, String rawMode, Integer rawCorrect, Integer rawIncorrect,
+      List<ScoreRule> correctRules, List<ScoreRule> incorrectRules) {
+    String mode = rawMode == null || rawMode.isBlank() ? activity.getScoringMode() : normalizeEnum(rawMode,
+        Set.of("SIMPLE", "GENERAL", "ADVANCED"), "scoring mode");
+    int correct = rawCorrect == null ? activity.getCorrectScorePercent() : rawCorrect;
+    int incorrect = rawIncorrect == null ? activity.getIncorrectScorePercent() : rawIncorrect;
+    if (correct < 0 || correct > 100 || incorrect < 0 || incorrect > 100) throw badRequest("Scoring percentages must be between 0 and 100");
+    validateScoreRules(correctRules);
+    validateScoreRules(incorrectRules);
+    String rules = writeScoringRules(correctRules == null ? readScoringRules(activity.getScoringRules()).getOrDefault("correct", List.of()) : correctRules,
+        incorrectRules == null ? readScoringRules(activity.getScoringRules()).getOrDefault("incorrect", List.of()) : incorrectRules);
+    activity.updateScoring(mode, correct, incorrect, rules);
+  }
+
+  private void validateScoreRules(List<ScoreRule> rules) {
+    if (rules == null) return;
+    if (rules.size() > 100) throw badRequest("At most 100 scoring rules are allowed");
+    for (ScoreRule rule : rules) {
+      if (rule == null || rule.rankFrom() == null || rule.rankTo() == null || rule.percent() == null
+          || rule.rankFrom() < 1 || rule.rankTo() < rule.rankFrom() || rule.percent() < 0 || rule.percent() > 100) {
+        throw badRequest("Invalid scoring rank rule");
+      }
+    }
+  }
+
+  private int applyScoring(Activity activity, int fullScore, int rawPoints, int responseRank) {
+    if (rawPoints > 0 && rawPoints < fullScore) return rawPoints;
+    boolean correct = rawPoints >= fullScore;
+    int percent = correct ? activity.getCorrectScorePercent() : activity.getIncorrectScorePercent();
+    if (!"SIMPLE".equals(activity.getScoringMode())) {
+      Map<String, List<ScoreRule>> rules = readScoringRules(activity.getScoringRules());
+      List<ScoreRule> selected = rules.getOrDefault(correct ? "correct" : "incorrect", List.of());
+      for (ScoreRule rule : selected) {
+        if (rule != null && rule.rankFrom() != null && rule.rankTo() != null && rule.percent() != null
+            && responseRank >= rule.rankFrom() && responseRank <= rule.rankTo()) {
+          percent = rule.percent();
+          break;
+        }
+      }
+    }
+    int points = Math.round(fullScore * (percent / 100.0f));
+    return correct ? points : -points;
+  }
+
+  private String writeScoringRules(List<ScoreRule> correct, List<ScoreRule> incorrect) {
+    try { return objectMapper.writeValueAsString(Map.of("correct", correct == null ? List.of() : correct,
+        "incorrect", incorrect == null ? List.of() : incorrect)); }
+    catch (JsonProcessingException e) { return "{}"; }
+  }
+
+  private Map<String, List<ScoreRule>> readScoringRules(String raw) {
+    if (raw == null || raw.isBlank()) return Map.of("correct", List.of(), "incorrect", List.of());
+    try {
+      return objectMapper.readValue(raw, new TypeReference<Map<String, List<ScoreRule>>>() { });
+    } catch (Exception e) { return Map.of("correct", List.of(), "incorrect", List.of()); }
   }
 
   private VenueResponse toVenue(Venue venue) {

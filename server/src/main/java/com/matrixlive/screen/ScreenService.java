@@ -130,7 +130,7 @@ public class ScreenService {
     ScreenDevice device = new ScreenDevice(activityId, clean(request.name()), hashToken(rawToken), request.viewportWidth(), request.viewportHeight());
     ScreenTemplate initialTemplate = request.templateId() != null ? requireTemplate(activityId, request.templateId())
         : templates.findByActivityIdOrderByUpdatedAtDesc(activityId).stream()
-        .filter(template -> "信息登记引导".equals(template.getName()))
+        .filter(template -> "星辉入场指引".equals(template.getName()))
         .findFirst()
         .orElse(null);
     if (initialTemplate != null) {
@@ -314,20 +314,20 @@ public class ScreenService {
     ScreenActivityState state = activityStates.findById(activityId).orElseGet(() -> activityStates.save(new ScreenActivityState(activityId)));
     if (state.isPresetsInitialized()) return;
     templates.saveAll(List.of(
-        preset(activityId, "信息登记引导", "信息登记二维码与现场引导", List.of(
-            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#091726")),
-            component("headline", ScreenComponentType.TEXT, Map.of("text", "扫码登记，加入挑战")),
-            component("registration-qr", ScreenComponentType.REGISTRATION_QR, Map.of("label", "扫描二维码登记信息")))),
-        preset(activityId, "活动二维码", "展示当前活动入口二维码", List.of(
-            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#123b3d")),
-            component("headline", ScreenComponentType.TEXT, Map.of("text", "加入现场挑战")),
-            component("activity-qr", ScreenComponentType.ACTIVITY_QR, Map.of("label", "扫描进入活动")))),
-        preset(activityId, "题目直播", "适合题目、计时和答题进度展示", List.of(
-            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#183850")),
-            component("question-title", ScreenComponentType.TEXT, Map.of("text", "题目将由控场实时下发")))),
-        preset(activityId, "积分排行榜", "适合实时积分和最终获奖名单", List.of(
-            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#132439")),
-            component("leaderboard-title", ScreenComponentType.TEXT, Map.of("text", "实时积分排行榜")))))
+        preset(activityId, "星辉入场指引", "扫码完成登记，召唤队友加入本场挑战", List.of(
+            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#6f5960")),
+            component("headline", ScreenComponentType.TEXT, Map.of("text", "扫码登记，解锁挑战任务")),
+            component("registration-qr", ScreenComponentType.REGISTRATION_QR, Map.of("label", "扫描二维码，创建你的冒险档案")))),
+        preset(activityId, "传送门二维码", "展示活动入口，邀请伙伴一起出发", List.of(
+            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#648496")),
+            component("headline", ScreenComponentType.TEXT, Map.of("text", "穿过传送门，加入答题冒险")),
+            component("activity-qr", ScreenComponentType.ACTIVITY_QR, Map.of("label", "扫描二维码，进入挑战现场")))),
+        preset(activityId, "番剧答题直播", "展示题目、倒计时和全场答题进度", List.of(
+            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#836c67")),
+            component("question-title", ScreenComponentType.TEXT, Map.of("text", "下一道题目即将降临，准备发动技能")))),
+        preset(activityId, "勇者积分榜", "展示答对加分、答错扣分与最终排名", List.of(
+            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#766b83")),
+            component("leaderboard-title", ScreenComponentType.TEXT, Map.of("text", "勇者集结，积分决定番位")))))
     );
     state.markPresetsInitialized();
   }

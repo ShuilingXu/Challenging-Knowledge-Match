@@ -275,7 +275,7 @@ function LoginPage() {
           <span>{siteSettings?.siteName || "Matrix Live"}</span>
         </Link>
         <div className="login-story__copy">
-          <span className="eyebrow">SOYO PALETTE · LIVE EVENT</span>
+          <span className="eyebrow">星辉主题 · 次元现场</span>
           <h1>
             让每一次相遇
             <br />
@@ -283,9 +283,9 @@ function LoginPage() {
           </h1>
           <p>把登记、竞赛、抽奖和大屏控制汇聚成一场温柔而有秩序的现场合奏。</p>
           <div className="login-story__tags" aria-label="产品能力">
-            <span>QUIZ</span>
-            <span>LOTTERY</span>
-            <span>LIVE SCREEN</span>
+            <span>答题冒险</span>
+            <span>幸运抽签</span>
+            <span>实时大屏</span>
           </div>
         </div>
         <div className="soyo-visual" aria-hidden="true">
@@ -293,7 +293,7 @@ function LoginPage() {
           <span className="soyo-visual__disc">03</span>
           <span className="soyo-visual__line soyo-visual__line--one" />
           <span className="soyo-visual__line soyo-visual__line--two" />
-          <span className="soyo-visual__note">BASS / ENSEMBLE</span>
+          <span className="soyo-visual__note">星轨 · 集结</span>
         </div>
         <div className="story-tile story-tile--signal">
           <span>多端连接</span>
@@ -308,11 +308,11 @@ function LoginPage() {
           </span>
           <strong>登记 · 答题 · 领奖</strong>
         </div>
-        <p className="login-copyright">Matrix Live · SOYO COLOR EDITION</p>
+        <p className="login-copyright">星辉现场 · 次元主题</p>
       </section>
       <section className="login-form-side">
         <div className="login-card">
-          <span className="eyebrow">STAFF SIGN IN · スタッフ</span>
+          <span className="eyebrow">工作人员登录 · 星辉入口</span>
           <h2>进入活动工作台</h2>
           <p>使用受授权的工作人员账户登录。</p>
           <form onSubmit={submit}>
@@ -533,7 +533,7 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
             >
               <Icon size={18} />
               <span>{item.label}</span>
-              {item.id === "control" && <em>LIVE</em>}
+              {item.id === "control" && <em>实况</em>}
             </button>
           );
         })}
@@ -654,7 +654,7 @@ function OverviewPage({ activityId, activities }) {
   return (
     <div className="page-content">
       <PageHeader
-        eyebrow="ACTIVITY PULSE"
+        eyebrow="活动脉冲"
         title="活动总览"
         description="实时读取当前活动、参与者和控场服务的状态。"
         action={
@@ -701,7 +701,7 @@ function OverviewPage({ activityId, activities }) {
         <article className="live-activity-panel">
           <div className="panel-top">
             <div>
-              <p className="eyebrow">LIVE ACTIVITY</p>
+              <p className="eyebrow">活动进行中</p>
               <h2>{activity?.name || "尚未创建活动"}</h2>
             </div>
             <span
@@ -719,7 +719,7 @@ function OverviewPage({ activityId, activities }) {
               <strong>
                 {control?.stage === "QUESTION_OPEN"
                   ? "问题已向所有终端开放"
-                  : "现场即将开始"}
+                  : "次元现场即将开启"}
               </strong>
               <small>
                 {control?.seconds
@@ -743,7 +743,7 @@ function OverviewPage({ activityId, activities }) {
         <article className="scoreboard-panel">
           <div className="panel-top">
             <div>
-              <p className="eyebrow">SCOREBOARD</p>
+              <p className="eyebrow">积分榜</p>
               <h2>实时积分榜</h2>
             </div>
             <Link to="/app/participants">
@@ -858,7 +858,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
   return (
     <div className="page-content">
       <PageHeader
-        eyebrow="ACTIVITY DIRECTORY"
+        eyebrow="活动图鉴"
         title="活动管理"
         description="完整维护活动时间、说明与参与端品牌；创建者会自动成为该活动管理员。"
         action={
@@ -1254,7 +1254,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   return (
     <div className="page-content">
       <PageHeader
-        eyebrow="LIVE CONSOLE"
+        eyebrow="实时控场台"
         title="实时控场"
         description="选择题目、设定倒计时，并将流程同步给参与者和受控大屏。"
       />
@@ -1449,7 +1449,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
             onRestart={() => update("QUESTION_OPEN", { seconds: 30 })}
           />
           <article className="control-guide">
-            <p className="eyebrow">RUN OF SHOW</p>
+            <p className="eyebrow">现场流程</p>
             <h3>现场流程</h3>
             <ol>
               <li
@@ -1812,7 +1812,7 @@ function QuestionsPage({ activityId, canManage }) {
   return (
     <div className="page-content">
       <PageHeader
-        eyebrow="QUESTION LIBRARY"
+        eyebrow="题库仓库"
         title="题库与组卷"
         description="维护题型、媒体和计分规则；文本题可自动匹配，未命中时进入人工评分队列。"
         action={canManage && <div className="page-header-actions">
@@ -1897,7 +1897,7 @@ function QuestionsPage({ activityId, canManage }) {
       {canManage && <section className="data-panel question-set-panel">
         <div className="data-panel__toolbar">
           <div>
-            <p className="eyebrow">QUESTION SETS</p>
+            <p className="eyebrow">题组编排</p>
             <h2>组卷与下发</h2>
           </div>
           <button className="secondary-button" type="button" onClick={openSetCreate}>
@@ -1958,7 +1958,7 @@ function QuestionsPage({ activityId, canManage }) {
       <section className="data-panel review-panel">
         <div className="data-panel__toolbar">
           <div>
-            <p className="eyebrow">TEXT REVIEW</p>
+            <p className="eyebrow">文字答案审核</p>
             <h2>文本题人工评分</h2>
           </div>
           <span>
@@ -2455,7 +2455,7 @@ function ParticipantsPage({ activityId }) {
   return (
     <div className="page-content">
       <PageHeader
-        eyebrow="PARTICIPANT DIRECTORY"
+        eyebrow="参与者名册"
         title="参与者"
         description="搜索、编辑和核对活动内参与者的身份、积分、奖品与抽奖机会。"
         action={
@@ -2621,7 +2621,7 @@ function ParticipantsPage({ activityId }) {
             </label>
             <div className="participant-detail-grid">
               <div>
-                <p className="eyebrow">REWARDS</p>
+                <p className="eyebrow">奖励仓库</p>
                 <strong>已获奖品</strong>
                 {detail.awards?.length ? (
                   detail.awards.map((award) => (
@@ -2639,7 +2639,7 @@ function ParticipantsPage({ activityId }) {
                 )}
               </div>
               <div>
-                <p className="eyebrow">LOTTERY</p>
+                <p className="eyebrow">幸运抽签</p>
                 <strong>抽奖机会</strong>
                 <b>{detail.lotteryChance?.remainingDraws || 0} 次剩余</b>
                 <span>
@@ -2649,7 +2649,7 @@ function ParticipantsPage({ activityId }) {
             </div>
             {Object.entries(form.customFields || {}).length > 0 && (
               <div className="custom-fields-readonly">
-                <p className="eyebrow">REGISTRATION FIELDS</p>
+                <p className="eyebrow">报名字段</p>
                 {Object.entries(form.customFields).map(([key, value]) => (
                   <span key={key}>
                     <b>{key}</b>
@@ -2880,7 +2880,7 @@ function RewardsPage({ activityId, canManage }) {
   return (
     <div className="page-content">
       <PageHeader
-        eyebrow="PRIZE OPERATIONS"
+        eyebrow="奖励运营"
         title="奖品与核销"
         description="为排名、抽奖和人工发放配置独立奖池，并在现场完成可审计的奖品核销。"
         action={canManage &&
@@ -2989,7 +2989,7 @@ function RewardsPage({ activityId, canManage }) {
         <article className="redemption-callout">
           <QrCode size={24} />
           <div>
-            <p className="eyebrow">ON-SITE REDEMPTION</p>
+            <p className="eyebrow">现场兑换台</p>
             <h2>现场扫码核销</h2>
             <span>
               {pendingAwards.length}{" "}
@@ -3036,7 +3036,7 @@ function RewardsPage({ activityId, canManage }) {
         <section className="redemption-workspace">
           <div className="redemption-workspace__heading">
             <div>
-              <p className="eyebrow">REDEMPTION LEDGER</p>
+              <p className="eyebrow">兑换记录</p>
               <h2>奖品核销台</h2>
             </div>
             <button
@@ -3404,7 +3404,7 @@ function RewardsPage({ activityId, canManage }) {
               includeMargin
             />
             <div>
-              <p className="eyebrow">LOTTERY LINK</p>
+              <p className="eyebrow">抽签传送门</p>
               <strong>{lotteryDialog.name}</strong>
               <a
                 href={lotteryUrl}
@@ -3615,25 +3615,25 @@ function ScreensPage({ activityId }) {
       components.push({
         id: "activity-qr",
         type: "ACTIVITY_QR",
-        config: { label: "扫描进入当前活动" },
+        config: { label: "扫描传送门，进入当前活动" },
       });
     if (templateForm.includeRegistrationQr)
       components.push({
         id: "registration-qr",
         type: "REGISTRATION_QR",
-        config: { label: "扫描登记信息" },
+        config: { label: "扫描登记，创建冒险档案" },
       });
     if (templateForm.imageUrl)
       components.push({
         id: "image",
         type: "IMAGE",
-        config: { url: templateForm.imageUrl, alt: "活动图片" },
+        config: { url: templateForm.imageUrl, alt: "活动主题图片" },
       });
     if (templateForm.fileUrl)
       components.push({
         id: "file",
         type: "FILE",
-        config: { url: templateForm.fileUrl, label: "活动文件" },
+        config: { url: templateForm.fileUrl, label: "活动资料文件" },
       });
     try {
       const payload = {
@@ -3742,7 +3742,7 @@ function ScreensPage({ activityId }) {
   return (
     <div className="page-content">
       <PageHeader
-        eyebrow="PUBLIC SCREEN SYSTEM"
+        eyebrow="公共大屏系统"
         title="大屏管理"
         description="每块屏幕均需一次性安全配对；内容、字号、音量和滚动位置会通过专属实时通道同步。"
         action={
@@ -3764,7 +3764,7 @@ function ScreensPage({ activityId }) {
           </div>
           <ShieldCheck size={22} />
           <div>
-            <p className="eyebrow">ONE-TIME PAIRING LINK</p>
+            <p className="eyebrow">一次性配对链接</p>
             <strong>{pairing.device.name} 已创建</strong>
             <span>扫描二维码或打开直达链接，令牌只可使用一次。</span>
           </div>
@@ -3793,7 +3793,7 @@ function ScreensPage({ activityId }) {
         <section className="data-panel">
           <div className="panel-section-title">
             <div>
-              <p className="eyebrow">CONNECTED DEVICES</p>
+              <p className="eyebrow">已连接设备</p>
               <h2>受控现场屏幕</h2>
             </div>
             <span>{devices.length} 台设备</span>
@@ -3810,7 +3810,7 @@ function ScreensPage({ activityId }) {
               >
                 <div className="device-preview">
                   <Monitor size={19} />
-                  <span>LIVE</span>
+                  <span>实况</span>
                 </div>
                 <div>
                   <strong>{device.name}</strong>
@@ -3923,7 +3923,7 @@ function ScreensPage({ activityId }) {
         <section className="data-panel">
           <div className="panel-section-title">
             <div>
-              <p className="eyebrow">TEMPLATE LIBRARY</p>
+              <p className="eyebrow">大屏模板库</p>
               <h2>大屏内容模板</h2>
             </div>
             <button
@@ -4571,7 +4571,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
   return (
     <div className="page-content">
       <PageHeader
-        eyebrow="PLATFORM & ACCESS"
+        eyebrow="平台与权限"
         title="站点与权限"
         description="维护当前活动的登记会场、报名字段和工作人员访问权限。"
         action={
@@ -4592,7 +4592,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
         <section className="settings-form-section">
           <div className="settings-form-section__heading">
             <div>
-              <p className="eyebrow">SITE BASICS</p>
+              <p className="eyebrow">站点基础</p>
               <h2>站点基础设置</h2>
               <span>
                 域名、名称、Logo
@@ -4651,7 +4651,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
           </form>
           <div className="settings-storage-section">
             <div>
-              <p className="eyebrow">OBJECT STORAGE</p>
+              <p className="eyebrow">素材仓库</p>
               <h3>S3 静态文件存储</h3>
               <span>
                 填写标准 S3 连接信息后，题库媒体会直传到指定桶；密钥只在提交时写入，不会再次显示。
@@ -4758,7 +4758,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
       <section className="settings-form-section settings-form-section--brand">
         <div className="settings-form-section__heading">
           <div>
-            <p className="eyebrow">CLIENT BRANDING</p>
+            <p className="eyebrow">参与端装扮</p>
             <h2>参与端活动品牌</h2>
             <span>
               {activity?.name || "当前活动"}{" "}
@@ -4862,7 +4862,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
         <article className="access-workspace">
           <div className="workspace-heading">
             <div>
-              <p className="eyebrow">REGISTRATION VENUES</p>
+              <p className="eyebrow">报名会场</p>
               <h2>会场管理</h2>
             </div>
             <button
@@ -4926,7 +4926,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
         <article className="access-workspace">
           <div className="workspace-heading">
             <div>
-              <p className="eyebrow">REGISTRATION SCHEMA</p>
+              <p className="eyebrow">报名字段</p>
               <h2>报名字段模板</h2>
             </div>
             <button
@@ -4993,7 +4993,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
       </section>
       <section className="access-workspace">
         <div>
-          <p className="eyebrow">ACTIVITY MEMBERS</p>
+          <p className="eyebrow">活动成员</p>
           <h2>当前活动成员</h2>
         </div>
         <form className="access-grant" onSubmit={grant}>
@@ -5063,7 +5063,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
         <section className="access-workspace">
           <div className="workspace-heading">
             <div>
-              <p className="eyebrow">ACCOUNT DIRECTORY</p>
+              <p className="eyebrow">账号名册</p>
               <h2>用户账户</h2>
             </div>
             <span className="settings-caption">可编辑登录名、显示名称和密码</span>
@@ -5668,12 +5668,12 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
       </section>
       <div className="participant-sidecopy">
         <span className="eyebrow">
-          {lotteryMode ? "幸運のルーレット" : "ようこそ、会場へ"}
+          {lotteryMode ? "幸运转盘 · 开始抽卡" : "欢迎来到挑战现场"}
         </span>
         <h1>{brandName}</h1>
         <p>
           {lotteryMode
-            ? "转动幸运轮盘，把今天的惊喜带回家。"
+            ? "转动幸运转盘，把今日限定惊喜带回家。"
             : "选好会场，写下你的名字。和现场的伙伴一起答题，收集积分与惊喜。"}
         </p>
         <div>
@@ -5793,7 +5793,7 @@ function RegistrationCard({
   };
   return (
     <form className="registration-card" onSubmit={submit}>
-      <p className="eyebrow">WELCOME TO THE EVENT</p>
+      <p className="eyebrow">欢迎来到次元现场</p>
       <h2>{returning ? "查询我的参与信息" : "先确认你的现场身份"}</h2>
       <p>联系方式会在当前活动与会场内唯一识别你。</p>
       <label>
@@ -6138,7 +6138,7 @@ function AnswerCard({
 function MobileRanking({ items, participantId }) {
   return (
     <article className="mobile-ranking">
-      <p className="eyebrow">LIVE SCOREBOARD</p>
+      <p className="eyebrow">实时积分榜</p>
       <h2>当前排行</h2>
       {items.map((item) => (
         <div
@@ -6210,7 +6210,7 @@ function RewardsCard({
   };
   return (
     <article className="mobile-rewards">
-      <p className="eyebrow">MY REWARDS</p>
+      <p className="eyebrow">我的奖励仓库</p>
       <h2>我的奖励</h2>
       {awards.map((award) => (
         <div className="mobile-award" key={award.id}>
@@ -6404,7 +6404,7 @@ function ScreenPairingNotice({ status, error }) {
     <main className="screen-pairing-page">
       <div>
         <Mark />
-        <p className="eyebrow">SCREEN DEVICE SECURITY</p>
+        <p className="eyebrow">大屏设备安全</p>
         <h1>{waiting ? "正在建立安全设备会话" : "等待工作人员配对此屏幕"}</h1>
         <p>
           {error ||
@@ -6423,7 +6423,7 @@ function ScreenDisplay({ activityId, display, mode }) {
   if (!display || mode === "LOBBY")
     return (
       <div className="screen-lobby">
-        <p className="eyebrow">MATRIX LIVE</p>
+        <p className="eyebrow">星辉现场</p>
         <h1>现场内容即将开始</h1>
         <span>此屏幕已完成安全配对，等待工作人员下发内容。</span>
       </div>
@@ -6515,7 +6515,7 @@ function TemplateScreen({ activityId, display }) {
                   level="M"
                   includeMargin
                 />
-                <strong>{value || "扫码进入活动"}</strong>
+                <strong>{value || "扫描传送门，加入挑战"}</strong>
               </div>
             );
           if (item.type === "IMAGE")
@@ -6537,15 +6537,15 @@ function TemplateScreen({ activityId, display }) {
                 href={config.url || undefined}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={value || config.url || "打开活动文件"}
+                aria-label={value || config.url || "打开活动资料文件"}
               >
                 <FilePlus2 size={42} />
-                <strong>{value || config.url || "活动文件"}</strong>
+                <strong>{value || config.url || "活动资料文件"}</strong>
               </a>
             );
           return (
             <div className="template-text" key={item.id}>
-              {value || "现场公告"}
+              {value || "本场公告"}
             </div>
           );
         })}
@@ -6573,7 +6573,7 @@ function ScreenQuestion({ question, state, result, responses = [], submittedCoun
               : stageLabel(state?.stage || "LOBBY")}
         </strong>
       </div>
-      <h1>{question?.title || "现场即将开始"}</h1>
+      <h1>{question?.title || "次元现场即将开启"}</h1>
       <QuestionMedia
         question={question}
         className="screen-question-media"
@@ -6617,8 +6617,8 @@ function ScreenQuestion({ question, state, result, responses = [], submittedCoun
         </div>
       )}
       <footer>
-        <span>请在手机端提交答案</span>
-        <span>活动数据由服务端实时确认</span>
+        <span>请用手机提交答案</span>
+        <span>冒险数据正在实时同步</span>
       </footer>
     </div>
   );
@@ -6729,9 +6729,9 @@ function ScreenScoreboard({ board, display }) {
   return (
     <div ref={scrollRef} className="screen-scoreboard-new screen-scrollable">
       <div>
-        <span>LIVE SCOREBOARD</span>
-        <h1>答题积分榜</h1>
-        <p>答对加分，答错扣分，积分变化实时同步。</p>
+        <span>实时积分榜</span>
+        <h1>勇者积分榜</h1>
+        <p>答对积攒能量，答错扣除能量，积分实时同步。</p>
       </div>
       <div className="screen-scoreboard-columns">
         {renderColumn("答对", correct, "correct")}
@@ -6746,9 +6746,9 @@ function ScreenWinners({ winners, display }) {
   return (
     <div ref={scrollRef} className="screen-scoreboard-new screen-scrollable">
       <div>
-        <span>AWARD CEREMONY</span>
-        <h1>本场获奖名单</h1>
-        <p>奖项已由工作人员确认，请获奖参与者前往核销台领取。</p>
+        <span>奖励揭晓</span>
+        <h1>本场奖励名单</h1>
+        <p>奖励已由工作人员确认，请前往兑换台领取。</p>
       </div>
       <div className="screen-scoreboard-list">
         {winners.map((winner, index) => (
@@ -6861,7 +6861,7 @@ function ControlTimer({ state, onRestart }) {
   const remaining = useLiveCountdown(state);
   return (
     <article className="control-timer">
-      <p className="eyebrow">QUESTION TIMER</p>
+      <p className="eyebrow">答题倒计时</p>
       <strong>{remaining ? formatSeconds(remaining) : "00:00"}</strong>
       <div>
         <i
@@ -6960,7 +6960,7 @@ function BackendProblem({ message, onRetry }) {
     <main className="backend-problem">
       <div>
         <CircleAlert size={28} />
-        <p className="eyebrow">SERVICE UNAVAILABLE</p>
+        <p className="eyebrow">活动服务暂不可用</p>
         <h1>无法连接到活动服务</h1>
         <p>{message || "请确认 Spring 服务已启动，并检查网络连接。"}</p>
         <button className="primary-button" onClick={onRetry}>
@@ -7130,6 +7130,9 @@ function readParticipant(activityId) {
 }
 
 export default App;
+
+
+
 
 
 

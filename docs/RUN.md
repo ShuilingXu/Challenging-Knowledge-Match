@@ -2,7 +2,10 @@
 
 ## Fast UI preview
 
-Run `npm install` once, then `npm run dev`. The UI is available at `http://127.0.0.1:4173`.
+Run `npm install` once, then `npm run dev`. The UI is available at
+`http://localhost:5173` (Vite's development-server port). To serve the
+production build locally, run `npm run build` followed by `npm run preview`; the
+preview server uses `http://localhost:4173`.
 
 ## API development
 

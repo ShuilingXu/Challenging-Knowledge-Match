@@ -1,6 +1,12 @@
 const TOKEN_KEY = 'matrix.access-token'
 const PARTICIPANT_TOKEN_PREFIX = 'matrix.participant-token.'
 const SCREEN_TOKEN_PREFIX = 'matrix.screen-token.'
+const REFRESH_LOCK_NAME = 'matrixlive-auth-refresh'
+
+// Refresh tokens rotate on every request. Keep one refresh request in flight
+// so React StrictMode and concurrent 401 retries cannot spend the same cookie
+// twice in this tab.
+let refreshInFlight = null
 
 export class ApiError extends Error {
   constructor(message, status, details) {
@@ -97,9 +103,15 @@ export async function request(path, { method = 'GET', body, auth = true, retry =
   if (body !== undefined) requestHeaders['Content-Type'] = 'application/json'
   if (auth && token) requestHeaders.Authorization = `Bearer ${token}`
   const response = await fetch(path, { method, headers: requestHeaders, body: body === undefined ? undefined : JSON.stringify(body), credentials: 'include' })
-  if (response.status === 401 && auth && retry && getAccessToken()) {
-    await refreshSession()
-    return request(path, { method, body, auth, retry: false, headers })
+  if (response.status === 401 && auth && retry && token) {
+    const latestToken = getAccessToken()
+    if (latestToken && latestToken !== token) {
+      return request(path, { method, body, auth, retry: false, headers })
+    }
+    if (latestToken === token) {
+      await refreshSession()
+      return request(path, { method, body, auth, retry: false, headers })
+    }
   }
   return parseResponse(response)
 }
@@ -116,8 +128,14 @@ async function requestMultipart(path, { file, category, retry = true } = {}) {
     credentials: 'include',
   })
   if (response.status === 401 && retry && token) {
-    await refreshSession()
-    return requestMultipart(path, { file, category, retry: false })
+    const latestToken = getAccessToken()
+    if (latestToken && latestToken !== token) {
+      return requestMultipart(path, { file, category, retry: false })
+    }
+    if (latestToken === token) {
+      await refreshSession()
+      return requestMultipart(path, { file, category, retry: false })
+    }
   }
   return parseResponse(response)
 }
@@ -129,9 +147,27 @@ export async function login(email, password) {
 }
 
 export async function refreshSession() {
-  const session = await request('/api/auth/refresh', { method: 'POST', auth: false, body: {} })
-  setSession(session)
-  return { ...session, user: normalizeIdentity(session) }
+  if (!refreshInFlight) {
+    const tokenAtStart = getAccessToken()
+    const refresh = async () => {
+      const latestToken = getAccessToken()
+      if (latestToken !== tokenAtStart) {
+        if (!latestToken) throw new ApiError('Session changed', 401)
+        return { accessToken: latestToken, user: getStoredIdentity() }
+      }
+      const session = await request('/api/auth/refresh', { method: 'POST', auth: false, body: {} })
+      setSession(session)
+      return { ...session, user: normalizeIdentity(session) }
+    }
+    const pending = globalThis.navigator?.locks?.request
+      ? globalThis.navigator.locks.request(REFRESH_LOCK_NAME, refresh)
+      : refresh()
+    refreshInFlight = pending
+      .finally(() => {
+        refreshInFlight = null
+      })
+  }
+  return refreshInFlight
 }
 
 export async function logout() {

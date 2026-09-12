@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>鹈鹕骑自行车 · SVG 动画</title>
+<style>
+  :root{
+    /* 一个踏板周期 —— 腿、曲柄、身体起伏全部挂在它上面 */
+    --crank: 1.2s;
+    /* 车轮周期，和踏板 4:3 的齿比 */
+    --wheel: .9s;
+  }
+
+  *{ box-sizing: border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    min-height:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:16px;
+    padding:28px 16px;
+    background:
+      radial-gradient(130% 110% at 50% 0%, #fdf6ea 0%, #eaf3f8 46%, #d5e6ef 100%);
+    font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+    color:#3f525e;
+  }
+
+  .card{
+    width:min(960px, 100%);
+    border-radius:24px;
+    overflow:hidden;
+    background:#fff;
+    box-shadow:
+      0 22px 50px -12px rgba(63,82,94,.35),
+      0 0 0 1px rgba(63,82,94,.06);
+  }
+
+  svg{ display:block; width:100%; height:auto; }
+
+  .caption{
+    width:min(960px,100%);
+    text-align:center;
+    font-size:14px;
+    line-height:1.7;
+    color:#7a8f9c;
+  }
+  .caption b{ color:#3f525e; font-weight:600; }
+
+  /* ── 所有 CSS 变换都锁在 viewBox 坐标系里 ─────────────────── */
+  .spin,.counter,.legSwing,.legStretch,.wheel,.headNod,.bob,.sunPulse,.zip,
+  .scrollGround,.scrollCloud{
+    transform-box: view-box;
+  }
+
+  /* ── 车轮 ─────────────────────────────────────────────────── */
+  .wheel{ animation: kSpin var(--wheel) linear infinite; }
+  .wheelRear { transform-origin: 262px 310px; }
+  .wheelFront{ transform-origin: 604px 310px; }
+
+  /* ── 曲柄：踏板绕五通转，自己再反向转回来，永远保持水平 ──── */
+  .spin{
+    transform-origin: 400px 320px;
+    animation: kSpin var(--crank) linear infinite;
+  }
+  .counter{ animation: kCounter var(--crank) linear infinite; }
+  .counterNear{ transform-origin: 400px 352px; }
+  .counterFar { transform-origin: 400px 288px; }
+
+  /* ── 腿：绕髋关节摆动 + 沿腿长伸缩，脚尖精确落在踏板上 ──── */
+  .legSwing,.legStretch{ transform-origin: 400px 190px; }
+  .legSwing  { animation: kLegSwing   var(--crank) linear infinite reverse; }
+  .legStretch{ animation: kLegStretch var(--crank) linear infinite reverse; }
+  /* 远侧那条腿相位差半个周期 */
+  .legFar .legSwing,
+  .legFar .legStretch{ animation-delay: calc(var(--crank) / -2); }
+
+  /* ── 身体律动 ─────────────────────────────────────────────── */
+  .bob    { animation: kBob calc(var(--crank) / 2) ease-in-out infinite; }
+  .headNod{ transform-origin: 540px 108px;
+            animation: kNod var(--crank) ease-in-out infinite; }
+  .sunPulse{ transform-origin: 800px 74px;
+             animation: kSun 5s ease-in-out infinite; }
+
+  /* ── 背景与地面滚动 ───────────────────────────────────────── */
+  .scrollCloud { animation: kCloud  30s linear infinite; }
+  .scrollGround{ animation: kGround 2.4s linear infinite; }
+
+  .zip { animation: kZip 1.1s linear infinite; }
+  .zip2{ animation-delay:-.37s; }
+  .zip3{ animation-delay:-.74s; }
+
+  /* ── 关键帧 ───────────────────────────────────────────────── */
+  @keyframes kSpin    { to { transform: rotate(360deg); } }
+  @keyframes kCounter { to { transform: rotate(-360deg); } }
+
+  @keyframes kBob{
+    0%,100%{ transform: translateY(0); }
+    50%    { transform: translateY(-3px); }
+  }
+  @keyframes kNod{
+    0%,100%{ transform: rotate(-1.2deg); }
+    50%    { transform: rotate(1.4deg); }
+  }
+  @keyframes kSun{
+    0%,100%{ transform: scale(1); }
+    50%    { transform: scale(1.06); }
+  }
+  @keyframes kGround{ from{ transform: translateX(0); } to{ transform: translateX(-1200px); } }
+  @keyframes kCloud { from{ transform: translateX(0); } to{ transform: translateX(-2400px); } }
+
+  @keyframes kZip{
+    0%  { transform: translateX(70px);   opacity:0; }
+    15% { opacity:.85; }
+    70% { opacity:.6; }
+    100%{ transform: translateX(-200px); opacity:0; }
+  }
+
+  /* 髋 (400,190) → 脚 (400,323.9)，腿长 133.88；踏板半径 32，
+     五通在髋正下方 130。下面 13 组数值是这套几何的正解，每 30° 采一点。 */
+  @keyframes kLegSwing{
+    0%      { transform: rotate(0deg); }
+    8.333%  { transform: rotate(-5.79deg); }
+    16.667% { transform: rotate(-10.75deg); }
+    25%     { transform: rotate(-13.83deg); }
+    33.333% { transform: rotate(-13.66deg); }
+    41.667% { transform: rotate(-8.89deg); }
+    50%     { transform: rotate(0deg); }
+    58.333% { transform: rotate(8.89deg); }
+    66.667% { transform: rotate(13.66deg); }
+    75%     { transform: rotate(13.83deg); }
+    83.333% { transform: rotate(10.75deg); }
+    91.667% { transform: rotate(5.79deg); }
+    100%    { transform: rotate(0deg); }
+  }
+  @keyframes kLegStretch{
+    0%      { transform: scaleY(1.2100); }
+    8.333%  { transform: scaleY(1.1841); }
+    16.667% { transform: scaleY(1.1100); }
+    25%     { transform: scaleY(1.0000); }
+    33.333% { transform: scaleY(.8763); }
+    41.667% { transform: scaleY(.7733); }
+    50%     { transform: scaleY(.7320); }
+    58.333% { transform: scaleY(.7733); }
+    66.667% { transform: scaleY(.8763); }
+    75%     { transform: scaleY(1.0000); }
+    83.333% { transform: scaleY(1.1100); }
+    91.667% { transform: scaleY(1.1841); }
+    100%    { transform: scaleY(1.2100); }
+  }
+
+  @media (max-width:560px){
+    .caption{ font-size:12.5px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+<svg viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-labelledby="ttl dsc">
+  <title id="ttl">一只鹈鹕骑着自行车向前跑</title>
+  <desc id="dsc">卡通风格的 SVG 动画：白色鹈鹕踩着踏板，车轮转动，云和草地不断向后退。</desc>
+
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"   stop-color="#cdeafd"/>
+      <stop offset=".72" stop-color="#e8f6fd"/>
+      <stop offset="1"   stop-color="#f7fcff"/>
+    </linearGradient>
+
+    <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"   stop-color="#a8dd85"/>
+      <stop offset=".55" stop-color="#8ccb63"/>
+      <stop offset="1"   stop-color="#74bd4c"/>
+    </linearGradient>
+
+    <radialGradient id="sunGlow">
+      <stop offset="0" stop-color="#ffe9a8" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#ffe9a8" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="framePaint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3e97a8"/>
+      <stop offset="1" stop-color="#26707f"/>
+    </linearGradient>
+
+    <!-- 一丛草 -->
+    <g id="tuft">
+      <path d="M0 0 q5 -17 13 -23 M7 0 q4 -15 -3 -23 M-5 0 q-7 -12 -13 -16"
+            fill="none" stroke="#5fae3e" stroke-width="4" stroke-linecap="round"/>
+    </g>
+
+    <!-- 一朵小花 -->
+    <g id="flower">
+      <path d="M0 0 v-26" fill="none" stroke="#5fae3e" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="0" cy="-31" r="9" fill="#ffffff"/>
+      <circle cx="0" cy="-31" r="4" fill="#ffcf5c"/>
+    </g>
+
+    <!-- 一块小石头 -->
+    <g id="pebble">
+      <ellipse cx="0" cy="0" rx="10" ry="6.5" fill="#8ec96a"/>
+      <ellipse cx="-2" cy="-2" rx="5" ry="3" fill="#a6d888"/>
+    </g>
+
+    <!-- 云层：内容铺满 0..2400，复制一份接在后面，滚到 -2400 正好无缝 -->
+    <g id="clouds" fill="#ffffff">
+      <g opacity=".92"><ellipse cx="120" cy="92" rx="48" ry="27"/><ellipse cx="82" cy="101" rx="32" ry="20"/><ellipse cx="158" cy="99" rx="36" ry="22"/></g>
+      <g opacity=".72" transform="translate(430 60) scale(.78)"><ellipse cx="0" cy="0" rx="48" ry="27"/><ellipse cx="-38" cy="9" rx="32" ry="20"/><ellipse cx="38" cy="7" rx="36" ry="22"/></g>
+      <g opacity=".95" transform="translate(770 124) scale(1.12)"><ellipse cx="0" cy="0" rx="48" ry="27"/><ellipse cx="-38" cy="9" rx="32" ry="20"/><ellipse cx="38" cy="7" rx="36" ry="22"/></g>
+      <g opacity=".66" transform="translate(1090 74) scale(.62)"><ellipse cx="0" cy="0" rx="48" ry="27"/><ellipse cx="-38" cy="9" rx="32" ry="20"/><ellipse cx="38" cy="7" rx="36" ry="22"/></g>
+      <g opacity=".88" transform="translate(1430 112) scale(.95)"><ellipse cx="0" cy="0" rx="48" ry="27"/><ellipse cx="-38" cy="9" rx="32" ry="20"/><ellipse cx="38" cy="7" rx="36" ry="22"/></g>
+      <g opacity=".6" transform="translate(1770 58) scale(.55)"><ellipse cx="0" cy="0" rx="48" ry="27"/><ellipse cx="-38" cy="9" rx="32" ry="20"/><ellipse cx="38" cy="7" rx="36" ry="22"/></g>
+      <g opacity=".9" transform="translate(2090 100) scale(1.02)"><ellipse cx="0" cy="0" rx="48" ry="27"/><ellipse cx="-38" cy="9" rx="32" ry="20"/><ellipse cx="38" cy="7" rx="36" ry="22"/></g>
+    </g>
+
+    <!-- 地面细节层：内容铺满 0..1200，复制一份接在 +1200，滚到 -1200 无缝 -->
+    <g id="groundLayer">
+      <use href="#tuft"   transform="translate(40 402)"/>
+      <use href="#flower" transform="translate(100 414)"/>
+      <use href="#tuft"   transform="translate(155 418) scale(.85)"/>
+      <use href="#pebble" transform="translate(196 432)"/>
+      <use href="#tuft"   transform="translate(250 405)"/>
+      <use href="#flower" transform="translate(302 424) scale(.9)"/>
+      <use href="#tuft"   transform="translate(360 415) scale(.75)"/>
+      <use href="#flower" transform="translate(388 406)"/>
+      <use href="#pebble" transform="translate(452 438) scale(.9)"/>
+      <use href="#tuft"   transform="translate(500 420)"/>
+      <use href="#flower" transform="translate(556 412) scale(.95)"/>
+      <use href="#tuft"   transform="translate(612 404) scale(.9)"/>
+      <use href="#flower" transform="translate(660 426)"/>
+      <use href="#pebble" transform="translate(716 434)"/>
+      <use href="#tuft"   transform="translate(770 416)"/>
+      <use href="#flower" transform="translate(822 408) scale(.85)"/>
+      <use href="#tuft"   transform="translate(880 422) scale(.8)"/>
+      <use href="#flower" transform="translate(934 414)"/>
+      <use href="#pebble" transform="translate(990 436) scale(.95)"/>
+      <use href="#tuft"   transform="translate(1046 406)"/>
+      <use href="#flower" transform="translate(1100 424) scale(.9)"/>
+      <use href="#tuft"   transform="translate(1156 418) scale(.85)"/>
+    </g>
+  </defs>
+
+  <!-- ═══ 天空 ═══ -->
+  <rect width="900" height="382" fill="url(#sky)"/>
+
+  <!-- 太阳 -->
+  <g class="sunPulse">
+    <circle cx="800" cy="74" r="96" fill="url(#sunGlow)"/>
+    <circle cx="800" cy="74" r="46" fill="#ffd97a"/>
+    <circle cx="800" cy="74" r="46" fill="none" stroke="#ffc94d" stroke-width="3" opacity=".55"/>
+  </g>
+
+  <!-- 云 -->
+  <g class="scrollCloud">
+    <use href="#clouds"/>
+    <use href="#clouds" transform="translate(2400 0)"/>
+  </g>
+
+  <!-- 远山 -->
+  <g>
+    <path d="M-60 382 Q 130 262 320 382 Z" fill="#c3e6ad"/>
+    <path d="M 210 382 Q 430 240 660 382 Z" fill="#addb92"/>
+    <path d="M 560 382 Q 760 268 980 382 Z" fill="#c3e6ad"/>
+  </g>
+
+  <!-- 地面 -->
+  <rect y="382" width="900" height="78" fill="url(#grass)"/>
+  <rect y="382" width="900" height="6" fill="#95d26d"/>
+
+  <!-- 地面细节（横向滚动） -->
+  <g class="scrollGround">
+    <use href="#groundLayer"/>
+    <use href="#groundLayer" transform="translate(1200 0)"/>
+  </g>
+
+  <!-- 车底投影 -->
+  <ellipse cx="436" cy="392" rx="215" ry="13" fill="#4f9a2f" opacity=".22"/>
+
+  <!-- 速度线（淡蓝；白线在浅色天空上看不见） -->
+  <g fill="#a9cde3">
+    <rect class="zip" x="0" y="188" width="132" height="7" rx="3.5"/>
+    <rect class="zip zip2" x="0" y="248" width="92" height="7" rx="3.5"/>
+    <rect class="zip zip3" x="0" y="304" width="112" height="7" rx="3.5"/>
+  </g>
+
+  <!-- ═══════════════ 车 + 鹈鹕 ═══════════════ -->
+  <g>
+
+    <!-- ── 1. 后轮 ── -->
+    <circle cx="262" cy="310" r="72" fill="none" stroke="#38464f" stroke-width="10"/>
+    <circle cx="262" cy="310" r="63" fill="none" stroke="#d5dee4" stroke-width="5"/>
+    <g class="wheel wheelRear" stroke="#b6c2cb" stroke-width="2" stroke-linecap="round">
+      <line x1="202" y1="310" x2="322" y2="310"/>
+      <line x1="262" y1="250" x2="262" y2="370"/>
+      <line x1="313.96" y1="340" x2="210.04" y2="280"/>
+      <line x1="292" y1="361.96" x2="232" y2="258.04"/>
+      <line x1="232" y1="361.96" x2="292" y2="258.04"/>
+      <line x1="210.04" y1="340" x2="313.96" y2="280"/>
+    </g>
+    <circle cx="262" cy="310" r="11" fill="#6d7c86"/>
+
+    <!-- ── 2. 前轮 ── -->
+    <circle cx="604" cy="310" r="72" fill="none" stroke="#38464f" stroke-width="10"/>
+    <circle cx="604" cy="310" r="63" fill="none" stroke="#d5dee4" stroke-width="5"/>
+    <g class="wheel wheelFront" stroke="#b6c2cb" stroke-width="2" stroke-linecap="round">
+      <line x1="544" y1="310" x2="664" y2="310"/>
+      <line x1="604" y1="250" x2="604" y2="370"/>
+      <line x1="655.96" y1="340" x2="552.04" y2="280"/>
+      <line x1="634" y1="361.96" x2="574" y2="258.04"/>
+      <line x1="574" y1="361.96" x2="634" y2="258.04"/>
+      <line x1="552.04" y1="340" x2="655.96" y2="280"/>
+    </g>
+    <circle cx="604" cy="310" r="11" fill="#6d7c86"/>
+
+    <!-- ── 3. 远侧腿（在车架后面；大腿粗小腿细，膝盖前顶）── -->
+    <g class="legFar">
+      <g class="legSwing">
+        <g class="legStretch">
+          <path d="M392 190 L412 246" fill="none" stroke="#c4762e"
+                stroke-width="14" stroke-linecap="round"/>
+          <path d="M412 246 L396 323.9" fill="none" stroke="#c4762e"
+                stroke-width="11" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+
+    <!-- ── 4. 远侧曲柄 + 踏板（在车架后面）── -->
+    <g class="spin">
+      <line x1="400" y1="320" x2="400" y2="288" stroke="#2f3b44"
+            stroke-width="9" stroke-linecap="round"/>
+    </g>
+    <g class="spin">
+      <g class="counter counterFar">
+        <rect x="372" y="283.5" width="56" height="9" rx="4" fill="#2f3b44"/>
+        <ellipse cx="400" cy="281" rx="21" ry="10" fill="#d98b3f"
+                 stroke="#b8732b" stroke-width="2.5"/>
+      </g>
+    </g>
+
+    <!-- ── 5. 车架 ── -->
+    <g stroke="url(#framePaint)" stroke-linecap="round" fill="none">
+      <path d="M400 320 L262 310" stroke-width="10"/>
+      <path d="M394 212 L262 310" stroke-width="9"/>
+      <path d="M400 320 L394 212" stroke-width="11"/>
+      <path d="M400 320 L582 246" stroke-width="12"/>
+      <path d="M394 212 L596 206" stroke-width="11"/>
+      <path d="M602 200 L580 248" stroke-width="15"/>
+      <path d="M580 248 Q592 286 604 310" stroke-width="10"/>
+      <path d="M598 204 L614 194" stroke-width="9"/>
+      <path d="M592 194 Q624 184 658 194" stroke-width="9"/>
+    </g>
+
+    <!-- 链条 -->
+    <g stroke="#8b98a1" stroke-width="3" stroke-linecap="round" stroke-dasharray="5 3">
+      <line x1="400" y1="290" x2="262" y2="299"/>
+      <line x1="400" y1="350" x2="262" y2="321"/>
+    </g>
+
+    <!-- 牙盘 -->
+    <circle cx="400" cy="320" r="30" fill="none" stroke="#cfd8de" stroke-width="4"/>
+    <circle cx="400" cy="320" r="30" fill="none" stroke="#8b98a1" stroke-width="4"
+            stroke-dasharray="3 5"/>
+    <circle cx="400" cy="320" r="11" fill="#6d7c86"/>
+
+    <!-- 座管夹 + 车座 -->
+    <path d="M394 212 L391 198" stroke="#35434c" stroke-width="8" stroke-linecap="round"/>
+    <path d="M364 200 Q392 187 422 199 Q392 208 364 200 Z" fill="#35434c"/>
+
+    <!-- ── 6. 近侧曲柄臂（在车架前面）── -->
+    <g class="spin">
+      <line x1="400" y1="320" x2="400" y2="352" stroke="#3f4d57"
+            stroke-width="9" stroke-linecap="round"/>
+    </g>
+
+    <!-- ── 7. 近侧腿（大腿粗小腿细，膝盖前顶）── -->
+    <g class="legNear">
+      <g class="legSwing">
+        <g class="legStretch">
+          <path d="M400 190 L422 250" fill="none" stroke="#ef8a3c"
+                stroke-width="17" stroke-linecap="round"/>
+          <path d="M422 250 L400 323.9" fill="none" stroke="#ef8a3c"
+                stroke-width="12" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+
+    <!-- ── 8. 近侧踏板 + 脚掌 ── -->
+    <g class="spin">
+      <g class="counter counterNear">
+        <rect x="372" y="347.5" width="56" height="9" rx="4" fill="#3f4d57"/>
+        <ellipse cx="400" cy="345" rx="21" ry="10" fill="#f2a03c"
+                 stroke="#d9822b" stroke-width="2.5"/>
+        <path d="M386 342 v8 M400 341 v9 M414 342 v8" stroke="#d9822b"
+              stroke-width="2" stroke-linecap="round" opacity=".6"/>
+      </g>
+    </g>
+
+    <!-- ── 9. 鹈鹕 ── -->
+    <g>
+      <!-- 尾羽 -->
+      <path d="M356 158 C318 158 284 146 260 124 C290 140 320 146 344 148
+               C330 136 314 122 304 106 C330 130 352 146 362 158 Z"
+            fill="#ffffff" stroke="#bcd3e2" stroke-width="3" stroke-linejoin="round"/>
+
+      <!-- 远侧翅膀（从肩膀后露出一小条）-->
+      <path d="M418 116 C458 116 496 132 526 152 C494 152 456 140 424 130 Z"
+            fill="#dbe7f0" stroke="#c3d5e2" stroke-width="3" stroke-linejoin="round"/>
+
+      <!-- 会上下起伏的身体 -->
+      <g class="bob">
+        <!-- 身体：坐实在车座上 -->
+        <ellipse cx="398" cy="176" rx="54" ry="39" fill="#ffffff"
+                 stroke="#bcd3e2" stroke-width="3"
+                 transform="rotate(-16 398 176)"/>
+        <!-- 腹部阴影 -->
+        <ellipse cx="410" cy="198" rx="40" ry="15" fill="#e9f2f8"
+                 transform="rotate(-10 410 198)"/>
+
+        <!-- 脖子：先粗描边后填色 -->
+        <path d="M438 148 C476 150 508 128 536 100" fill="none"
+              stroke="#bcd3e2" stroke-width="31" stroke-linecap="round"/>
+        <path d="M438 148 C476 150 508 128 536 100" fill="none"
+              stroke="#ffffff" stroke-width="26" stroke-linecap="round"/>
+
+        <!-- 头 / 喙 / 喉囊 -->
+        <g class="headNod">
+          <!-- 呆毛 -->
+          <path d="M544 64 q2 -16 15 -19 M556 61 q7 -15 19 -13" fill="none"
+                stroke="#bcd3e2" stroke-width="4" stroke-linecap="round"/>
+
+          <!-- 头 -->
+          <ellipse cx="560" cy="86" rx="30" ry="25" fill="#ffffff"
+                   stroke="#bcd3e2" stroke-width="3"/>
+
+          <!-- 喉囊 -->
+          <path d="M574 86 C578 138 626 152 664 142 C692 134 706 118 706 98 L574 86 Z"
+                fill="#f8cd6a" stroke="#dd9520" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M590 96 C602 128 630 142 658 140" fill="none" stroke="#e5a72c"
+                stroke-width="2" opacity=".5"/>
+          <path d="M620 92 C630 116 646 130 668 134" fill="none" stroke="#e5a72c"
+                stroke-width="2" opacity=".4"/>
+
+          <!-- 囊里露出来的小鱼尾 -->
+          <path d="M644 92 L634 60 L644 72 L656 58 L650 92 Z" fill="#a8d8ee"
+                stroke="#74abc8" stroke-width="2.5" stroke-linejoin="round"/>
+
+          <!-- 上喙：画在鱼尾之后，把鱼尾根部压住 -->
+          <path d="M572 64 C620 66 668 78 710 92 L704 102 C662 92 614 84 574 84 Z"
+                fill="#f4b03c" stroke="#dd9520" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M706 92 q7 5 2 11" fill="none" stroke="#dd9520"
+                stroke-width="3" stroke-linecap="round"/>
+
+          <!-- 眼睛 -->
+          <circle cx="558" cy="72" r="7" fill="#26343e"/>
+          <circle cx="560.5" cy="69" r="2.5" fill="#ffffff"/>
+        </g>
+      </g>
+
+      <!-- 近侧翅膀：搭在车把上，不随身体起伏 -->
+      <path d="M424 132 C492 122 572 148 646 182 L652 192 C578 182 492 176 430 164
+               C416 156 414 140 424 132 Z"
+            fill="#ffffff" stroke="#bcd3e2" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M446 138 C508 140 574 158 638 186" fill="none"
+            stroke="#c3d5e2" stroke-width="2.5" opacity=".85"/>
+      <path d="M434 152 C494 156 558 170 626 192" fill="none"
+            stroke="#c3d5e2" stroke-width="2.5" opacity=".55"/>
+      <!-- 翼尖握住车把 -->
+      <path d="M638 178 q22 -9 27 8 q-7 14 -25 10 z" fill="#ffffff"
+            stroke="#bcd3e2" stroke-width="3" stroke-linejoin="round"/>
+    </g>
+
+  </g>
+</svg>
+</div>
+
+<p class="caption">
+  <b>鹈鹕骑自行车</b> —— 纯 HTML + 内联 SVG，没有 JavaScript、没有外部依赖。<br />
+  车轮 0.9 秒一圈，踏板 1.2 秒一圈；腿的摆动与伸缩是按踏板圆周算好的，脚尖一直踩在踏板上。
+</p>
+
+</body>
+</html>

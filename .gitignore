@@ -6,3 +6,18 @@ server/.m2/
 .env
 .env.*
 requirement.md
+# Disposable browser/AI workspaces and temporary files must not enter the repo.
+test-assets/edge-qa-profile/
+**/*.tmpdir
+**/.*.tmpdir
+**/*.tmpdir/
+**/*.tmpdir/**
+**/.*.tmpdir/
+**/.*.tmpdir/**
+**/*.tmp
+**/*.tmp/**
+**/.*.tmp
+**/.*.tmp/**
+/deploy
+/deploy
+/test-assets

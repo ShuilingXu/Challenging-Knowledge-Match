@@ -15,12 +15,16 @@ export SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD"
 export REDIS_URL="redis://:${REDIS_PASSWORD}@127.0.0.1:6379"
 export REALTIME_REDIS_ENABLED=true
 export MANAGEMENT_HEALTH_REDIS_ENABLED=true
-export S3_ENABLED=true
-export S3_ENDPOINT="https://${S3_DOMAIN}"
+export S3_ENABLED="${S3_ENABLED:-true}"
+export S3_ENDPOINT="${S3_ENDPOINT:-https://${S3_DOMAIN}}"
+export S3_PUBLIC_BASE_URL="${S3_PUBLIC_BASE_URL:-}"
 export S3_ADDRESSING_STYLE=PATH
 export JWT_REFRESH_COOKIE_SECURE=true
+
+APP_BACKEND_PORT="${APP_BACKEND_PORT:-8080}"
 
 exec /usr/lib/jvm/java-21-openjdk-amd64/bin/java \
   -jar "$APP_DIR/server/target/knowledge-match-api-0.1.0.jar" \
   --spring.profiles.active=compose \
-  --server.address=127.0.0.1
+  --server.address=127.0.0.1 \
+  --server.port="$APP_BACKEND_PORT"

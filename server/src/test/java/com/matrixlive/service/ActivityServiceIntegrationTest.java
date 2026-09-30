@@ -173,6 +173,28 @@ class ActivityServiceIntegrationTest {
   }
 
   @Test
+  void answerRevealPublishesDedicatedAnswerMediaInsteadOfQuestionMedia() {
+    var activity = service.createActivity(new CreateActivityRequest("Answer media", "Shanghai", Instant.now()));
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Which image is the answer?",
+        java.util.List.of("Alpha", "Beta"), Set.of("Alpha"), 100, 0,
+        "https://cdn.example.test/question.png", 40, java.util.List.of(), "MANUAL", true,
+        java.util.List.of("https://cdn.example.test/question.png"),
+        java.util.List.of("https://cdn.example.test/answer.png")));
+    var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
+        "Answer stage", 1920, 1080)).device();
+
+    service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 42));
+    var opened = screens.currentDisplay(activity.id(), device.id());
+    assertEquals(java.util.List.of("https://cdn.example.test/question.png"), opened.data().get("mediaUrls"));
+
+    service.control(activity.id(), new ControlRequest("ANSWER_REVEALED", question.id(), 0));
+    var revealed = screens.currentDisplay(activity.id(), device.id());
+    assertEquals(ScreenDisplayMode.RESULT, revealed.mode());
+    assertEquals(java.util.List.of("https://cdn.example.test/answer.png"), revealed.data().get("answerMediaUrls"));
+    assertEquals(java.util.List.of("https://cdn.example.test/question.png"), revealed.data().get("mediaUrls"));
+  }
+
+  @Test
   void editsQuestionsAndActivatesAnOrderedQuestionSetForRuntime() {
     var activity = service.createActivity(new CreateActivityRequest("Question set", "Shanghai", Instant.now()));
     var first = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "First", java.util.List.of("A", "B"),
@@ -199,6 +221,7 @@ class ActivityServiceIntegrationTest {
     service.activateQuestionSet(activity.id(), set.id());
     assertEquals(java.util.List.of(first.id(), second.id()), service.listQuestionControl(activity.id()).stream()
         .map(item -> item.id()).toList());
+    assertEquals(java.util.List.of("B"), service.listQuestionControl(activity.id()).getFirst().answers());
     assertEquals(set.id(), service.activity(activity.id()).activeQuestionSetId());
   }
 }

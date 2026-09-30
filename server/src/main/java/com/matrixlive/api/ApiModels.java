@@ -171,26 +171,34 @@ public final class ApiModels {
       @Size(max = 50) List<@NotBlank @Size(max = 2000) String> textAcceptedAnswers,
       @Size(max = 24) String textMatchMode,
       Boolean enabled,
-      @Size(max = 20) List<@NotBlank @Size(max = 2048) String> mediaUrls) {
+      @Size(max = 20) List<@NotBlank @Size(max = 2048) String> mediaUrls,
+      @Size(max = 20) List<@NotBlank @Size(max = 2048) String> answerMediaUrls) {
     public QuestionWriteRequest(String type, String title, List<String> options, Set<String> answers,
         Integer fullScore, Integer displayOrder, String mediaUrl, Integer partialCreditPercent,
-        List<String> textAcceptedAnswers, String textMatchMode, Boolean enabled) {
+      List<String> textAcceptedAnswers, String textMatchMode, Boolean enabled) {
       this(type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent,
-          textAcceptedAnswers, textMatchMode, enabled, null);
+          textAcceptedAnswers, textMatchMode, enabled, null, null);
+    }
+
+    public QuestionWriteRequest(String type, String title, List<String> options, Set<String> answers,
+        Integer fullScore, Integer displayOrder, String mediaUrl, Integer partialCreditPercent,
+        List<String> textAcceptedAnswers, String textMatchMode, Boolean enabled, List<String> mediaUrls) {
+      this(type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent,
+          textAcceptedAnswers, textMatchMode, enabled, mediaUrls, null);
     }
 
     public QuestionWriteRequest(String type, String title, List<String> options, Set<String> answers,
         Integer fullScore, Integer displayOrder, String mediaUrl, Integer partialCreditPercent, Boolean enabled) {
-      this(type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent, null, null, enabled, null);
+      this(type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent, null, null, enabled, null, null);
     }
   }
 
   public record QuestionResponse(UUID id, String type, String title, List<String> options, int fullScore,
-      int displayOrder, String mediaUrl, boolean enabled, List<String> mediaUrls) {
+      int displayOrder, String mediaUrl, boolean enabled, List<String> mediaUrls, List<String> answerMediaUrls) {
     public QuestionResponse(UUID id, String type, String title, List<String> options, int fullScore,
         int displayOrder, String mediaUrl, boolean enabled) {
       this(id, type, title, options, fullScore, displayOrder, mediaUrl, enabled,
-          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl));
+          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl), List.of());
     }
   }
 
@@ -198,23 +206,23 @@ public final class ApiModels {
    * excluded from the participant-facing QuestionResponse. */
   public record QuestionControlResponse(UUID id, String type, String title, List<String> options, int fullScore,
       int displayOrder, String mediaUrl, List<String> textAcceptedAnswers, String textMatchMode, boolean enabled,
-      List<String> mediaUrls) {
+      List<String> mediaUrls, List<String> answerMediaUrls, List<String> answers) {
     public QuestionControlResponse(UUID id, String type, String title, List<String> options, int fullScore,
         int displayOrder, String mediaUrl, List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) {
       this(id, type, title, options, fullScore, displayOrder, mediaUrl, textAcceptedAnswers, textMatchMode, enabled,
-          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl));
+          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl), List.of(), List.of());
     }
   }
 
   public record QuestionAdminResponse(UUID id, String type, String title, List<String> options,
       List<String> answers, int fullScore, int displayOrder, String mediaUrl, int partialCreditPercent,
-      List<String> textAcceptedAnswers, String textMatchMode, boolean enabled, List<String> mediaUrls) {
+      List<String> textAcceptedAnswers, String textMatchMode, boolean enabled, List<String> mediaUrls, List<String> answerMediaUrls) {
     public QuestionAdminResponse(UUID id, String type, String title, List<String> options,
         List<String> answers, int fullScore, int displayOrder, String mediaUrl, int partialCreditPercent,
         List<String> textAcceptedAnswers, String textMatchMode, boolean enabled) {
       this(id, type, title, options, answers, fullScore, displayOrder, mediaUrl, partialCreditPercent,
           textAcceptedAnswers, textMatchMode, enabled,
-          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl));
+          mediaUrl == null || mediaUrl.isBlank() ? List.of() : List.of(mediaUrl), List.of());
     }
   }
 

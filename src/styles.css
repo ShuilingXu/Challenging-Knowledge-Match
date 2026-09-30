@@ -470,3 +470,15 @@ a { color: inherit; text-decoration: none; }
   .screen-scoreboard-column article em { font-size: clamp(6px, 1.1vw, 9px); }
   .screen-scoreboard-empty { font-size: 7px; padding: 5px; }
 }
+
+.dialog-form .question-answer-media-section { display: grid; gap: 8px; padding: 10px; border: 1px solid #dfe8e9; border-radius: 5px; background: #f8fbfb; }
+.dialog-form .question-answer-media-section legend { padding: 0 4px; color: #167f70; }
+.control-preview-answer { margin-top: 8px; padding: 9px 11px; color: #245d56; background: #edf8f4; border-radius: 6px; font-weight: 700; overflow-wrap: anywhere; }
+.screen-question-new--image-only h1 { margin: 2% 0; }
+.screen-question-new--image-only > .screen-question-media { width: 100%; max-width: 100%; max-height: none; height: 100%; min-height: 0; flex: 1 1 0; align-self: center; object-fit: contain; object-position: center; margin: 0 0 12px; }
+.template-screen--image-only { padding: 3%; overflow: hidden; }
+.template-screen--image-only .template-image { box-sizing: border-box; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; }
+@media (max-width: 810px) {
+  .screen-question-new--image-only h1 { margin: 2% 0; }
+  .screen-question-new--image-only > .screen-question-media { width: 100%; max-height: none; margin-bottom: 2%; }
+}

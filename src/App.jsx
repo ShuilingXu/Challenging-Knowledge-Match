@@ -112,13 +112,14 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
-            path="/app/*"
+            path="/admin/*"
             element={
               <RequireStaff>
                 <StaffApp />
               </RequireStaff>
             }
           />
+          <Route path="/app/*" element={<LegacyAdminRedirect />} />
           <Route path="/event_select" element={<ParticipantEntryRedirect />} />
           <Route path="/join/demo" element={<Navigate to="/event_select" replace />} />
           <Route path="/join" element={<ParticipantEntryRedirect />} />
@@ -128,7 +129,7 @@ function App() {
             element={<ParticipantPortal lotteryMode />}
           />
           <Route path="/screen/:activityId" element={<PublicScreen />} />
-          <Route path="*" element={<Navigate to="/app/overview" replace />} />
+          <Route path="*" element={<Navigate to="/event_select" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
@@ -140,8 +141,8 @@ function AuthProvider({ children }) {
   const [ready, setReady] = useState(false);
   const location = useLocation();
   const staffRoute = location.pathname === "/login"
-    || location.pathname === "/app"
-    || location.pathname.startsWith("/app/");
+    || location.pathname === "/admin"
+    || location.pathname.startsWith("/admin/");
   useEffect(() => {
     let mounted = true;
     const tokenAtStart = getAccessToken();
@@ -199,6 +200,12 @@ function RequireStaff({ children }) {
   return children;
 }
 
+function LegacyAdminRedirect() {
+  const location = useLocation();
+  const suffix = location.pathname.replace(/^\/app(?=\/|$)/, "") || "/overview";
+  return <Navigate to={`/admin${suffix}${location.search}${location.hash}`} replace />;
+}
+
 function ParticipantEntryRedirect() {
   const [activities, setActivities] = useState(null);
   const [error, setError] = useState("");
@@ -253,14 +260,14 @@ function LoginPage() {
     api.siteSettings().then((settings) => mounted && setSiteSettings(settings)).catch(() => {});
     return () => { mounted = false; };
   }, []);
-  if (user) return <Navigate to="/app/overview" replace />;
+  if (user) return <Navigate to="/admin/overview" replace />;
   const submit = async (event) => {
     event.preventDefault();
     setError("");
     setSubmitting(true);
     try {
       await signIn(email, password);
-      navigate("/app/overview");
+      navigate("/admin/overview");
     } catch (cause) {
       setError(cause.message || "无法登录，请检查账号和密码");
     } finally {
@@ -458,7 +465,7 @@ function StaffApp() {
           />
           <Route
             path="questions"
-            element={lotteryActivity ? <Navigate to="/app/rewards" replace /> : <QuestionsPage key={activityId} activityId={activityId} canManage={canManage} />}
+            element={lotteryActivity ? <Navigate to="/admin/rewards" replace /> : <QuestionsPage key={activityId} activityId={activityId} canManage={canManage} />}
           />
           <Route
             path="participants"
@@ -501,7 +508,7 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
   return (
     <aside className={`staff-sidebar ${open ? "is-open" : ""}`}>
       <div className="staff-sidebar__header">
-        <Link to="/app/overview" className="product-logo product-logo--sidebar" onClick={onClose}>
+        <Link to="/admin/overview" className="product-logo product-logo--sidebar" onClick={onClose}>
         <Mark />
         </Link>
         <button
@@ -529,7 +536,7 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
               type="button"
               className={active === item.id ? "is-active" : ""}
               key={item.id}
-              onClick={() => go(`/app/${item.id}`)}
+              onClick={() => go(`/admin/${item.id}`)}
             >
               <Icon size={18} />
               <span>{item.label}</span>
@@ -539,7 +546,7 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
         })}
       </nav>
       <div className="sidebar-footer">
-        <button type="button" onClick={() => go("/app/settings")}>
+        <button type="button" onClick={() => go("/admin/settings")}>
           <CircleHelp size={18} />
           帮助与支持
         </button>
@@ -658,7 +665,7 @@ function OverviewPage({ activityId, activities }) {
         title="活动总览"
         description="实时读取当前活动、参与者和控场服务的状态。"
         action={
-          <Link className="secondary-button" to="/app/control">
+          <Link className="secondary-button" to="/admin/control">
             <Radio size={16} />
             进入控场
           </Link>
@@ -746,7 +753,7 @@ function OverviewPage({ activityId, activities }) {
               <p className="eyebrow">积分榜</p>
               <h2>实时积分榜</h2>
             </div>
-            <Link to="/app/participants">
+            <Link to="/admin/participants">
               全部
               <ChevronRight size={16} />
             </Link>
@@ -790,6 +797,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     setForm({
       ...emptyActivity(),
       ...activity,
+      scoringMode: activity.scoringMode === "ADVANCED" ? "GENERAL" : (activity.scoringMode || "SIMPLE"),
       startsAt: toDateTimeInput(activity.startsAt),
       endsAt: toDateTimeInput(activity.endsAt),
     });
@@ -807,16 +815,40 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     clientBackgroundImageUrl: form.clientBackgroundImageUrl,
     parentActivityId: form.parentActivityId || null,
     activityType: form.activityType || "EVENT",
-    scoringMode: form.scoringMode || "SIMPLE",
+    scoringMode: form.scoringMode === "ADVANCED" ? "GENERAL" : (form.scoringMode || "SIMPLE"),
     correctScorePercent: Number(form.correctScorePercent ?? 100),
     incorrectScorePercent: Number(form.incorrectScorePercent ?? 0),
-    correctRankRules: form.correctRankRules || [],
-    incorrectRankRules: form.incorrectRankRules || [],
+    correctRankRules: (form.correctRankRules || []).map((rule) => ({ rankFrom: Number(rule.rankFrom), rankTo: Number(rule.rankTo), percent: Number(rule.percent) })),
+    incorrectRankRules: (form.incorrectRankRules || []).map((rule) => ({ rankFrom: Number(rule.rankFrom), rankTo: Number(rule.rankTo), percent: Number(rule.percent) })),
   });
   const submit = async (event) => {
     event.preventDefault();
-    setBusy("activity");
     setError("");
+    {
+      for (const [key, label] of [["correctRankRules", "答对加分"], ["incorrectRankRules", "答错扣分"]]) {
+        const rules = form[key] || [];
+        if (rules.length > 100) {
+          setError(`${label}最多可设置 100 条排名规则。`);
+          return;
+        }
+        for (const [index, rule] of rules.entries()) {
+          const values = [rule.rankFrom, rule.rankTo, rule.percent];
+          if (values.some((value) => value === "" || value == null || !Number.isInteger(Number(value)))) {
+            setError(`${label}第 ${index + 1} 行：请完整填写整数排名和比例。`);
+            return;
+          }
+          if (Number(rule.rankFrom) < 1 || Number(rule.rankTo) < Number(rule.rankFrom) || Number(rule.percent) < 0 || Number(rule.percent) > 100) {
+            setError(`${label}第 ${index + 1} 行：排名需从 1 开始，结束排名不能小于起始排名，比例需为 0～100。`);
+            return;
+          }
+          if (rules.slice(0, index).some((previous) => Number(rule.rankFrom) <= Number(previous.rankTo) && Number(rule.rankTo) >= Number(previous.rankFrom))) {
+            setError(`${label}第 ${index + 1} 行：排名区间与前面的规则重叠。`);
+            return;
+          }
+        }
+      }
+    }
+    setBusy("activity");
     try {
       const saved =
         dialog === "create"
@@ -854,6 +886,19 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     try { await api.changeActivityStatus(activity.id, status); await reload(); }
     catch (cause) { setError(cause.message); }
     finally { setBusy(""); }
+  };
+  const updateRankRule = (key, index, field, value) => {
+    const rules = [...(form[key] || [])];
+    rules[index] = { ...rules[index], [field]: value };
+    setForm({ ...form, [key]: rules });
+  };
+  const addRankRule = (key) => {
+    const rules = [...(form[key] || []), { rankFrom: "", rankTo: "", percent: 100 }];
+    setForm({ ...form, [key]: rules });
+  };
+  const removeRankRule = (key, index) => {
+    const rules = (form[key] || []).filter((_, ruleIndex) => ruleIndex !== index);
+    setForm({ ...form, [key]: rules });
   };
   return (
     <div className="page-content">
@@ -924,7 +969,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 </button>
               )}
               <Link
-                to={activity.activityType === "LOTTERY" ? "/app/rewards" : "/app/overview"}
+                to={activity.activityType === "LOTTERY" ? "/admin/rewards" : "/admin/overview"}
                 className="row-action"
                 onClick={() => setActivityId(activity.id)}
               >
@@ -1048,7 +1093,6 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                   <select value={form.scoringMode || "SIMPLE"} onChange={(event) => setForm({ ...form, scoringMode: event.target.value })}>
                     <option value="SIMPLE">简单模式（固定比例）</option>
                     <option value="GENERAL">一般模式（按排名）</option>
-                    <option value="ADVANCED">高级模式（按排名）</option>
                   </select>
                 </label>
                 <label>
@@ -1061,13 +1105,22 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 </label>
               </div>
               <small>所有积分按题目满分比例计算并取整数；答错时按扣分比例扣减。</small>
-              {form.scoringMode !== "SIMPLE" && <div className="form-grid">
-                {[['correctRankRules','答对排名规则'],['incorrectRankRules','答错排名规则']].map(([key,label]) => <label key={key}>{label}（排名起止 / 比例%）
-                  <input placeholder="例如 1-10 / 100" value={(form[key] || []).map((r) => `${r.rankFrom}-${r.rankTo} / ${r.percent}`).join(', ')} onChange={(event) => {
-                    const rules = event.target.value.split(',').map((part) => { const m = part.trim().match(/(\d+)\s*-\s*(\d+)\s*\/\s*(\d+)/); return m ? { rankFrom: Number(m[1]), rankTo: Number(m[2]), percent: Number(m[3]) } : null; }).filter(Boolean);
-                    setForm({ ...form, [key]: rules });
-                  }} />
-                </label>)}
+              {form.scoringMode === "GENERAL" && <div className="scoring-rules-grid">
+                {[['correctRankRules','答对加分排名规则'],['incorrectRankRules','答错扣分排名规则']].map(([key,label]) => <div className="scoring-rule-table" key={key}>
+                  <div className="scoring-rule-table__head"><strong>{label}</strong><button type="button" className="text-button" aria-label={`添加${label}`} disabled={(form[key] || []).length >= 100} onClick={() => addRankRule(key)}>＋添加一行</button></div>
+                  <table aria-label={label}>
+                    <thead><tr><th>排名起</th><th>排名止</th><th>比例（%）</th><th aria-label="操作" /></tr></thead>
+                    <tbody>
+                      {(form[key] || []).map((rule, index) => <tr key={`${key}-${index}`}>
+                        <td><input required aria-label={`${label}第 ${index + 1} 行起始排名`} type="number" min="1" step="1" value={rule.rankFrom ?? ""} onChange={(event) => updateRankRule(key, index, "rankFrom", event.target.value)} /></td>
+                        <td><input required aria-label={`${label}第 ${index + 1} 行结束排名`} type="number" min="1" step="1" value={rule.rankTo ?? ""} onChange={(event) => updateRankRule(key, index, "rankTo", event.target.value)} /></td>
+                        <td><input required aria-label={`${label}第 ${index + 1} 行比例`} type="number" min="0" max="100" step="1" value={rule.percent ?? ""} onChange={(event) => updateRankRule(key, index, "percent", event.target.value)} /></td>
+                        <td><button type="button" className="toolbar-icon" title="删除此规则" aria-label={`删除${label}第 ${index + 1} 行`} onClick={() => removeRankRule(key, index)}><X size={14} /></button></td>
+                      </tr>)}
+                    </tbody>
+                  </table>
+                  {!(form[key] || []).length && <small>暂未添加规则，将使用上方固定比例。</small>}
+                </div>)}
               </div>}
             </fieldset>
             <fieldset className="brand-fieldset">
@@ -1291,7 +1344,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
                   {selectionIsOpen ? "当前答题题目" : "已选题目，可跳题并开始"}
                 </p>
               )}
-              <Link className="text-button" to="/app/questions">
+              <Link className="text-button" to="/admin/questions">
                 <Pencil size={15} />
                 题库
               </Link>
@@ -1300,6 +1353,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
             <QuestionMedia
               question={current}
               className="control-question-media"
+              answer={state?.stage === "ANSWER_REVEALED" && state.questionId === current?.id}
             />
             <div className="control-option-grid">
               {asOptions(current).map((option, index) => (
@@ -1441,7 +1495,20 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
           {[ ["上一题", previousQuestion], ["下一题", nextQuestion] ].map(([label, preview]) => (
             <article className="control-guide" key={label}>
               <h3>{label}</h3>
-              {preview ? <><p>{preview.title}</p><QuestionMedia question={preview} className="control-question-media" /><p>{asOptions(preview).join(" / ")}</p></> : <p>暂无{label}</p>}
+              {preview ? <>
+                <p>{preview.title}</p>
+                <QuestionMedia question={preview} className="control-question-media" />
+                {asOptions(preview).length > 0 && <p>{asOptions(preview).join(" / ")}</p>}
+                <p className="control-preview-answer">正确答案：{
+                  preview.type === "TEXT"
+                    ? textAcceptedAnswers(preview).join("、") || "未配置标准答案，需人工评分"
+                    : [...answerSet(preview)].join("、") || "未配置"
+                }</p>
+                {preview.answerMediaUrls?.length > 0 && <>
+                  <p>答案材料</p>
+                  <QuestionMedia question={preview} className="control-question-media" answer />
+                </>}
+              </> : <p>暂无{label}</p>}
             </article>
           ))}
           <ControlTimer
@@ -1482,6 +1549,9 @@ function QuestionsPage({ activityId, canManage }) {
   const mediaUrlsFor = (question) => Array.isArray(question.mediaUrls)
     ? question.mediaUrls
     : question.mediaUrl ? [question.mediaUrl] : [];
+  const answerMediaUrlsFor = (question) => Array.isArray(question?.answerMediaUrls)
+    ? question.answerMediaUrls
+    : question?.answerMediaUrl ? [question.answerMediaUrl] : [];
   const emptyQuestion = (questionType = "SINGLE") => ({
     type: questionType,
     title: "",
@@ -1492,6 +1562,7 @@ function QuestionsPage({ activityId, canManage }) {
     textAcceptedAnswers: "",
     textMatchMode: "FUZZY",
     mediaUrls: [],
+    answerMediaUrls: [],
     enabled: true,
   });
   const [questions, setQuestions] = useState([]);
@@ -1568,6 +1639,7 @@ function QuestionsPage({ activityId, canManage }) {
       ...emptyQuestion(question.type),
       ...question,
       mediaUrls: mediaUrlsFor(question),
+      answerMediaUrls: answerMediaUrlsFor(question),
       options: asOptions(question).join("\n"),
       answers: answerSet(question).size
         ? [...answerSet(question)].join(", ")
@@ -1694,15 +1766,39 @@ function QuestionsPage({ activityId, canManage }) {
       setBusy("");
     }
   };
+  const uploadAnswerMedia = async (event) => {
+    const input = event.target;
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
+    if (form.answerMediaUrls.length + files.length > 20) {
+      setError("每道题最多添加 20 个答案材料文件");
+      input.value = "";
+      return;
+    }
+    setBusy("answer-media");
+    setError("");
+    try {
+      for (const file of files) {
+        const uploaded = await api.uploadMedia(activityId, file, "questions");
+        setForm((current) => ({ ...current, answerMediaUrls: [...current.answerMediaUrls, uploaded.url] }));
+      }
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      input.value = "";
+      setBusy("");
+    }
+  };
   const submit = async (event) => {
     event.preventDefault();
-    if (busy === "question-media") return;
+    if (busy === "question-media" || busy === "answer-media") return;
     const fullScore = Number(form.fullScore);
     if (!Number.isInteger(fullScore) || fullScore < 1 || fullScore > 100000) {
       setError("题目分值需为 1 至 100000 的整数");
       return;
     }
     const mediaUrls = [...new Set(form.mediaUrls.map((url) => url.trim()).filter(Boolean))];
+    const answerMediaUrls = [...new Set(form.answerMediaUrls.map((url) => url.trim()).filter(Boolean))];
     setBusy("question-form");
     setError("");
     const options =
@@ -1745,6 +1841,7 @@ function QuestionsPage({ activityId, canManage }) {
       textMatchMode: form.type === "TEXT" ? form.textMatchMode : null,
       mediaUrl: mediaUrls[0] || "",
       mediaUrls,
+      answerMediaUrls,
     };
     try {
       if (dialog === "create") await api.createQuestion(activityId, payload);
@@ -1858,6 +1955,7 @@ function QuestionsPage({ activityId, canManage }) {
                     ? `${textMatchLabel(question.textMatchMode)} · ${textAcceptedAnswers(question).length} 项标准答案`
                     : `${asOptions(question).length} 个选项`}
                   {mediaUrlsFor(question).length ? ` · ${mediaUrlsFor(question).length} 个媒体` : ""}
+                  {answerMediaUrlsFor(question).length ? ` · ${answerMediaUrlsFor(question).length} 个答案材料` : ""}
                 </small>
               </div>
               <span className="type-chip">
@@ -2015,7 +2113,7 @@ function QuestionsPage({ activityId, canManage }) {
               ? "新建活动题目"
               : `编辑题目 · ${typeLabel(form.type)}`
           }
-          onClose={() => { if (busy !== "question-media") setDialog(null); }}
+          onClose={() => { if (busy !== "question-media" && busy !== "answer-media") setDialog(null); }}
         >
           <form className="dialog-form" onSubmit={submit}>
             <InlineError text={error} />
@@ -2203,6 +2301,65 @@ function QuestionsPage({ activityId, canManage }) {
               </button>
               <span>{form.mediaUrls.length} / 20 个媒体</span>
             </div>
+            <fieldset className="question-answer-media-section">
+              <legend>答案材料（公布答案时展示）</legend>
+              {form.answerMediaUrls.map((url, index) => (
+                <div className="question-media-item" key={index}>
+                  <div className="media-upload-control">
+                    <label>
+                      答案材料地址 {index + 1}
+                      <input
+                        aria-label={`答案材料地址 ${index + 1}`}
+                        value={url}
+                        maxLength="2048"
+                        disabled={busy === "answer-media"}
+                        onChange={(event) => setForm((current) => ({
+                          ...current,
+                          answerMediaUrls: current.answerMediaUrls.map((item, itemIndex) => itemIndex === index ? event.target.value : item),
+                        }))}
+                        placeholder="https://..."
+                      />
+                    </label>
+                    <button
+                      className="toolbar-icon"
+                      type="button"
+                      title={`移除答案材料 ${index + 1}`}
+                      disabled={busy === "answer-media"}
+                      onClick={() => setForm((current) => ({
+                        ...current,
+                        answerMediaUrls: current.answerMediaUrls.filter((_, itemIndex) => itemIndex !== index),
+                      }))}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <ScreenMedia src={url} className="question-editor-media" />
+                </div>
+              ))}
+              <div className="media-upload-control">
+                <label className="secondary-button">
+                  <FilePlus2 size={16} />
+                  {busy === "answer-media" ? "正在上传" : "上传答案材料"}
+                  <input
+                    type="file"
+                    accept="image/*,audio/*,video/*"
+                    multiple
+                    disabled={busy === "answer-media" || form.answerMediaUrls.length >= 20}
+                    onChange={uploadAnswerMedia}
+                  />
+                </label>
+                <button
+                  className="toolbar-icon"
+                  type="button"
+                  title="添加答案材料地址"
+                  disabled={busy === "answer-media" || form.answerMediaUrls.length >= 20}
+                  onClick={() => setForm((current) => ({ ...current, answerMediaUrls: [...current.answerMediaUrls, ""] }))}
+                >
+                  <Plus size={16} />
+                </button>
+                <span>{form.answerMediaUrls.length} / 20 个答案材料</span>
+              </div>
+            </fieldset>
             <label className="toggle-control">
               <input
                 type="checkbox"
@@ -2215,7 +2372,7 @@ function QuestionsPage({ activityId, canManage }) {
             </label>
             <button
               className="primary-button"
-              disabled={busy === "question-form" || busy === "question-media"}
+              disabled={busy === "question-form" || busy === "question-media" || busy === "answer-media"}
             >
               {busy === "question-form" ? "正在保存" : "保存题目"}
               <Check size={17} />
@@ -5700,8 +5857,8 @@ function ParticipantHeader({ state, activity, siteSettings }) {
   return (
     <header className="participant-header">
       <Link
-        to="/login"
-        aria-label={siteSettings?.siteName || "返回工作人员登录"}
+        to="/event_select"
+        aria-label="返回活动选择"
       >
         {siteSettings?.logoUrl ? (
           <img
@@ -6065,7 +6222,7 @@ function AnswerCard({
         {typeLabel(question.type)} · {question.fullScore || 100} 分
       </span>
       <h2>{question.title}</h2>
-      <QuestionMedia question={question} className="answer-question-media" />
+      <QuestionMedia question={question} className="answer-question-media" answer={revealed} />
       {text ? (
         <textarea
           className="text-answer"
@@ -6445,6 +6602,8 @@ function ScreenDisplay({ activityId, display, mode }) {
           answers: payload.answers,
           mediaUrl: payload.mediaUrl,
           mediaUrls: payload.mediaUrls,
+          answerMediaUrls: payload.answerMediaUrls,
+          answerMediaUrl: payload.answerMediaUrl,
         }}
         state={{
           stage: mode === "RESULT" ? "ANSWER_REVEALED" : "QUESTION_OPEN",
@@ -6486,6 +6645,8 @@ function ScreenDisplay({ activityId, display, mode }) {
 function TemplateScreen({ activityId, display }) {
   const containerRef = useRef(null);
   const components = display.template?.components || [];
+  const visibleComponents = components.filter((item) => item.type !== "BACKGROUND");
+  const imageOnly = visibleComponents.length === 1 && visibleComponents[0].type === "IMAGE";
   const overrides = display.data?.overrides || {};
   const background =
     components.find((item) => item.type === "BACKGROUND")?.config || {};
@@ -6494,16 +6655,14 @@ function TemplateScreen({ activityId, display }) {
   return (
     <div
       ref={containerRef}
-      className="template-screen"
+      className={`template-screen${imageOnly ? " template-screen--image-only" : ""}`}
       style={{
         background: background.imageUrl
           ? "center / cover no-repeat url(" + background.imageUrl + ")"
           : background.color || "#836c67",
       }}
     >
-      {components
-        .filter((item) => item.type !== "BACKGROUND")
-        .map((item) => {
+      {visibleComponents.map((item) => {
           const config = item.config || {};
           const value = overrides[item.id] ?? config.text ?? config.label;
           if (item.type === "ACTIVITY_QR" || item.type === "REGISTRATION_QR")
@@ -6555,13 +6714,17 @@ function TemplateScreen({ activityId, display }) {
 
 function ScreenQuestion({ question, state, result, responses = [], submittedCount = 0, volume }) {
   const remaining = useLiveCountdown(state);
+  const options = asOptions(question);
+  const mediaUrls = result ? question?.answerMediaUrls : question?.mediaUrls;
+  const singleMediaUrl = Array.isArray(mediaUrls) ? mediaUrls.length === 1 && mediaUrls[0] : null;
+  const imageOnly = options.length === 0 && singleMediaUrl && !/\.(?:mp4|m4v|mov|webm|mp3|wav|m4a|aac|flac|oga|ogg)(?:[?#]|$)/i.test(singleMediaUrl);
   const resultResponses = Array.isArray(responses)
     ? responses
     : responses
       ? [responses]
       : [];
   return (
-    <div className="screen-question-new">
+    <div className={`screen-question-new${imageOnly ? " screen-question-new--image-only" : ""}`}>
       <div className="screen-question-new__meta">
         <span>{typeLabel(question?.type || "SINGLE")}</span>
         <span className="screen-submitted-count"><Users size={20} />{submittedCount} 人已提交</span>
@@ -6578,9 +6741,10 @@ function ScreenQuestion({ question, state, result, responses = [], submittedCoun
         question={question}
         className="screen-question-media"
         volume={volume}
+        answer={result}
       />
-      <div className="screen-options-new">
-        {asOptions(question).map((option, index) => (
+      {options.length > 0 && <div className="screen-options-new">
+        {options.map((option, index) => (
           <div
             className={
               result && answerSet(question).has(option) ? "is-correct" : ""
@@ -6594,7 +6758,7 @@ function ScreenQuestion({ question, state, result, responses = [], submittedCoun
             )}
           </div>
         ))}
-      </div>
+      </div>}
       {result && question?.type === "TEXT" && answerSet(question).size > 0 && (
         <div className="screen-text-answer">
           <span>正确答案</span>
@@ -6624,8 +6788,13 @@ function ScreenQuestion({ question, state, result, responses = [], submittedCoun
   );
 }
 
-function QuestionMedia({ question, className, volume }) {
-  const sources = Array.isArray(question?.mediaUrls) ? question.mediaUrls : question?.mediaUrl ? [question.mediaUrl] : [];
+function QuestionMedia({ question, className, volume, answer = false }) {
+  const answerSources = Array.isArray(question?.answerMediaUrls)
+    ? question.answerMediaUrls
+    : question?.answerMediaUrl ? [question.answerMediaUrl] : [];
+  const sources = answer
+    ? answerSources
+    : Array.isArray(question?.mediaUrls) ? question.mediaUrls : question?.mediaUrl ? [question.mediaUrl] : [];
   if (!sources.length) return null;
   if (sources.length === 1) return <ScreenMedia src={sources[0]} className={className} volume={volume} />;
   return <div className={`question-media-gallery ${className || ""}`}>

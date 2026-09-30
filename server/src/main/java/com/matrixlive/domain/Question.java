@@ -53,6 +53,10 @@ public class Question {
   @Column(name = "media_urls", columnDefinition = "text")
   private List<String> mediaUrls;
 
+  @Convert(converter = MediaUrlsConverter.class)
+  @Column(name = "answer_media_urls", columnDefinition = "text")
+  private List<String> answerMediaUrls;
+
   @Column(nullable = false)
   private int partialCreditPercent;
 
@@ -103,6 +107,9 @@ public class Question {
     }
     return List.copyOf(mediaUrls);
   }
+  public List<String> getAnswerMediaUrls() {
+    return answerMediaUrls == null ? List.of() : List.copyOf(answerMediaUrls);
+  }
   public int getPartialCreditPercent() { return partialCreditPercent; }
   public String getTextAcceptedAnswers() { return textAcceptedAnswers; }
   public String getTextMatchMode() { return textMatchMode; }
@@ -126,6 +133,10 @@ public class Question {
   public void setMediaUrls(List<String> mediaUrls) {
     this.mediaUrls = List.copyOf(mediaUrls);
     this.mediaUrl = mediaUrls.isEmpty() ? "" : mediaUrls.get(0);
+  }
+
+  public void setAnswerMediaUrls(List<String> answerMediaUrls) {
+    this.answerMediaUrls = answerMediaUrls == null ? List.of() : List.copyOf(answerMediaUrls);
   }
 
   @Converter

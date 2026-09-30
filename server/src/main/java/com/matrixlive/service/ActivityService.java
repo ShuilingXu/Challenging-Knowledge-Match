@@ -457,11 +457,12 @@ public class ActivityService {
     QuestionValues values = questionValues(request.type(), request.title(), request.options(), request.answers(),
         request.fullScore(), request.displayOrder(), questionMediaUrls(request, List.of()), request.partialCreditPercent(),
         request.textAcceptedAnswers(), request.textMatchMode(), request.enabled(),
-        (int) questions.countByActivityId(activityId));
+        (int) questions.countByActivityId(activityId), request.answerMediaUrls());
     Question question = questions.save(new Question(activityId, values.type(), values.title(), joinPipe(values.options()),
         joinComma(values.answers()), values.fullScore(), values.displayOrder(), null,
         values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()), values.textMatchMode()));
     question.setMediaUrls(values.mediaUrls());
+    question.setAnswerMediaUrls(values.answerMediaUrls());
     question.update(null, null, null, null, null, null, null, null, null, null, values.enabled());
     return toQuestionAdmin(question);
   }
@@ -479,11 +480,13 @@ public class ActivityService {
         request.partialCreditPercent() == null ? question.getPartialCreditPercent() : request.partialCreditPercent(),
         request.textAcceptedAnswers() == null ? readTextAnswers(question.getTextAcceptedAnswers()) : request.textAcceptedAnswers(),
         request.textMatchMode() == null ? question.getTextMatchMode() : request.textMatchMode(),
-        request.enabled() == null ? question.isEnabled() : request.enabled(), question.getDisplayOrder());
+        request.enabled() == null ? question.isEnabled() : request.enabled(), question.getDisplayOrder(),
+        request.answerMediaUrls() == null ? question.getAnswerMediaUrls() : request.answerMediaUrls());
     question.update(values.type(), values.title(), joinPipe(values.options()), joinComma(values.answers()), values.fullScore(),
         values.displayOrder(), null, values.partialCreditPercent(), writeTextAnswers(values.textAcceptedAnswers()),
         values.textMatchMode(), values.enabled());
     question.setMediaUrls(values.mediaUrls());
+    question.setAnswerMediaUrls(values.answerMediaUrls());
     return toQuestionAdmin(question);
   }
 
@@ -693,6 +696,8 @@ public class ActivityService {
         payload.put("updatedAt", state.updatedAt());
         payload.put("questionType", question.getType());
         if ("ANSWER_REVEALED".equals(stage)) {
+          payload.put("answerMediaUrls", question.getAnswerMediaUrls());
+          payload.put("answerMediaUrl", question.getAnswerMediaUrls().isEmpty() ? "" : question.getAnswerMediaUrls().get(0));
           payload.put("answers", displayAnswers(question));
           List<Map<String, Object>> responses = submissions
               .findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, question.getId()).stream()
@@ -1153,7 +1158,8 @@ public class ActivityService {
 
   private QuestionValues questionValues(String rawType, String rawTitle, List<String> rawOptions, Set<String> rawAnswers,
       Integer rawFullScore, Integer rawDisplayOrder, List<String> rawMediaUrls, Integer rawPartialCreditPercent,
-      List<String> rawTextAcceptedAnswers, String rawTextMatchMode, Boolean rawEnabled, int fallbackDisplayOrder) {
+      List<String> rawTextAcceptedAnswers, String rawTextMatchMode, Boolean rawEnabled, int fallbackDisplayOrder,
+      List<String> rawAnswerMediaUrls) {
     String type = normalizeEnum(rawType, QUESTION_TYPES, "question type");
     String title = cleanRequired(rawTitle, "Question title");
     List<String> options = cleanValues(rawOptions == null ? List.of() : rawOptions, "option");
@@ -1188,8 +1194,14 @@ public class ActivityService {
       if (url.length() > 2048) throw badRequest("Question media URL is too long");
       return url;
     }).distinct().toList();
+    List<String> answerMediaUrls = rawAnswerMediaUrls == null ? List.of() : rawAnswerMediaUrls.stream().map(value -> {
+      String url = cleanRequired(value, "Answer media URL");
+      if (url.length() > 2048) throw badRequest("Answer media URL is too long");
+      return url;
+    }).distinct().toList();
+    if (answerMediaUrls.size() > 20) throw badRequest("A question supports at most 20 answer media items");
     return new QuestionValues(type, title, options, answers, fullScore, displayOrder, mediaUrls,
-        partialCreditPercent, textAcceptedAnswers, textMatchMode, rawEnabled == null || rawEnabled);
+        answerMediaUrls, partialCreditPercent, textAcceptedAnswers, textMatchMode, rawEnabled == null || rawEnabled);
   }
 
   private List<String> questionMediaUrls(QuestionWriteRequest request, List<String> fallback) {
@@ -1483,8 +1495,17 @@ public class ActivityService {
 
   private void configureScoring(Activity activity, String rawMode, Integer rawCorrect, Integer rawIncorrect,
       List<ScoreRule> correctRules, List<ScoreRule> incorrectRules) {
-    String mode = rawMode == null || rawMode.isBlank() ? activity.getScoringMode() : normalizeEnum(rawMode,
-        Set.of("SIMPLE", "GENERAL", "ADVANCED"), "scoring mode");
+    String mode;
+    if (rawMode == null || rawMode.isBlank()) {
+      // ADVANCED was removed from the settings UI. Migrate any legacy records
+      // to the equivalent rank based GENERAL mode when they are next updated.
+      String existingMode = activity.getScoringMode();
+      mode = "ADVANCED".equalsIgnoreCase(existingMode) ? "GENERAL"
+          : (existingMode == null || existingMode.isBlank() ? "SIMPLE"
+              : normalizeEnum(existingMode, Set.of("SIMPLE", "GENERAL"), "scoring mode"));
+    } else {
+      mode = normalizeEnum(rawMode, Set.of("SIMPLE", "GENERAL"), "scoring mode");
+    }
     int correct = rawCorrect == null ? activity.getCorrectScorePercent() : rawCorrect;
     int incorrect = rawIncorrect == null ? activity.getIncorrectScorePercent() : rawIncorrect;
     if (correct < 0 || correct > 100 || incorrect < 0 || incorrect > 100) throw badRequest("Scoring percentages must be between 0 and 100");
@@ -1569,15 +1590,20 @@ public class ActivityService {
   }
 
   private QuestionResponse toQuestion(Question question) {
+    boolean revealed = activities.findById(question.getActivityId())
+        .map(activity -> "ANSWER_REVEALED".equals(activity.getControlStage())
+            && question.getId().equals(activity.getControlQuestionId()))
+        .orElse(false);
     return new QuestionResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
-        question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(), question.isEnabled(), question.getMediaUrls());
+        question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(), question.isEnabled(), question.getMediaUrls(),
+        revealed ? question.getAnswerMediaUrls() : List.of());
   }
 
   private QuestionAdminResponse toQuestionAdmin(Question question) {
     return new QuestionAdminResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
         splitComma(question.getAnswers()), question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(),
         question.getPartialCreditPercent(), readTextAnswers(question.getTextAcceptedAnswers()), question.getTextMatchMode(),
-        question.isEnabled(), question.getMediaUrls());
+        question.isEnabled(), question.getMediaUrls(), question.getAnswerMediaUrls());
   }
 
   private QuestionSetResponse toQuestionSet(QuestionSet set) {
@@ -1597,7 +1623,8 @@ public class ActivityService {
     return new QuestionControlResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
         question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(),
         "TEXT".equals(question.getType()) ? readTextAnswers(question.getTextAcceptedAnswers()) : List.of(),
-        question.getTextMatchMode(), question.isEnabled(), question.getMediaUrls());
+        question.getTextMatchMode(), question.isEnabled(), question.getMediaUrls(), question.getAnswerMediaUrls(),
+        splitComma(question.getAnswers()));
   }
 
   private AnswerResult toAnswerResult(AnswerSubmission submission, int totalScore, boolean replayed, int responseRank) {
@@ -1648,7 +1675,7 @@ public class ActivityService {
 
   private record FieldValues(String type, List<String> options) { }
   private record QuestionValues(String type, String title, List<String> options, Set<String> answers, int fullScore,
-      int displayOrder, List<String> mediaUrls, int partialCreditPercent, List<String> textAcceptedAnswers, String textMatchMode,
+      int displayOrder, List<String> mediaUrls, List<String> answerMediaUrls, int partialCreditPercent, List<String> textAcceptedAnswers, String textMatchMode,
       boolean enabled) { }
   private record PrizeValues(String purpose, String deliveryType, int totalQuantity, int minScore, int drawWeight,
       Integer rankFrom, Integer rankTo) { }

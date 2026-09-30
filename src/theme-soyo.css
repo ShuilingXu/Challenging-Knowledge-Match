@@ -941,6 +941,67 @@ a:focus-visible {
   }
 }
 
+.scoring-rules-grid {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.scoring-rule-table {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--soyo-line, #eadfd4);
+  border-radius: 14px;
+  background: rgba(255, 253, 249, 0.7);
+}
+
+.scoring-rule-table__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.scoring-rule-table table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.scoring-rule-table th {
+  padding: 0 4px 8px;
+  color: var(--soyo-muted, #84746c);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.scoring-rule-table td {
+  padding: 6px 4px;
+  border-top: 1px solid var(--soyo-line, #eadfd4);
+}
+
+.scoring-rule-table th:last-child,
+.scoring-rule-table td:last-child {
+  width: 42px;
+  text-align: center;
+}
+
+.scoring-rule-table input {
+  min-width: 0;
+  padding-inline: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoring-rule-table > small {
+  display: block;
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
 /* Focused SOYO polish for the editor, answer surfaces and public screen.
  * The controls keep their existing semantics; only their visual treatment is
  * translucent so the warm paper/dot layers remain visible behind each field.

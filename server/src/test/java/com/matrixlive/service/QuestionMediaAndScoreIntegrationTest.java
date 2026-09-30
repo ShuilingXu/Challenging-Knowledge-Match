@@ -28,7 +28,8 @@ class QuestionMediaAndScoreIntegrationTest {
   void persistsOrderedMediaAndExposesItToEveryQuestionView() {
     var activity = service.createActivity(new CreateActivityRequest("Question media", "Shanghai", Instant.now()));
     var urls = List.of("https://example.test/first.png?caption=%22quoted%22", "https://example.test/second.png");
-    var question = service.createQuestion(activity.id(), request(25, urls));
+    var answerUrls = List.of("https://example.test/answer.png");
+    var question = service.createQuestion(activity.id(), request(25, urls, answerUrls));
     entityManager.flush();
     entityManager.clear();
 
@@ -38,6 +39,8 @@ class QuestionMediaAndScoreIntegrationTest {
     assertEquals(urls, service.listQuestions(activity.id()).getFirst().mediaUrls());
     assertEquals(urls, service.listQuestionAdministration(activity.id()).getFirst().mediaUrls());
     assertEquals(urls, service.listQuestionControl(activity.id()).getFirst().mediaUrls());
+    assertEquals(answerUrls, service.listQuestionAdministration(activity.id()).getFirst().answerMediaUrls());
+    assertEquals(answerUrls, service.listQuestionControl(activity.id()).getFirst().answerMediaUrls());
     assertEquals(25, service.listQuestions(activity.id()).getFirst().fullScore());
 
     var edited = service.updateQuestion(activity.id(), question.id(), request(35, null));
@@ -95,7 +98,11 @@ class QuestionMediaAndScoreIntegrationTest {
   }
 
   private QuestionWriteRequest request(int fullScore, List<String> mediaUrls) {
+    return request(fullScore, mediaUrls, null);
+  }
+
+  private QuestionWriteRequest request(int fullScore, List<String> mediaUrls, List<String> answerMediaUrls) {
     return new QuestionWriteRequest("SINGLE", "Pick A", List.of("A", "B"), Set.of("A"), fullScore,
-        0, null, 40, List.of(), "MANUAL", true, mediaUrls);
+        0, null, 40, List.of(), "MANUAL", true, mediaUrls, answerMediaUrls);
   }
 }

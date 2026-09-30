@@ -20,6 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 class ActivityDomainWorkflowTest {
   @Autowired private ActivityService service;
+  @Autowired private com.matrixlive.repository.ActivityRepository activities;
+  @Autowired private jakarta.persistence.EntityManager entityManager;
+  @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
   @Test
   void isolatesVenuesAndPersistsConfiguredRegistrationFields() {
@@ -211,5 +214,40 @@ class ActivityDomainWorkflowTest {
     assertEquals(List.of("A", "C"), updated.answers());
     assertEquals(20, updated.fullScore());
     assertEquals(3, updated.displayOrder());
+  }
+
+  @Test
+  void acceptsGeneralRankRulesAndRejectsRetiredAdvancedMode() {
+    var configured = service.createActivity(new CreateActivityRequest("Rank scoring", "Shanghai", Instant.now(),
+        null, null, null, null, null, null, null, "EVENT", "GENERAL", 100, 0,
+        List.of(new ScoreRule(1, 1, 100), new ScoreRule(2, 3, 70)),
+        List.of(new ScoreRule(1, 1, 0))));
+    assertEquals("GENERAL", configured.scoringMode());
+    assertEquals(List.of(new ScoreRule(1, 1, 100), new ScoreRule(2, 3, 70)), configured.correctRankRules());
+
+    assertThrows(DomainException.class, () -> service.createActivity(new CreateActivityRequest("Legacy mode", "Shanghai",
+        Instant.now(), null, null, null, null, null, null, null, "EVENT", "ADVANCED", 100, 0, null, null)));
+  }
+
+  @Test
+  void migratesRetiredAdvancedModeWithoutChangingScoringConfiguration() {
+    var activity = service.createActivity(new CreateActivityRequest("Legacy scoring", "Shanghai", Instant.now()));
+    var legacyRules = "{\"correct\":[{\"rankFrom\":1,\"rankTo\":2,\"percent\":70}],\"incorrect\":[{\"rankFrom\":3,\"rankTo\":5,\"percent\":30}]}";
+    activities.findById(activity.id()).orElseThrow().updateScoring("ADVANCED", 80, 20, legacyRules);
+    entityManager.flush();
+
+    jdbcTemplate.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+      org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+          new org.springframework.core.io.ClassPathResource("db/migration/V13__remove_advanced_scoring_mode.sql"));
+      return null;
+    });
+    entityManager.clear();
+
+    var migrated = service.activity(activity.id());
+    assertEquals("GENERAL", migrated.scoringMode());
+    assertEquals(80, migrated.correctScorePercent());
+    assertEquals(20, migrated.incorrectScorePercent());
+    assertEquals(List.of(new ScoreRule(1, 2, 70)), migrated.correctRankRules());
+    assertEquals(List.of(new ScoreRule(3, 5, 30)), migrated.incorrectRankRules());
   }
 }

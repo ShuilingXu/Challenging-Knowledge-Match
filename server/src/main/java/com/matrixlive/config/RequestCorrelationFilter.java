@@ -19,6 +19,7 @@ public class RequestCorrelationFilter extends OncePerRequestFilter {
     if (requestId == null || requestId.isBlank() || requestId.length() > 120) requestId = UUID.randomUUID().toString();
     MDC.put("requestId", requestId);
     response.setHeader("X-Request-Id", requestId);
+    response.setHeader("X-Server-Time", java.time.Instant.now().toString());
     try { chain.doFilter(request, response); } finally { MDC.remove("requestId"); }
   }
 }

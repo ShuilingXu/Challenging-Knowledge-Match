@@ -46,6 +46,7 @@ export function setSession(session) {
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem('matrix.identity')
+  globalThis.window?.dispatchEvent(new Event('matrix-session-expired'))
 }
 
 export function getStoredIdentity() {
@@ -61,7 +62,10 @@ export function getParticipantToken(activityId) {
 }
 
 export function setParticipantToken(activityId, token) {
-  if (token === null) sessionStorage.removeItem(`${PARTICIPANT_TOKEN_PREFIX}${activityId}`)
+  if (token === null) {
+    sessionStorage.removeItem(`${PARTICIPANT_TOKEN_PREFIX}${activityId}`)
+    sessionStorage.removeItem(`matrix.participant-refresh.${activityId}`)
+  }
   else sessionStorage.setItem(`${PARTICIPANT_TOKEN_PREFIX}${activityId}`, token)
 }
 
@@ -87,20 +91,62 @@ function normalizeIdentity(session) {
   }
 }
 
+let serverClock = null
+export function serverNow() {
+  return serverClock ? serverClock.time + performance.now() - serverClock.received : Date.now()
+}
 async function parseResponse(response) {
+  const timestamp = Date.parse(response.headers.get('X-Server-Time') || '')
+  if (Number.isFinite(timestamp)) serverClock = { time: timestamp, received: performance.now() }
   const contentType = response.headers.get('content-type') || ''
   const body = contentType.includes('application/json') ? await response.json() : await response.text()
   if (!response.ok) {
     const message = typeof body === 'object' ? body.message || body.error || '请求未成功' : body || '请求未成功'
-    throw new ApiError(message, response.status, body)
+    const fallback = { 400: '请求参数不正确，请检查填写内容', 401: '登录已过期或身份验证失败，请重新登录', 403: '没有执行此操作的权限', 404: '请求的记录不存在', 409: '操作与当前状态冲突，请刷新后重试', 413: '文件超过上传大小限制', 415: '文件格式不受支持', 429: '请求过于频繁，请稍后重试', 503: '服务暂时不可用，请稍后重试' }
+    throw new ApiError(/[\u3400-\u9fff]/.test(message) ? message : fallback[response.status] || '请求失败，请稍后重试', response.status, body)
   }
   return body
+}
+
+const clientRenewals = new Map()
+const clientTokens = new Map()
+function tokenClaims(token) {
+  try { return JSON.parse(atob(token.split('.')[1].replaceAll('-', '+').replaceAll('_', '/'))) } catch { return null }
+}
+function clientCredential(token) {
+  const claims = tokenClaims(token)
+  if (!claims || !globalThis.sessionStorage) return null
+  if (claims.kind === 'PARTICIPANT') return sessionStorage.getItem(`matrix.participant-refresh.${claims.aid}`)
+  if (claims.kind === 'SCREEN_DEVICE') return getScreenSession(claims.aid, claims.did)?.refreshToken
+  return null
+}
+export async function resolveClientToken(token, force = false) {
+  if (!token) return token
+  let current = token
+  while (clientTokens.has(current)) current = clientTokens.get(current)
+  const claims = tokenClaims(current)
+  if (!claims || !force && claims.exp * 1000 - serverNow() > 300000) return current
+  const credential = clientCredential(current)
+  if (!credential) return current
+  if (!clientRenewals.has(credential)) {
+    clientRenewals.set(credential, request('/api/auth/client-refresh', { method: 'POST', auth: false, body: { refreshToken: credential } })
+      .then((session) => {
+        if (clientCredential(current) !== credential) throw new ApiError("会话已退出", 401)
+        clientTokens.set(token, session.accessToken)
+        clientTokens.set(current, session.accessToken)
+        if (claims.kind === 'PARTICIPANT') setParticipantToken(claims.aid, session.accessToken)
+        else setScreenSession(claims.aid, claims.did, { ...getScreenSession(claims.aid, claims.did), ...session })
+        return session.accessToken
+      }).finally(() => clientRenewals.delete(credential)))
+  }
+  return clientRenewals.get(credential)
 }
 
 export async function request(path, { method = 'GET', body, auth = true, retry = true, headers = {} } = {}) {
   const token = getAccessToken()
   const requestHeaders = { Accept: 'application/json', ...headers }
   if (body !== undefined) requestHeaders['Content-Type'] = 'application/json'
+  if (!auth && requestHeaders.Authorization?.startsWith("Bearer ")) requestHeaders.Authorization = `Bearer ${await resolveClientToken(requestHeaders.Authorization.slice(7))}`
   if (auth && token) requestHeaders.Authorization = `Bearer ${token}`
   const response = await fetch(path, { method, headers: requestHeaders, body: body === undefined ? undefined : JSON.stringify(body), credentials: 'include' })
   if (response.status === 401 && auth && retry && token) {
@@ -113,6 +159,12 @@ export async function request(path, { method = 'GET', body, auth = true, retry =
       return request(path, { method, body, auth, retry: false, headers })
     }
   }
+  if (response.status === 401 && !auth && retry && requestHeaders.Authorization?.startsWith('Bearer ')) {
+    const old = requestHeaders.Authorization.slice(7)
+    const renewed = await resolveClientToken(old, true)
+    if (renewed !== old) return request(path, { method, body, auth, retry: false, headers: { ...headers, Authorization: `Bearer ${renewed}` } })
+  }
+  if (response.status === 401 && auth && !retry) clearSession()
   return parseResponse(response)
 }
 
@@ -155,7 +207,19 @@ export async function refreshSession() {
         if (!latestToken) throw new ApiError('Session changed', 401)
         return { accessToken: latestToken, user: getStoredIdentity() }
       }
-      const session = await request('/api/auth/refresh', { method: 'POST', auth: false, body: {} })
+      let session
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try { session = await request('/api/auth/refresh', { method: 'POST', auth: false, body: {} }); break }
+        catch (cause) {
+          if (cause.status !== 409 || attempt === 2) throw cause
+          await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)))
+        }
+      }
+      if (getAccessToken() !== tokenAtStart) {
+        const latest = getAccessToken()
+        if (!latest) throw new ApiError('会话已退出', 401)
+        return { accessToken: latest, user: getStoredIdentity() }
+      }
       setSession(session)
       return { ...session, user: normalizeIdentity(session) }
     }
@@ -163,6 +227,10 @@ export async function refreshSession() {
       ? globalThis.navigator.locks.request(REFRESH_LOCK_NAME, refresh)
       : refresh()
     refreshInFlight = pending
+      .catch((cause) => {
+        if (cause.status === 401 && getAccessToken() === tokenAtStart) clearSession()
+        throw cause
+      })
       .finally(() => {
         refreshInFlight = null
       })
@@ -172,7 +240,7 @@ export async function refreshSession() {
 
 export async function logout() {
   try {
-    await request('/api/auth/logout', { method: 'POST', auth: false, body: {} })
+    await request('/api/auth/logout', { method: 'POST', body: {} })
   } finally {
     clearSession()
   }
@@ -210,7 +278,12 @@ export const api = {
     headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {},
   }),
   updateParticipant: (id, participantId, payload) => request(`/api/activities/${id}/participants/${participantId}`, { method: 'PATCH', body: payload }),
-  participantToken: (payload) => request('/api/auth/participant-token', { method: 'POST', auth: false, body: payload }),
+  participantToken: async (payload) => {
+    const session = await request('/api/auth/participant-token', { method: 'POST', auth: false, body: payload })
+    sessionStorage.setItem(`matrix.participant-refresh.${payload.activityId}`, session.refreshToken)
+    setParticipantToken(payload.activityId, session.accessToken)
+    return session
+  },
   questions: (id, participantToken) => request(`/api/activities/${id}/questions`, { auth: !participantToken, headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {} }),
   questionsAdmin: (id) => request(`/api/activities/${id}/questions/admin`),
   questionsControl: (id) => request(`/api/activities/${id}/questions/control`),
@@ -219,6 +292,15 @@ export const api = {
   updateQuestionSet: (id, setId, payload) => request(`/api/activities/${id}/question-sets/${setId}`, { method: 'PUT', body: payload }),
   activateQuestionSet: (id, setId) => request(`/api/activities/${id}/question-sets/${setId}/activate`, { method: 'POST' }),
   deleteQuestionSet: (id, setId) => request(`/api/activities/${id}/question-sets/${setId}`, { method: 'DELETE' }),
+  participantLogout: async (activityId) => {
+    const refreshToken = sessionStorage.getItem(`matrix.participant-refresh.${activityId}`)
+    if (refreshToken) await request('/api/auth/client-logout', { method: 'POST', auth: false, body: { refreshToken } })
+    setParticipantToken(activityId, null)
+    sessionStorage.removeItem(`matrix.participant.${activityId}`)
+  },
+  humanChallenge: () => request("/api/auth/human-challenge", { auth: false }),
+  activitySubmissions: (id) => request(`/api/activities/${id}/submissions`),
+  importQuestions: (id, rows) => request(`/api/activities/${id}/questions/import`, { method: "POST", body: rows }),
   createQuestion: (id, payload) => request(`/api/activities/${id}/questions`, { method: 'POST', body: payload }),
   updateQuestion: (id, questionId, payload) => request(`/api/activities/${id}/questions/${questionId}`, { method: 'PUT', body: payload }),
   deleteQuestion: (id, questionId) => request(`/api/activities/${id}/questions/${questionId}`, { method: 'DELETE' }),

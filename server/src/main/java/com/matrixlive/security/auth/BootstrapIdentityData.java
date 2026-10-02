@@ -20,11 +20,12 @@ public class BootstrapIdentityData {
 
   public BootstrapIdentityData(UserAccountRepository users, ActivityMembershipRepository memberships,
       ActivityRepository activities, PasswordEncoder passwordEncoder,
-      @Value("${APP_BOOTSTRAP_PASSWORD:ChangeMe!2026}") String bootstrapPassword) {
+      @Value("${APP_BOOTSTRAP_PASSWORD}") String bootstrapPassword) {
     this.users = users;
     this.memberships = memberships;
     this.activities = activities;
     this.passwordEncoder = passwordEncoder;
+    if (bootstrapPassword == null || bootstrapPassword.isBlank() || bootstrapPassword.length() < 12) throw new IllegalStateException("APP_BOOTSTRAP_PASSWORD must contain at least 12 characters");
     this.bootstrapPassword = bootstrapPassword;
   }
 

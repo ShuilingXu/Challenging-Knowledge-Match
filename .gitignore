@@ -5,6 +5,7 @@ server/target/
 server/.m2/
 .env
 .env.*
+!.env.example
 requirement.md
 # Disposable browser/AI workspaces and temporary files must not enter the repo.
 test-assets/edge-qa-profile/
@@ -18,6 +19,4 @@ test-assets/edge-qa-profile/
 **/*.tmp/**
 **/.*.tmp
 **/.*.tmp/**
-/deploy
-/deploy
 /test-assets

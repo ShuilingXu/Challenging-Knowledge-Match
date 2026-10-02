@@ -25,7 +25,7 @@ class ObjectStorageServiceTest {
   }
 
   @Test
-  void uploadReturnsAStableUrlAndAccessDoesNotCacheTheSignedRedirect() throws Exception {
+  void uploadReturnsAStableUrlAndAccessStreamsThePrivateObject() throws Exception {
     var storage = mock(ObjectStorageService.class);
     var activityId = java.util.UUID.randomUUID();
     String fileName = java.util.UUID.randomUUID() + "-poster.png";
@@ -33,16 +33,18 @@ class ObjectStorageServiceTest {
     var file = new org.springframework.mock.web.MockMultipartFile("file", "poster.png", "image/png", new byte[]{1});
     when(storage.upload(activityId, "branding", file)).thenReturn(new ObjectStorageService.StoredObject(
         activityId + "/branding/" + fileName, path, "image/png", 1));
-    when(storage.accessUrl(activityId, "branding", fileName)).thenReturn("https://storage.example.test/poster.png?signature=fresh");
+    when(storage.download(activityId, "branding", fileName, null)).thenReturn(org.springframework.http.ResponseEntity.ok()
+        .cacheControl(org.springframework.http.CacheControl.noStore())
+        .body(new org.springframework.core.io.InputStreamResource(new java.io.ByteArrayInputStream(new byte[]{1}))));
     var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new MediaController(storage)).build();
     mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart("/api/activities/" + activityId + "/media")
             .file(file).param("category", "branding"))
         .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isCreated())
-        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.url").value("http://localhost" + path));
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.url").value(path));
     mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path))
-        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isFound())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
         .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control", "no-store"))
-        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("https://storage.example.test/poster.png?signature=fresh"));
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(new byte[]{1}));
   }
   @Test
   void derivesRegionalAwsEndpointsWhenNoCustomEndpointIsConfigured() {

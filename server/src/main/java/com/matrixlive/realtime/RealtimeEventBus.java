@@ -13,6 +13,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /** Bridges local STOMP brokers through Redis so WebSocket clients can be connected to any API node. */
 @Service
 public class RealtimeEventBus {
+  private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(RealtimeEventBus.class);
   private final SimpMessagingTemplate messaging;
   private final StringRedisTemplate redis;
   private final ObjectMapper mapper;
@@ -29,11 +30,16 @@ public class RealtimeEventBus {
   public void send(String destination, Object payload) {
     if (TransactionSynchronizationManager.isActualTransactionActive()) {
       TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-        @Override public void afterCommit() { publish(destination, payload); }
+        @Override public void afterCommit() { safePublish(destination, payload); }
       });
     } else {
-      publish(destination, payload);
+      safePublish(destination, payload);
     }
+  }
+
+  private void safePublish(String destination, Object payload) {
+    try { publish(destination, payload); }
+    catch (Exception exception) { LOG.error("Real-time delivery failed after commit: {}", destination, exception); }
   }
 
   private void publish(String destination, Object payload) {
@@ -43,8 +49,9 @@ public class RealtimeEventBus {
     }
     try {
       redis.convertAndSend(properties.getChannel(), mapper.writeValueAsString(new Envelope(destination, payload, Instant.now())));
-    } catch (JsonProcessingException exception) {
-      throw new IllegalStateException("Redis real-time publishing failed", exception);
+    } catch (Exception exception) {
+      LOG.warn("Redis unavailable; using local STOMP delivery", exception);
+      messaging.convertAndSend(destination, payload);
     }
   }
 

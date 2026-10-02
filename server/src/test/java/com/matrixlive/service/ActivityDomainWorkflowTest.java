@@ -16,7 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
-@SpringBootTest
+@SpringBootTest(properties = {"APP_BOOTSTRAP_PASSWORD=ChangeMe!2026", "app.security.jwt.secret=VGVzdC1vbmx5LXNlY3JldC1uZXZlci11c2UtaW4tcHJvZHVjdGlvbiE="})
 @Transactional
 class ActivityDomainWorkflowTest {
   @Autowired private ActivityService service;
@@ -35,7 +35,7 @@ class ActivityDomainWorkflowTest {
     var north = service.register(activity.id(), "north",
         new RegisterParticipantRequest("Alex", "138 0000 1000", "Matrix", Map.of("department", "Engineering")));
     var south = service.register(activity.id(), "south",
-        new RegisterParticipantRequest("Alex", "13800001000", "Matrix", Map.of("department", "Operations")));
+        new RegisterParticipantRequest("Alex", "13800001001", "Matrix", Map.of("department", "Operations")));
 
     assertEquals("Engineering", north.customFields().get("department"));
     assertEquals("Operations", south.customFields().get("department"));
@@ -117,7 +117,7 @@ class ActivityDomainWorkflowTest {
 
     var graded = service.gradeSubmission(activity.id(), answer.submissionId(),
         new GradeSubmissionRequest(85, "观点完整，表达清晰。"));
-    assertEquals("SCORED", graded.status());
+    assertEquals("PARTIAL", graded.status());
     assertEquals("观点完整，表达清晰。", graded.feedback());
     assertEquals(85, service.participant(activity.id(), participant.id()).score());
   }

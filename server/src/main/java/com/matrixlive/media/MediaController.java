@@ -28,16 +28,14 @@ public class MediaController {
       @RequestParam(name = "category", defaultValue = "assets") String category,
       @RequestPart("file") MultipartFile file) {
     ObjectStorageService.StoredObject object = storage.upload(activityId, category, file);
-    String url = ServletUriComponentsBuilder.fromCurrentContextPath().path(object.url()).build().toUriString();
+    String url = object.url(); // Same-origin API path; never persist the upload request Host.
     return new MediaUploadResponse(object.objectKey(), url, object.contentType(), object.size());
   }
 
   @GetMapping("/{category}/{fileName}")
-  public ResponseEntity<Void> access(@PathVariable UUID activityId, @PathVariable String category,
-      @PathVariable String fileName) throws Exception {
-    return ResponseEntity.status(HttpStatus.FOUND)
-        .location(java.net.URI.create(storage.accessUrl(activityId, category, fileName)))
-        .cacheControl(CacheControl.noStore()).build();
+  public ResponseEntity<org.springframework.core.io.InputStreamResource> access(@PathVariable UUID activityId, @PathVariable String category,
+      @PathVariable String fileName, @org.springframework.web.bind.annotation.RequestHeader(value="Range", required=false) String range) throws Exception {
+    return storage.download(activityId, category, fileName, range);
   }
 
   public record MediaUploadResponse(String objectKey, String url, String contentType, long size) { }

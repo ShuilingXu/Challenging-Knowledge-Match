@@ -18,7 +18,7 @@ export function buildRegistrationPayload(values, customValues) {
   const customFields = Object.fromEntries(
     Object.entries(customValues || {})
       .filter(([key, value]) => key && !RESERVED_REGISTRATION_KEYS.has(key) && String(value || '').trim())
-      .map(([key, value]) => [key, String(value).trim()]),
+      .map(([key, value]) => [key, Array.isArray(value) ? JSON.stringify(value) : String(value).trim()]),
   )
   return {
     name: values.name,

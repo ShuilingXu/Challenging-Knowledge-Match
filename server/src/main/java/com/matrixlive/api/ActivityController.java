@@ -290,10 +290,22 @@ public class ActivityController {
     return service.draw(activityId, request);
   }
 
+  @GetMapping("/{activityId}/submissions")
+  public List<SubmissionResponse> activitySubmissions(@PathVariable UUID activityId) {
+    return service.activitySubmissions(activityId);
+  }
+
+  @PostMapping("/{activityId}/questions/import")
+  public List<QuestionAdminResponse> importQuestions(@PathVariable UUID activityId,
+      @Valid @RequestBody List<@Valid QuestionWriteRequest> requests) {
+    return service.importQuestions(activityId, requests);
+  }
+
   @PostMapping("/{activityId}/awards/{awardId}/redeem")
   public AwardResponse redeem(@PathVariable UUID activityId, @PathVariable UUID awardId,
-      @RequestBody(required = false) RedeemAwardRequest request) {
-    return service.redeem(activityId, awardId, request == null ? "system" : request.operator());
+      @RequestBody(required = false) RedeemAwardRequest request,
+      @org.springframework.security.core.annotation.AuthenticationPrincipal com.matrixlive.security.AuthenticatedPrincipal principal) {
+    return service.redeem(activityId, awardId, principal.username());
   }
 
   @PostMapping("/{activityId}/awards/redeem-batch")

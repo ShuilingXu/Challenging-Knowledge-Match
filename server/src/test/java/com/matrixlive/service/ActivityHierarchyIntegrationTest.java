@@ -25,11 +25,12 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
-@SpringBootTest
+@SpringBootTest(properties = {"APP_BOOTSTRAP_PASSWORD=ChangeMe!2026", "app.security.jwt.secret=VGVzdC1vbmx5LXNlY3JldC1uZXZlci11c2UtaW4tcHJvZHVjdGlvbiE="})
 @AutoConfigureMockMvc
 @Transactional
 class ActivityHierarchyIntegrationTest {
   @Autowired private ActivityService service;
+  @Autowired private com.matrixlive.security.auth.HumanChallengeRepository challenges;
   @Autowired private MockMvc mvc;
   @Autowired private ObjectMapper mapper;
   @Autowired private JwtTokenService jwt;
@@ -71,7 +72,7 @@ class ActivityHierarchyIntegrationTest {
     assertEquals(1, service.lotteryChance(lottery.id(), person.id()).remainingDraws());
 
     mvc.perform(post("/api/auth/participant-token").contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of("activityId", lottery.id(), "venue", "main", "contact", person.contact()))))
+            .content(mapper.writeValueAsString(Map.of("activityId", lottery.id(), "venue", "main", "contact", person.contact(), "challengeId", com.matrixlive.security.auth.TestChallenges.create(challenges), "challengeAnswer", "ABCDE"))))
         .andExpect(status().isOk());
     var other = lottery(mainActivity().id());
     mvc.perform(get("/api/activities/" + other.id() + "/participants/" + person.id())

@@ -29,6 +29,10 @@ public class RefreshToken {
   private Instant revokedAt;
   @Column(length = 64)
   private String replacedByHash;
+  @Column(length = 256)
+  private String replacementCiphertext;
+  public String getReplacementCiphertext() { return replacementCiphertext; }
+  public void setReplacementCiphertext(String value) { replacementCiphertext = value; }
   @Column(nullable = false)
   private Instant createdAt;
   @Column(length = 64)
@@ -53,6 +57,7 @@ public class RefreshToken {
   public UUID getFamilyId() { return familyId; }
   public String getTokenHash() { return tokenHash; }
   public Instant getExpiresAt() { return expiresAt; }
+  public String getReplacedByHash() { return replacedByHash; }
   public Instant getRevokedAt() { return revokedAt; }
   public boolean isActive(Instant now) { return revokedAt == null && expiresAt.isAfter(now); }
   public void revoke(String replacementHash) { this.revokedAt = Instant.now(); this.replacedByHash = replacementHash; }

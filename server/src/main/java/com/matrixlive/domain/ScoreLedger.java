@@ -21,6 +21,11 @@ public class ScoreLedger {
   @Column(nullable = false)
   private UUID participantId;
 
+  @Column(length = 160)
+  private String idempotencyKey;
+  public String getIdempotencyKey() { return idempotencyKey; }
+  public void setIdempotencyKey(String value) { idempotencyKey = value; }
+
   private UUID questionId;
   private UUID submissionId;
 

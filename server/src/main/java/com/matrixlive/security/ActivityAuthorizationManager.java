@@ -64,6 +64,8 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
     if (!activityId.equals(principal.activityId()) && !activities.findById(activityId)
         .filter(item -> "LOTTERY".equals(item.getActivityType()) && principal.activityId().equals(item.getParentActivityId()))
         .isPresent()) return false;
+    if (!activityId.equals(principal.activityId()) && !(remainder.equals("draws") || remainder.equals("prize-pools")
+        || remainder.equals("awards") || remainder.matches("participants/[0-9a-fA-F-]{36}(?:/lottery-chances)?"))) return false;
     String method = request.getMethod();
     if ("questions".equals(remainder) || "scoreboard".equals(remainder) || "control".equals(remainder)
         || "prize-pools".equals(remainder)) {

@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface ParticipantRepository extends JpaRepository<Participant, UUID> {
+  List<Participant> findByActivityIdAndContact(UUID activityId, String contact);
   Optional<Participant> findByActivityIdAndVenueAndContact(UUID activityId, String venue, String contact);
   List<Participant> findByActivityId(UUID activityId);
   List<Participant> findByActivityIdAndVenue(UUID activityId, String venue);

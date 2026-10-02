@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createIdempotencyKey, refreshSession, request } from './api'
+import { createIdempotencyKey, refreshSession, request, resolveClientToken, serverNow } from './api'
 
 const storage = {
   values: new Map(),
@@ -141,5 +141,49 @@ describe('authenticated request retries', () => {
     await expect(request('/api/protected')).resolves.toEqual({ ok: true })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer fresh-token')
+  })
+
+  it('clears the staff session after an unrecoverable refresh failure', async () => {
+    storage.setItem('matrix.access-token', 'expired')
+    storage.setItem('matrix.identity', '{"username":"staff"}')
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false, status: 401, headers: { get: () => 'application/json' }, json: async () => ({ error: 'expired' }),
+    })))
+    await expect(request('/api/protected')).rejects.toMatchObject({ status: 401 })
+    expect(storage.getItem('matrix.access-token')).toBeNull()
+    expect(storage.getItem('matrix.identity')).toBeNull()
+  })
+
+  it('preserves the staff session when refreshing fails due to a network interruption', async () => {
+    storage.setItem('matrix.access-token', 'cached')
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network offline') }))
+    await expect(refreshSession()).rejects.toThrow('network offline')
+    expect(storage.getItem('matrix.access-token')).toBe('cached')
+  })
+
+  it('renews an expired participant session once for concurrent callers', async () => {
+    const clientStorage = { ...storage, values: new Map() }
+    vi.stubGlobal('sessionStorage', clientStorage)
+    const token = `header.${btoa(JSON.stringify({ kind: 'PARTICIPANT', aid: 'renewal-test', exp: 1 }))}.signature`
+    clientStorage.setItem('matrix.participant-refresh.renewal-test', 'long-client-credential')
+    const fetchMock = vi.fn(async () => ({
+      ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ accessToken: 'renewed-client' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await Promise.all([resolveClientToken(token), resolveClientToken(token)])
+    expect(result).toEqual(['renewed-client', 'renewed-client'])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/client-refresh')
+    expect(clientStorage.getItem('matrix.participant-token.renewal-test')).toBe('renewed-client')
+  })
+
+  it('uses server time instead of the device wall clock', async () => {
+    const now = Date.parse('2026-10-02T04:00:00Z')
+    vi.spyOn(Date, 'now').mockReturnValue(now + 3600000)
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200, headers: { get: (key) => key === 'X-Server-Time' ? new Date(now).toISOString() : 'application/json' }, json: async () => ({}),
+    })))
+    await request('/api/health', { auth: false })
+    expect(Math.abs(serverNow() - now)).toBeLessThan(1000)
   })
 })

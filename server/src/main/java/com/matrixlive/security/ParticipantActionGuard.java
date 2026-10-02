@@ -20,6 +20,9 @@ public class ParticipantActionGuard {
   @Before("execution(* com.matrixlive.service.ActivityService.submitAnswer(..)) && args(activityId, request)")
   public void verifyAnswerOwnership(UUID activityId, SubmitAnswerRequest request) {
     verify(activityId, request.participantId());
+    Object principal = SecurityContextHolder.getContext().getAuthentication() == null ? null : SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    if (principal instanceof AuthenticatedPrincipal current && current.isParticipant() && !activityId.equals(current.activityId()))
+      throw new AccessDeniedException("Quiz answers require the exact activity scope");
   }
 
   @Before("execution(* com.matrixlive.service.ActivityService.draw(..)) && args(activityId, request)")

@@ -1,4 +1,8 @@
 spring:
+  servlet:
+    multipart:
+      max-file-size: ${S3_MAX_FILE_SIZE:20971520}
+      max-request-size: 24MB
   application:
     name: knowledge-match-api
   datasource:
@@ -56,9 +60,14 @@ app:
     max-file-size: ${S3_MAX_FILE_SIZE:20971520}
 
   security:
+    human-verification:
+      # Allow many attendees sharing a venue Wi-Fi IP; the contact limit remains tight.
+      challenge-ip-limit: ${HUMAN_CHALLENGE_IP_LIMIT:3000}
+      participant-ip-limit: ${HUMAN_PARTICIPANT_IP_LIMIT:3000}
+      contact-limit: ${HUMAN_CONTACT_LIMIT:10}
     jwt:
-      # Development-only fallback. Production must set JWT_SECRET to a unique 256-bit base64 value.
-      secret: ${JWT_SECRET:QWxsZGV2ZWxvcG1lbnQtc2VjcmV0cy1tdXN0LWJlLXJlcGxhY2VkLTIwMjY=}
+      # Required in every environment; tests supply their own isolated key.
+      secret: ${JWT_SECRET}
       issuer: ${JWT_ISSUER:matrixlive-api}
       access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT15M}
       participant-token-ttl: ${JWT_PARTICIPANT_TOKEN_TTL:PT2H}

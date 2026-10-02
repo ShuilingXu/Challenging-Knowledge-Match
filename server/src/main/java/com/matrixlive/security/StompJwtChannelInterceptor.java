@@ -29,6 +29,7 @@ import org.springframework.stereotype.Component;
 public class StompJwtChannelInterceptor implements ChannelInterceptor {
   private static final Pattern ACTIVITY_TOPIC = Pattern.compile("^/topic/activities/([0-9a-fA-F-]{36})(?:/screens)?$");
   private static final Pattern DEVICE_TOPIC = Pattern.compile("^/topic/screens/([0-9a-fA-F-]{36})$");
+  private final java.util.concurrent.ConcurrentMap<String, TokenClaims> sessions = new java.util.concurrent.ConcurrentHashMap<>();
   private final JwtTokenService tokens;
   private final TokenRevocationService revocations;
   private final ActivityMembershipRepository memberships;
@@ -51,6 +52,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
   public Message<?> preSend(Message<?> message, MessageChannel channel) {
     StompHeaderAccessor headers = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
     if (headers == null) return message;
+    if (StompCommand.DISCONNECT.equals(headers.getCommand())) sessions.remove(headers.getSessionId());
     if (StompCommand.SEND.equals(headers.getCommand())) {
       throw new AccessDeniedException("Clients cannot publish server events");
     }
@@ -68,13 +70,26 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     return message;
   }
 
+  public Message<?> outbound(Message<?> message) {
+    var headers = org.springframework.messaging.simp.SimpMessageHeaderAccessor.wrap(message);
+    if (headers.getMessageType() != org.springframework.messaging.simp.SimpMessageType.MESSAGE) return message;
+    TokenClaims claims = sessions.get(headers.getSessionId());
+    if (claims == null || !claims.expiresAt().isAfter(java.time.Instant.now()) || revocations.isAccessTokenRevoked(claims)) return null;
+    if (claims.kind() == PrincipalKind.ACCOUNT && !isEnabledAccount(claims)) return null;
+    if (claims.kind() == PrincipalKind.SCREEN_DEVICE && devices.findByIdAndActivityId(claims.deviceId(),claims.activityId()).isEmpty()) return null;
+    return message;
+  }
+
+  @org.springframework.context.event.EventListener
+  public void disconnected(org.springframework.web.socket.messaging.SessionDisconnectEvent event) { sessions.remove(event.getSessionId()); }
+
   private Authentication authenticate(StompHeaderAccessor headers) {
     String value = headers.getFirstNativeHeader("Authorization");
     if (value == null) value = headers.getFirstNativeHeader("authorization");
     if (value == null || !value.startsWith("Bearer ")) throw new AccessDeniedException("STOMP access token is required");
     try {
       TokenClaims claims = tokens.parse(value.substring(7));
-      if (revocations.isAccessTokenRevoked(claims.tokenId())) throw new AccessDeniedException("Access token is revoked");
+      if (revocations.isAccessTokenRevoked(claims)) throw new AccessDeniedException("Access token is revoked");
       if (claims.kind() == PrincipalKind.ACCOUNT && !isEnabledAccount(claims)) {
         throw new AccessDeniedException("Account is unavailable");
       }
@@ -82,8 +97,9 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
           || devices.findByIdAndActivityId(claims.deviceId(), claims.activityId()).isEmpty())) {
         throw new AccessDeniedException("Screen device is unavailable");
       }
+      if (headers.getSessionId() != null) sessions.put(headers.getSessionId(), claims);
       AuthenticatedPrincipal principal = new AuthenticatedPrincipal(claims.tokenId(), claims.kind(), claims.userId(),
-          claims.participantId(), claims.deviceId(), claims.activityId(), claims.role(), claims.username(), claims.expiresAt());
+          claims.participantId(), claims.deviceId(), claims.activityId(), claims.role(), claims.username(), claims.expiresAt(), claims.familyId());
       return new UsernamePasswordAuthenticationToken(principal, null,
           List.of(new SimpleGrantedAuthority("ROLE_" + claims.role().name())));
     } catch (JwtException | IllegalArgumentException exception) {

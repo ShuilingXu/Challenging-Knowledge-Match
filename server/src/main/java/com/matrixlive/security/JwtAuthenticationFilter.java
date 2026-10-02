@@ -44,7 +44,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
     try {
       TokenClaims claims = tokens.parse(header.substring(7));
-      if (revocations.isAccessTokenRevoked(claims.tokenId())) {
+      if (revocations.isAccessTokenRevoked(claims)) {
         unauthorized(response, "Access token has been revoked");
         return;
       }
@@ -58,7 +58,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return;
       }
       AuthenticatedPrincipal principal = new AuthenticatedPrincipal(claims.tokenId(), claims.kind(), claims.userId(),
-          claims.participantId(), claims.deviceId(), claims.activityId(), claims.role(), claims.username(), claims.expiresAt());
+          claims.participantId(), claims.deviceId(), claims.activityId(), claims.role(), claims.username(), claims.expiresAt(), claims.familyId());
       var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + authorityFor(claims.role())));
       SecurityContextHolder.getContext().setAuthentication(
           new UsernamePasswordAuthenticationToken(principal, null, authorities));

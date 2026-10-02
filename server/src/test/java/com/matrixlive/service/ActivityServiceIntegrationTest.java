@@ -24,7 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
-@SpringBootTest
+@SpringBootTest(properties = {"APP_BOOTSTRAP_PASSWORD=ChangeMe!2026", "app.security.jwt.secret=VGVzdC1vbmx5LXNlY3JldC1uZXZlci11c2UtaW4tcHJvZHVjdGlvbiE="})
 @Transactional
 class ActivityServiceIntegrationTest {
   @Autowired private ActivityService service;
@@ -72,7 +72,7 @@ class ActivityServiceIntegrationTest {
         java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
     var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
         "Timing screen", 1920, 1080)).device();
-    Instant openedAt = Instant.now().minusSeconds(12);
+    Instant openedAt = Instant.now().minusSeconds(12).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     activities.findById(activity.id()).orElseThrow().updateControl("QUESTION_OPEN", question.id(), 30, openedAt);
     entityManager.flush();
     entityManager.clear();

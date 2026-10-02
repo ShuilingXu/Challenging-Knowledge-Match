@@ -1,7 +1,7 @@
 const columns = ["type", "title", "options", "answers", "fullScore", "partialCreditPercent", "textAcceptedAnswers", "textMatchMode", "enabled"];
 const aliases = { 题型: "type", 题干: "title", 选项: "options", 答案: "answers", 分值: "fullScore", 部分得分: "partialCreditPercent", 标准答案: "textAcceptedAnswers", 匹配模式: "textMatchMode", 启用: "enabled" };
 const typeAliases = { 单选: "SINGLE", 单选题: "SINGLE", 多选: "MULTIPLE", 多选题: "MULTIPLE", 文本: "TEXT", 文本题: "TEXT" };
-const splitValues = (value) => String(value || "").split(/\|\||\r?\n|；|;/).map((item) => item.trim()).filter(Boolean);
+const splitValues = (value) => String(value || "").split(/\|\||\r?\n/).map((item) => item.trim()).filter(Boolean);
 
 export function questionImportTemplate() {
   const rows = [
@@ -56,7 +56,7 @@ export function parseQuestionImport(text) {
     if (!Number.isInteger(partialCreditPercent) || partialCreditPercent < 0 || partialCreditPercent > 100) fail("部分得分须为 0 至 100 的整数");
     const options = type === "TEXT" ? [] : splitValues(row.options);
     const answers = type === "TEXT" ? [] : [...new Set(String(row.answers || "").split(/[,，、]/).map((item) => item.trim()).filter(Boolean).map((answer) => {
-      const offset = /^[A-Z]$/i.test(answer) ? answer.toUpperCase().charCodeAt(0) - 65 : -1;
+      const offset = !options.includes(answer) && /^[A-Z]$/i.test(answer) ? answer.toUpperCase().charCodeAt(0) - 65 : -1;
       return offset >= 0 && offset < options.length ? options[offset] : answer;
     }))];
     if (type !== "TEXT") {

@@ -21,7 +21,7 @@ export S3_PUBLIC_BASE_URL="${S3_PUBLIC_BASE_URL:-}"
 export S3_ADDRESSING_STYLE=PATH
 export JWT_REFRESH_COOKIE_SECURE=true
 
-APP_BACKEND_PORT="${APP_BACKEND_PORT:-8080}"
+APP_BACKEND_PORT="${APP_BACKEND_PORT:-8082}"
 
 exec /usr/lib/jvm/java-21-openjdk-amd64/bin/java \
   -jar "$APP_DIR/server/target/knowledge-match-api-0.1.0.jar" \

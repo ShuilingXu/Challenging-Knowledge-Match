@@ -34,6 +34,7 @@ public class ScreenService {
   private static final TypeReference<List<ScreenComponent>> COMPONENT_LIST = new TypeReference<>() { };
   private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() { };
 
+  private final com.matrixlive.repository.AnswerSubmissionRepository submissions;
   private final ActivityRepository activities;
   private final ScreenTemplateRepository templates;
   private final ScreenDeviceRepository devices;
@@ -41,10 +42,12 @@ public class ScreenService {
   private final ObjectMapper objectMapper;
   private final RealtimeEventBus realtime;
   private final JwtTokenService tokenService;
+  private final com.matrixlive.security.auth.ClientSessionService clientSessions;
 
   public ScreenService(ActivityRepository activities, ScreenTemplateRepository templates, ScreenDeviceRepository devices,
       ScreenActivityStateRepository activityStates, ObjectMapper objectMapper, RealtimeEventBus realtime,
-      JwtTokenService tokenService) {
+      JwtTokenService tokenService, com.matrixlive.security.auth.ClientSessionService clientSessions, com.matrixlive.repository.AnswerSubmissionRepository submissions) {
+    this.submissions = submissions;
     this.activities = activities;
     this.templates = templates;
     this.devices = devices;
@@ -52,6 +55,7 @@ public class ScreenService {
     this.objectMapper = objectMapper;
     this.realtime = realtime;
     this.tokenService = tokenService;
+    this.clientSessions = clientSessions;
   }
 
   @Transactional
@@ -84,7 +88,7 @@ public class ScreenService {
     requireActivity(activityId);
     validateComponents(request.components());
     ScreenTemplate template = requireTemplate(activityId, templateId);
-    template.update(clean(request.name()), cleanNullable(request.description()), writeJson(request.components()));
+    template.update(template.isPreset() ? template.getName() : clean(request.name()), cleanNullable(request.description()), writeJson(request.components()));
     ScreenTemplateResponse response = toTemplate(template);
     broadcastActivity(activityId, "screen.template.updated", response);
     broadcastTemplateConsumers(activityId, templateId, "screen.template.updated");
@@ -95,6 +99,7 @@ public class ScreenService {
   public void deleteTemplate(UUID activityId, UUID templateId) {
     requireActivity(activityId);
     ScreenTemplate template = requireTemplate(activityId, templateId);
+    if (template.isPreset()) throw new DomainException(HttpStatus.CONFLICT, "预设大屏模板不能删除");
     List<ScreenDevice> affected = devices.findByActivityIdAndCurrentTemplateId(activityId, templateId);
     for (ScreenDevice device : affected) {
       device.updateDisplay(null, ScreenDisplayMode.LOBBY, writeJson(Map.of()));
@@ -153,10 +158,11 @@ public class ScreenService {
     ScreenDevice device = devices.findByIdAndDeviceTokenHash(deviceId, hashToken(pairingToken))
         .filter(item -> activityId.equals(item.getActivityId()))
         .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "大屏配对令牌无效"));
-    JwtTokenService.IssuedAccessToken token = tokenService.issueScreenDeviceToken(activityId, deviceId);
+    var session = clientSessions.issue(com.matrixlive.security.PrincipalKind.SCREEN_DEVICE, activityId, deviceId);
+    var token = session.access();
     // Pairing material cannot be replayed after the device has received its scoped session token.
     device.rotatePairingToken(hashToken(generateToken()));
-    return new ScreenDeviceSession(toDevice(device), token.value(), "Bearer", token.expiresAt());
+    return new ScreenDeviceSession(toDevice(device), token.value(), "Bearer", token.expiresAt(), session.refreshToken());
   }
 
   @Transactional
@@ -296,7 +302,16 @@ public class ScreenService {
   @Transactional(readOnly = true)
   public ScreenDisplayResponse currentDisplay(UUID activityId, UUID deviceId) {
     requireActivity(activityId);
-    return toDisplay(requireDevice(activityId, deviceId));
+    ScreenDisplayResponse display = toDisplay(requireDevice(activityId, deviceId));
+    if ((display.mode() == ScreenDisplayMode.QUESTION || display.mode() == ScreenDisplayMode.RESULT) && display.data().get("questionId") != null) {
+      var data = new java.util.HashMap<>(display.data());
+      long actual = submissions.countByActivityIdAndQuestionId(activityId, UUID.fromString(data.get("questionId").toString()));
+      if (actual <= ((Number) data.getOrDefault("submittedCount", 0)).longValue()) return display;
+      data.put("submittedCount", actual);
+      return new ScreenDisplayResponse(display.deviceId(), display.activityId(), display.deviceName(), display.templateId(), display.template(),
+          display.mode(), data, display.fontScale(), display.volume(), display.scrollPosition(), display.autoScroll(), display.updatedAt());
+    }
+    return display;
   }
 
   @Transactional
@@ -312,7 +327,7 @@ public class ScreenService {
 
   private void ensurePresetTemplates(UUID activityId) {
     ScreenActivityState state = activityStates.findById(activityId).orElseGet(() -> activityStates.save(new ScreenActivityState(activityId)));
-    if (state.isPresetsInitialized()) return;
+    Set<String> existing = templates.findByActivityIdOrderByUpdatedAtDesc(activityId).stream().filter(ScreenTemplate::isPreset).map(ScreenTemplate::getName).collect(java.util.stream.Collectors.toSet());
     templates.saveAll(List.of(
         preset(activityId, "星辉入场指引", "扫码完成登记，召唤队友加入本场挑战", List.of(
             component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#6f5960")),
@@ -328,7 +343,7 @@ public class ScreenService {
         preset(activityId, "勇者积分榜", "展示答对加分、答错扣分与最终排名", List.of(
             component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#766b83")),
             component("leaderboard-title", ScreenComponentType.TEXT, Map.of("text", "勇者集结，积分决定番位")))))
-    );
+    .stream().filter(template -> !existing.contains(template.getName())).toList());
     state.markPresetsInitialized();
   }
 

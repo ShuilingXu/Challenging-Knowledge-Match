@@ -59,7 +59,8 @@ public final class ApiModels {
       @Min(0) @Max(100) Integer correctScorePercent,
       @Min(0) @Max(100) Integer incorrectScorePercent,
       List<ScoreRule> correctRankRules,
-      List<ScoreRule> incorrectRankRules) { }
+      List<ScoreRule> incorrectRankRules,
+      Boolean clearEndsAt) { }
 
   public record ScoreRule(@Min(1) Integer rankFrom, @Min(1) Integer rankTo,
       @Min(0) @Max(100) Integer percent) { }
@@ -248,7 +249,7 @@ public final class ApiModels {
     }
   }
 
-  public record GradeSubmissionRequest(@NotNull Integer awardedPoints, @Size(max = 1000) String feedback) { }
+  public record GradeSubmissionRequest(@NotNull @Min(0) Integer awardedPoints, @Size(max = 1000) String feedback) { }
 
   public record SubmissionResponse(UUID id, UUID participantId, UUID questionId, List<String> answers,
       int awardedPoints, String status, String feedback, Instant submittedAt, Instant gradedAt, int responseRank) { }
@@ -256,7 +257,10 @@ public final class ApiModels {
   public record ScoreLedgerResponse(UUID id, UUID participantId, UUID questionId, UUID submissionId, int points,
       String entryType, String note, Instant createdAt) { }
 
-  public record ManualScoreRequest(@NotNull UUID participantId, @NotNull Integer points, @Size(max = 400) String note) { }
+  public record ManualScoreRequest(@NotNull UUID participantId, @NotNull Integer points, @Size(max = 400) String note,
+      @NotBlank @Size(max = 160) String idempotencyKey) {
+    public ManualScoreRequest(UUID participantId, Integer points, String note) { this(participantId, points, note, UUID.randomUUID().toString()); }
+  }
 
   public record ControlRequest(@NotBlank String stage, UUID questionId, Integer seconds) { }
   public record ControlState(String stage, UUID questionId, int seconds, Instant updatedAt) { }

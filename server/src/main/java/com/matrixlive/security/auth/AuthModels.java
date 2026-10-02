@@ -14,9 +14,12 @@ public final class AuthModels {
   public record LogoutRequest(String refreshToken) { }
   public record AccessTokenResponse(String accessToken, String tokenType, Instant expiresAt,
                                     UUID userId, String username, String displayName, String systemRole) { }
-  public record ParticipantTokenRequest(@NotNull UUID activityId, @NotBlank String venue, @NotBlank String contact) { }
+  public record ParticipantTokenRequest(@NotNull UUID activityId, @NotBlank @Size(max=80) String venue, @NotBlank @Size(max=160) String contact,
+      @NotNull UUID challengeId, @NotBlank @Size(max=16) String challengeAnswer) { }
+  public record ClientRefreshRequest(@NotBlank @Size(max=200) String refreshToken) { }
+  public record ClientRefreshResponse(String accessToken, Instant expiresAt) { }
   public record ParticipantTokenResponse(String accessToken, String tokenType, Instant expiresAt,
-                                         UUID participantId, UUID activityId) { }
+                                         UUID participantId, UUID activityId, String refreshToken) { }
   public record CurrentPrincipalResponse(String kind, UUID userId, UUID participantId, UUID activityId,
                                          String username, String role, Instant expiresAt) { }
   public record CreateUserRequest(@NotBlank @Size(max = 120) String username,

@@ -90,7 +90,7 @@ public final class ScreenModels {
       ScreenDeviceResponse device,
       String accessToken,
       String tokenType,
-      Instant expiresAt) { }
+      Instant expiresAt, String refreshToken) { }
 
   public record ScreenDisplayResponse(
       UUID deviceId,

@@ -24,6 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuthService {
   private static final SecureRandom RANDOM = new SecureRandom();
+  private final com.matrixlive.security.TokenRevocationService revocations;
+  private final HumanVerificationService humanVerification;
+  private final ClientSessionService clientSessions;
+  private final RefreshReplayCodec replayCodec;
   private final UserAccountRepository users;
   private final ParticipantRepository participants;
   private final ActivityRepository activities;
@@ -36,7 +40,11 @@ public class AuthService {
 
   public AuthService(UserAccountRepository users, ParticipantRepository participants, ActivityRepository activities, RefreshTokenRepository refreshTokens,
       JwtTokenService jwt, JwtProperties properties, PasswordEncoder passwordEncoder, SecurityAuditService audit,
-      RequestMetadata requestMetadata) {
+      RequestMetadata requestMetadata, com.matrixlive.security.TokenRevocationService revocations, HumanVerificationService humanVerification, ClientSessionService clientSessions, RefreshReplayCodec replayCodec) {
+    this.replayCodec = replayCodec;
+    this.revocations = revocations;
+    this.humanVerification = humanVerification;
+    this.clientSessions = clientSessions;
     this.users = users;
     this.participants = participants;
     this.activities = activities;
@@ -63,14 +71,32 @@ public class AuthService {
     return session;
   }
 
-  @Transactional
+  @Transactional(noRollbackFor = DomainException.class)
   public AuthenticatedSession refresh(String rawToken, HttpServletRequest servletRequest) {
     if (rawToken == null || rawToken.isBlank()) throw new DomainException(HttpStatus.UNAUTHORIZED, "Refresh token is required");
     String tokenHash = hash(rawToken);
     RefreshToken existing = refreshTokens.findByTokenHash(tokenHash)
         .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
+    if (revocations.isAccessTokenRevoked(existing.getFamilyId())) throw new DomainException(HttpStatus.UNAUTHORIZED, "会话已退出");
     if (!existing.isActive(Instant.now())) {
+      // An overlapping request must not revoke the winning rotation's session.
+      if (existing.getRevokedAt() != null && existing.getReplacedByHash() != null
+          && existing.getRevokedAt().plusSeconds(10).isAfter(Instant.now())) {
+        RefreshToken cursor = existing;
+        for (int hop = 0; hop < 32 && cursor.getReplacedByHash() != null && cursor.getReplacementCiphertext() != null; hop++) {
+          RefreshToken replacement = refreshTokens.findByTokenHash(cursor.getReplacedByHash()).orElse(null);
+          if (replacement == null) break;
+          if (replacement.isActive(Instant.now())) {
+            UserAccount account = users.findById(existing.getUserId()).filter(UserAccount::isEnabled)
+                .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "Account is unavailable"));
+            return new AuthenticatedSession(toResponse(account, jwt.issueAccountToken(account, existing.getFamilyId())), replayCodec.decrypt(cursor.getReplacementCiphertext()));
+          }
+          cursor = replacement;
+        }
+        throw new DomainException(HttpStatus.CONFLICT, "会话正在刷新，请稍后重试");
+      }
       if (existing.getRevokedAt() != null) {
+        revocations.revokeFamily(existing.getFamilyId(), existing.getUserId(), Instant.now().plus(properties.getRefreshTokenTtl()));
         for (RefreshToken token : refreshTokens.findByFamilyIdAndRevokedAtIsNull(existing.getFamilyId())) token.revoke(null);
         audit.record("AUTH_REFRESH_REUSE_DETECTED", "ACCOUNT", existing.getUserId(), null, false,
             requestMetadata.ipAddress(servletRequest), requestMetadata.userAgent(servletRequest), "Refresh family revoked");
@@ -82,6 +108,7 @@ public class AuthService {
         .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "Account is unavailable"));
     AuthenticatedSession session = issueSession(account, existing.getFamilyId(), servletRequest);
     existing.revoke(hash(session.refreshToken()));
+    existing.setReplacementCiphertext(replayCodec.encrypt(session.refreshToken()));
     audit.record("AUTH_TOKEN_REFRESHED", "ACCOUNT", account.getId(), null, true,
         requestMetadata.ipAddress(servletRequest), requestMetadata.userAgent(servletRequest), "Refresh rotation");
     return session;
@@ -90,31 +117,38 @@ public class AuthService {
   public AuthModels.ParticipantTokenResponse participantToken(AuthModels.ParticipantTokenRequest request,
       HttpServletRequest servletRequest) {
     String contact = normalizeContact(request.contact());
+    humanVerification.verify(request.challengeId(), request.challengeAnswer(), servletRequest.getRemoteAddr(), hash(contact));
     UUID participantScope = activities.findById(request.activityId())
         .filter(activity -> "LOTTERY".equals(activity.getActivityType()))
         .map(Activity::getParentActivityId).orElse(request.activityId());
     var participant = participants.findByActivityIdAndVenueAndContact(participantScope, request.venue(), contact)
-        .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "Registration was not found"));
-    IssuedAccessToken token = jwt.issueParticipantToken(request.activityId(), participant.getId());
+        .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "身份验证失败，请检查登记信息"));
+    if (!"ACTIVE".equals(participant.getStatus())) throw new DomainException(HttpStatus.UNAUTHORIZED, "身份验证失败，请检查登记信息");
+    var clientSession = clientSessions.issue(com.matrixlive.security.PrincipalKind.PARTICIPANT, request.activityId(), participant.getId());
+    IssuedAccessToken token = clientSession.access();
     audit.record("PARTICIPANT_SESSION_ISSUED", "PARTICIPANT", participant.getId(), request.activityId(), true,
         requestMetadata.ipAddress(servletRequest), requestMetadata.userAgent(servletRequest), "Contact-bound participant session");
-    return new AuthModels.ParticipantTokenResponse(token.value(), "Bearer", token.expiresAt(), participant.getId(), request.activityId());
+    return new AuthModels.ParticipantTokenResponse(token.value(), "Bearer", token.expiresAt(), participant.getId(), request.activityId(), clientSession.refreshToken());
   }
 
   @Transactional
   public void logout(String rawRefreshToken, HttpServletRequest servletRequest, UUID accountId) {
     if (rawRefreshToken != null && !rawRefreshToken.isBlank()) {
-      refreshTokens.findByTokenHash(hash(rawRefreshToken)).filter(token -> token.isActive(Instant.now()))
-          .ifPresent(token -> token.revoke(null));
+      refreshTokens.findByTokenHash(hash(rawRefreshToken))
+          .ifPresent(token -> {
+            revocations.revokeFamily(token.getFamilyId(), token.getUserId(), Instant.now().plus(properties.getRefreshTokenTtl()));
+            for (RefreshToken member : refreshTokens.findByFamilyIdAndRevokedAtIsNull(token.getFamilyId())) member.revoke(null);
+          });
     }
     audit.record("AUTH_LOGOUT", "ACCOUNT", accountId, null, true,
         requestMetadata.ipAddress(servletRequest), requestMetadata.userAgent(servletRequest), "Token revoked");
   }
 
   private AuthenticatedSession issueSession(UserAccount account, UUID existingFamilyId, HttpServletRequest request) {
-    IssuedAccessToken access = jwt.issueAccountToken(account);
+    UUID familyId = existingFamilyId == null ? UUID.randomUUID() : existingFamilyId;
+    IssuedAccessToken access = jwt.issueAccountToken(account, familyId);
     String rawRefresh = randomToken();
-    refreshTokens.save(new RefreshToken(account.getId(), existingFamilyId == null ? UUID.randomUUID() : existingFamilyId,
+    refreshTokens.save(new RefreshToken(account.getId(), familyId,
         hash(rawRefresh), Instant.now().plus(properties.getRefreshTokenTtl()), requestMetadata.ipAddress(request),
         requestMetadata.userAgent(request)));
     return new AuthenticatedSession(toResponse(account, access), rawRefresh);

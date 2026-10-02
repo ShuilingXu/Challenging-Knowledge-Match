@@ -13,10 +13,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class TokenRevocationService {
   private final RevokedAccessTokenRepository revokedAccessTokens;
   private final RefreshTokenRepository refreshTokens;
+  private final JwtProperties properties;
 
-  public TokenRevocationService(RevokedAccessTokenRepository revokedAccessTokens, RefreshTokenRepository refreshTokens) {
+  public TokenRevocationService(RevokedAccessTokenRepository revokedAccessTokens, RefreshTokenRepository refreshTokens, JwtProperties properties) {
     this.revokedAccessTokens = revokedAccessTokens;
     this.refreshTokens = refreshTokens;
+    this.properties = properties;
+  }
+
+  public boolean isAccessTokenRevoked(JwtTokenService.TokenClaims claims) {
+    return isAccessTokenRevoked(claims.tokenId()) || claims.familyId() != null && isAccessTokenRevoked(claims.familyId());
+  }
+
+  @Transactional
+  public void revokeFamily(UUID familyId, UUID userId, Instant until) {
+    revokedAccessTokens.save(new RevokedAccessToken(familyId.toString(), until, userId));
   }
 
   public boolean isAccessTokenRevoked(UUID tokenId) {
@@ -25,7 +36,8 @@ public class TokenRevocationService {
 
   @Transactional
   public void revokeAccessToken(AuthenticatedPrincipal principal) {
-    if (principal.userId() != null && principal.expiresAt().isAfter(Instant.now())) {
+    if (principal.familyId() != null) revokeFamily(principal.familyId(),principal.userId(),Instant.now().plus(properties.getRefreshTokenTtl()).plus(properties.getParticipantTokenTtl()));
+    if (principal.expiresAt().isAfter(Instant.now())) {
       revokedAccessTokens.save(new RevokedAccessToken(principal.tokenId().toString(), principal.expiresAt(), principal.userId()));
     }
   }
@@ -35,6 +47,8 @@ public class TokenRevocationService {
 
   @Transactional
   public void revokeRefreshFamily(UUID familyId) {
-    for (RefreshToken token : refreshTokens.findByFamilyIdAndRevokedAtIsNull(familyId)) token.revoke(null);
+    var members = refreshTokens.findByFamilyIdAndRevokedAtIsNull(familyId);
+    for (RefreshToken token : members) token.revoke(null);
+    members.stream().map(RefreshToken::getExpiresAt).max(Instant::compareTo).ifPresent(until -> revokeFamily(familyId, members.getFirst().getUserId(), until));
   }
 }

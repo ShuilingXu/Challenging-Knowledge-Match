@@ -76,6 +76,8 @@ import {
   clearSession,
   createIdempotencyKey,
   getAccessToken,
+  serverNow,
+  resolveClientToken,
   getParticipantToken,
   getScreenSession,
   getStoredIdentity,
@@ -154,11 +156,11 @@ function AuthProvider({ children }) {
     setReady(false);
     refreshSession()
       .then((session) => mounted && setUser(session.user))
-      .catch(() => {
+      .catch((cause) => {
         // Another tab may have completed the rotation while this request was
         // in flight. Do not erase that newer session when this stale request
         // fails.
-        if (getAccessToken() === tokenAtStart) {
+        if (cause.status === 401 && getAccessToken() === tokenAtStart) {
           clearSession();
           mounted && setUser(null);
         } else if (mounted) {
@@ -170,6 +172,12 @@ function AuthProvider({ children }) {
       mounted = false;
     };
   }, [staffRoute]);
+  useEffect(() => {
+    const sync = () => setUser(getStoredIdentity());
+    window.addEventListener("matrix-session-expired", sync);
+    window.addEventListener("storage", sync);
+    return () => { window.removeEventListener("matrix-session-expired", sync); window.removeEventListener("storage", sync); };
+  }, []);
   const value = useMemo(
     () => ({
       user,
@@ -257,7 +265,7 @@ function LoginPage() {
   const [siteSettings, setSiteSettings] = useState(null);
   useEffect(() => {
     let mounted = true;
-    api.siteSettings().then((settings) => mounted && setSiteSettings(settings)).catch(() => {});
+    api.siteSettings().then((settings) => mounted && setSiteSettings(settings)).catch((cause) => mounted && setError("站点信息加载失败：" + cause.message));
     return () => { mounted = false; };
   }, []);
   if (user) return <Navigate to="/admin/overview" replace />;
@@ -808,6 +816,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     ...form,
     startsAt: form.startsAt ? new Date(form.startsAt).toISOString() : null,
     endsAt: form.endsAt ? new Date(form.endsAt).toISOString() : null,
+    clearEndsAt: !form.endsAt,
     description: form.description,
     clientDisplayName: form.clientDisplayName,
     clientThemeColor: form.clientThemeColor,
@@ -1273,6 +1282,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
     loadStats(questionId);
   };
   const update = async (stage, overrides = {}) => {
+    if (!activityId || busy) return;
     if (["QUESTION_OPEN", "ANSWER_REVEALED"].includes(stage) && !current)
       return;
     setBusy(true);
@@ -1471,7 +1481,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
             </button>
             <button
               className="primary-button"
-              disabled={busy}
+              disabled={busy || !activityId}
               onClick={() => update("SCOREBOARD", { seconds: 0 })}
             >
               发布积分榜
@@ -1479,7 +1489,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
             </button>
             <button
               className="secondary-button"
-              disabled={busy}
+              disabled={busy || !activityId}
               onClick={() => update("WINNERS", { seconds: 0 })}
             >
               <Trophy size={17} />
@@ -1577,8 +1587,10 @@ function QuestionsPage({ activityId, canManage }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const importInputRef = useRef(null);
+  const questionLoadInFlight = useRef(false);
   const load = useCallback(async () => {
-    if (!activityId) return;
+    if (!activityId || questionLoadInFlight.current) return;
+    questionLoadInFlight.current = true;
     try {
       const [questionList, setList, people] = await Promise.all([
         canManage ? api.questionsAdmin(activityId) : api.questionsControl(activityId),
@@ -1588,13 +1600,10 @@ function QuestionsPage({ activityId, canManage }) {
       setQuestions(questionList);
       setQuestionSets(setList);
       setParticipants(people);
-      const allSubmissions = await Promise.all(
-        people.map((person) => api.submissions(activityId, person.id)),
-      );
-      setSubmissions(allSubmissions.flat());
+      setSubmissions(await api.activitySubmissions(activityId));
     } catch (cause) {
       setError(cause.message);
-    }
+    } finally { questionLoadInFlight.current = false; }
   }, [activityId, canManage]);
   useEffect(() => {
     load();
@@ -1620,7 +1629,7 @@ function QuestionsPage({ activityId, canManage }) {
     setError("");
     try {
       const rows = parseQuestionImport(await file.text());
-      for (const row of rows) await api.createQuestion(activityId, row);
+      await api.importQuestions(activityId, rows);
       await load();
     } catch (cause) {
       setError(cause.message || "批量导入失败");
@@ -1817,7 +1826,7 @@ function QuestionsPage({ activityId, canManage }) {
             .filter(Boolean)
             .map((answer) => {
               const index =
-                answer.length === 1
+                !options.includes(answer) && answer.length === 1
                   ? answer.toUpperCase().charCodeAt(0) - 65
                   : -1;
               return index >= 0 && index < options.length
@@ -2496,6 +2505,7 @@ function QuestionsPage({ activityId, canManage }) {
                 name="points"
                 required
                 type="number"
+                min="0"
                 max={questionById.get(dialog.questionId)?.fullScore || 100}
                 defaultValue={dialog.awardedPoints || 0}
               />
@@ -2530,6 +2540,7 @@ function ParticipantsPage({ activityId }) {
   const [venues, setVenues] = useState([]);
   const [form, setForm] = useState(null);
   const [scoreDelta, setScoreDelta] = useState("");
+  const scoreRequestKey = useRef(createIdempotencyKey());
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const load = useCallback(async () => {
@@ -2591,12 +2602,16 @@ function ParticipantsPage({ activityId }) {
         customFields: form.customFields || {},
       });
       const points = Number(scoreDelta || 0);
-      if (points)
+      if (points) {
         await api.adjustScore(activityId, {
           participantId: detail.id,
           points,
           note: "工作人员人工调整",
+          idempotencyKey: scoreRequestKey.current,
         });
+        setScoreDelta("");
+        scoreRequestKey.current = createIdempotencyKey();
+      }
       const nextDetail = await api.participant(activityId, detail.id);
       setDetail(nextDetail);
       setForm({ ...nextDetail, customFields: nextDetail.customFields || {} });
@@ -2772,7 +2787,7 @@ function ParticipantsPage({ activityId }) {
               <input
                 type="number"
                 value={scoreDelta}
-                onChange={(event) => setScoreDelta(event.target.value)}
+                onChange={(event) => { setScoreDelta(event.target.value); scoreRequestKey.current = createIdempotencyKey(); }}
                 placeholder="例如：20 或 -10"
               />
             </label>
@@ -3676,15 +3691,28 @@ function ScreensPage({ activityId }) {
   });
   const [deviceNameForm, setDeviceNameForm] = useState({ name: "" });
   const [templateForm, setTemplateForm] = useState(emptyTemplate);
+  const optimisticSettings = useRef(new Map());
+  const settingsLoadSequence = useRef(0);
   const load = useCallback(async () => {
     if (!activityId) return;
+    const sequence = ++settingsLoadSequence.current;
     try {
       const [templateList, deviceList] = await Promise.all([
         api.templates(activityId),
         api.devices(activityId),
       ]);
+      if (sequence !== settingsLoadSequence.current) return;
       setTemplates(templateList);
-      setDevices(deviceList);
+      setDevices(deviceList.map((device) => {
+        const pending = optimisticSettings.current.get(device.id);
+        if (!pending) return device;
+        if (!settingsSaving.current && !settingsQueue.current.has(device.id)
+            && Object.entries(pending).every(([key, value]) => device[key] === value)) {
+          optimisticSettings.current.delete(device.id);
+          return device;
+        }
+        return { ...device, ...pending };
+      }));
       setSelectedDeviceId((current) =>
         current && deviceList.some((item) => item.id === current)
           ? current
@@ -3710,6 +3738,8 @@ function ScreensPage({ activityId }) {
     : "";
   const registerDevice = async (event) => {
     event.preventDefault();
+    if (deviceBusy) return;
+    setDeviceBusy(true);
     setError("");
     try {
       const next = await api.registerScreen(activityId, {
@@ -3723,6 +3753,8 @@ function ScreensPage({ activityId }) {
       await load();
     } catch (cause) {
       setError(cause.message);
+    } finally {
+      setDeviceBusy(false);
     }
   };
   const templateToForm = (template) => {
@@ -3827,14 +3859,52 @@ function ScreensPage({ activityId }) {
       setError(cause.message);
     }
   };
-  const updateSettings = async (patch) => {
-    if (!selected) return;
+  const settingsQueue = useRef(new Map());
+  const settingsTimer = useRef(null);
+  const settingsSaving = useRef(false);
+  const settingsActive = useRef(true);
+  useEffect(() => {
+    settingsActive.current = true;
+    return () => {
+      settingsActive.current = false;
+      window.clearTimeout(settingsTimer.current);
+      settingsQueue.current.clear();
+      optimisticSettings.current.clear();
+      ++settingsLoadSequence.current;
+    };
+  }, [activityId]);
+  const flushSettings = async () => {
+    if (settingsSaving.current || !settingsActive.current) return;
+    settingsSaving.current = true;
+    let savingDevice;
     try {
-      await api.updateScreenSettings(activityId, selected.id, patch);
-      await load();
+      while (settingsQueue.current.size && settingsActive.current) {
+        const [deviceId, patch] = settingsQueue.current.entries().next().value;
+        savingDevice = deviceId;
+        settingsQueue.current.delete(deviceId);
+        await api.updateScreenSettings(activityId, deviceId, patch);
+      }
     } catch (cause) {
+      const pending = settingsQueue.current.get(savingDevice);
+      if (pending) optimisticSettings.current.set(savingDevice, pending);
+      else optimisticSettings.current.delete(savingDevice);
       setError(cause.message);
     }
+    finally {
+      settingsSaving.current = false;
+      if (settingsActive.current) await load();
+      if (settingsActive.current && settingsQueue.current.size)
+        settingsTimer.current = window.setTimeout(flushSettings, 250);
+    }
+  };
+  const updateSettings = (patch) => {
+    if (!selected) return;
+    const deviceId = selected.id;
+    optimisticSettings.current.set(deviceId, { ...optimisticSettings.current.get(deviceId), ...patch });
+    setDevices((items) => items.map((device) => device.id === deviceId ? { ...device, ...patch } : device));
+    settingsQueue.current.set(deviceId, { ...settingsQueue.current.get(deviceId), ...patch });
+    window.clearTimeout(settingsTimer.current);
+    settingsTimer.current = window.setTimeout(flushSettings, 250);
   };
   const rename = async (event) => {
     event.preventDefault();
@@ -4199,8 +4269,8 @@ function ScreensPage({ activityId }) {
                 />
               </label>
             </div>
-            <button className="primary-button">
-              创建一次性配对链接
+            <button className="primary-button" disabled={deviceBusy}>
+              {deviceBusy ? "正在注册…" : "创建一次性配对链接"}
               <ArrowRight size={17} />
             </button>
           </form>
@@ -5743,6 +5813,10 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
             <Trophy size={26} />
           </div>
           <InlineError text={error} onRetry={load} />
+          {participant && participantToken && <button className="text-button" onClick={async () => {
+            try { await api.participantLogout(identityActivityId); setParticipant(null); setLocalParticipantToken(null); }
+            catch (cause) { setError(cause.message); }
+          }}>退出当前参与身份</button>}
           {!participant || !participantToken ? (
             <RegistrationCard
               activityId={identityActivityId}
@@ -5906,6 +5980,13 @@ function RegistrationCard({
   onRegistered,
 }) {
   const [returning, setReturning] = useState(false);
+  const [challenge, setChallenge] = useState(null);
+  const [challengeAnswer, setChallengeAnswer] = useState("");
+  const renewChallenge = useCallback(async () => {
+    setChallenge(null); setChallengeAnswer("");
+    try { setChallenge(await api.humanChallenge()); } catch (cause) { setError(cause.message); }
+  }, []);
+  useEffect(() => { renewChallenge(); }, [renewChallenge]);
   const [values, setValues] = useState({
     name: "",
     contact: "",
@@ -5933,10 +6014,13 @@ function RegistrationCard({
     try {
       const payload = buildRegistrationPayload(values, customValues);
       const registered = returning ? null : await api.register(activityId, venue, payload);
+      if (registered) setReturning(true);
       const session = await api.participantToken({
         activityId,
         venue,
         contact: values.contact,
+        challengeId: challenge?.challengeId,
+        challengeAnswer,
       });
       const person = returning
         ? await api.participant(activityId, session.participantId, session.accessToken)
@@ -5944,6 +6028,7 @@ function RegistrationCard({
       onRegistered(person, session.accessToken);
     } catch (cause) {
       setError(cause.message);
+      await renewChallenge();
     } finally {
       setBusy(false);
     }
@@ -5952,7 +6037,7 @@ function RegistrationCard({
     <form className="registration-card" onSubmit={submit}>
       <p className="eyebrow">欢迎来到次元现场</p>
       <h2>{returning ? "查询我的参与信息" : "先确认你的现场身份"}</h2>
-      <p>联系方式会在当前活动与会场内唯一识别你。</p>
+      <p>联系方式会在当前活动内唯一识别你。</p>
       <label>
         会场
         <select
@@ -6024,7 +6109,12 @@ function RegistrationCard({
           {error}
         </p>
       )}
-      <button className="primary-button" disabled={busy || !venue}>
+      <label>人机验证
+        {challenge && <img src={challenge.image} alt="人机验证码" width="210" height="70" />}
+        <input required autoComplete="off" maxLength={5} value={challengeAnswer} onChange={(event) => setChallengeAnswer(event.target.value)} placeholder="输入图片中的字符" />
+      </label>
+      <button type="button" className="text-button" onClick={renewChallenge} disabled={busy}>换一张验证码</button>
+      <button className="primary-button" disabled={busy || !venue || !challenge}>
         {busy ? "正在提交" : returning ? "查询并继续参与" : "完成登记"}
         <ArrowRight size={17} />
       </button>
@@ -6057,7 +6147,19 @@ function RegistrationFieldInput({ field, value, onChange }) {
         />
       </label>
     );
-  if (type === "SELECT" || type === "CHECKBOX")
+  if (type === "CHECKBOX") {
+    let selected = [];
+    try { selected = Array.isArray(value) ? value : JSON.parse(value || "[]"); } catch { selected = value ? [value] : []; }
+    if (!Array.isArray(selected)) selected = [];
+    return <fieldset className="registration-dynamic-field"><legend>{label}（可多选）</legend>
+      {(field.options || []).map((option) => <label key={option}>
+        <input type="checkbox" checked={selected.includes(option)}
+          required={field.required && !selected.length}
+          onChange={(event) => onChange(event.target.checked ? [...selected, option] : selected.filter((item) => item !== option))} />{option}
+      </label>)}
+    </fieldset>;
+  }
+  if (type === "SELECT")
     return (
       <label className="registration-dynamic-field">
         {label}
@@ -6515,10 +6617,11 @@ function PublicScreen() {
         })
         .catch((cause) => { setError(cause.message); setStatus("offline"); });
     sendHeartbeat();
-    const interval = window.setInterval(sendHeartbeat, 30000);
+    const interval = window.setInterval(() => { sendHeartbeat(); load(); }, 10000);
     return () => window.clearInterval(interval);
   }, [activityId, deviceId, session?.accessToken]);
-  useScreenStream(deviceId, load, session?.accessToken, setError, clearDeletedSession);
+  const screenConnectionError = useCallback((message) => { setError(message); setStatus("offline"); }, []);
+  useScreenStream(deviceId, load, session?.accessToken, screenConnectionError, clearDeletedSession);
   if (
     !deviceId ||
     !session?.accessToken ||
@@ -6545,6 +6648,7 @@ function PublicScreen() {
           </span>
         </div>
       </header>
+      {error && <p role="status" className="form-error">{error} · 正在自动重试</p>}
       <section
         className="public-canvas"
         style={{ "--screen-font-scale": (display?.fontScale || 100) / 100 }}
@@ -6866,8 +6970,9 @@ function ScreenScoreboard({ board, display }) {
   const answeredCorrectly = (item) => {
     if (item?.correct === false || item?.isCorrect === false) return false;
     const status = String(item?.status || item?.result || "").toUpperCase();
-    return !["INCORRECT", "WRONG", "FAIL", "FAILED"].includes(status);
+    return item?.correct === true || item?.isCorrect === true || ["CORRECT", "PARTIAL"].includes(status);
   };
+  const isRanking = entries.every((item) => Object.hasOwn(item, "score"));
   const correct = entries.filter(answeredCorrectly);
   const incorrect = entries.filter((item) => !answeredCorrectly(item));
   const deltaFor = (item) => item?.scoreDelta ?? item?.pointsDelta ?? item?.delta ?? item?.change;
@@ -6903,8 +7008,10 @@ function ScreenScoreboard({ board, display }) {
         <p>答对积攒能量，答错扣除能量，积分实时同步。</p>
       </div>
       <div className="screen-scoreboard-columns">
-        {renderColumn("答对", correct, "correct")}
-        {renderColumn("答错", incorrect, "incorrect")}
+        {isRanking ? renderColumn("积分排名", entries, "correct") : <>
+          {renderColumn("答对", correct, "correct")}
+          {renderColumn("答错", incorrect, "incorrect")}
+        </>}
       </div>
     </div>
   );
@@ -6944,19 +7051,47 @@ function useActivityStream(activityId, onEvent, token, onError) {
     const accessToken = token || getAccessToken();
     if (!activityId || !accessToken) return undefined;
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    let pending;
     const client = new Client({
       brokerURL: `${protocol}://${window.location.host}/ws`,
       reconnectDelay: 2500,
       connectHeaders: { Authorization: `Bearer ${accessToken}` },
+      beforeConnect: async () => {
+        try {
+          const next = token ? await resolveClientToken(token) : getAccessToken();
+          client.connectHeaders = { Authorization: `Bearer ${next}` };
+        } catch (cause) { onError(cause.message); }
+      },
       onStompError: (frame) => onError(frame.headers.message + ": " + frame.body),
       onWebSocketError: () => onError("实时连接异常，正在重新连接"),
       onConnect: () => {
-        client.subscribe(`/topic/activities/${activityId}`, (message) => onEvent(JSON.parse(message.body)));
+        const reload = (message) => {
+          try { if (JSON.parse(message.body)?.type === "screen.device.heartbeat") return; } catch { /* Reload malformed notifications. */ }
+          if (pending) return;
+          pending = window.setTimeout(() => { pending = null; onEvent(); }, 200);
+        };
+        client.subscribe(`/topic/activities/${activityId}`, reload);
+        if (!token) client.subscribe(`/topic/activities/${activityId}/screens`, reload);
         onEvent();
       },
     });
+    let disposed = false;
+    let reconnecting = false;
+    const refreshConnection = async () => {
+      if (reconnecting || disposed) return;
+      reconnecting = true;
+      try {
+        const next = token ? await resolveClientToken(token) : getAccessToken();
+        if (next && client.connectHeaders.Authorization !== `Bearer ${next}`) {
+          await client.deactivate();
+          if (!disposed) { client.connectHeaders = { Authorization: `Bearer ${next}` }; client.activate(); }
+        }
+      } catch (cause) { if (!disposed) onError(cause.message); }
+      finally { reconnecting = false; }
+    };
+    const poll = window.setInterval(() => { onEvent(); refreshConnection(); }, 10000);
     client.activate();
-    return () => client.deactivate();
+    return () => { disposed = true; window.clearInterval(poll); window.clearTimeout(pending); client.deactivate(); };
   }, [activityId, onEvent, token, onError]);
 }
 
@@ -6964,25 +7099,47 @@ function useScreenStream(deviceId, onEvent, token, onError, onDeleted) {
   useEffect(() => {
     if (!deviceId || !token) return undefined;
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    let pending;
     const client = new Client({
       brokerURL: `${protocol}://${window.location.host}/ws`,
       reconnectDelay: 2500,
       connectHeaders: { Authorization: `Bearer ${token}` },
+      beforeConnect: async () => {
+        try { client.connectHeaders = { Authorization: `Bearer ${await resolveClientToken(token)}` }; }
+        catch (cause) { onError(cause.message); }
+      },
       onStompError: (frame) => onError(frame.headers.message + ": " + frame.body),
       onWebSocketError: () => onError("大屏实时连接异常，正在重新连接"),
+      onWebSocketClose: () => onError("大屏实时连接已断开，正在重新连接"),
       onConnect: () => {
         client.subscribe(`/topic/screens/${deviceId}`, (message) => {
           try {
             const event = JSON.parse(message.body);
             if (event?.type === "screen.device.deleted") { onDeleted?.(); return; }
+            if (event?.type === "screen.device.heartbeat") return;
           } catch { /* fall back to a state refresh */ }
           onEvent();
         });
         onEvent();
       },
     });
+    let disposed = false;
+    let reconnecting = false;
+    const refreshConnection = async () => {
+      if (reconnecting || disposed) return;
+      reconnecting = true;
+      try {
+        const next = token ? await resolveClientToken(token) : getAccessToken();
+        if (next && client.connectHeaders.Authorization !== `Bearer ${next}`) {
+          await client.deactivate();
+          if (!disposed) { client.connectHeaders = { Authorization: `Bearer ${next}` }; client.activate(); }
+        }
+      } catch (cause) { if (!disposed) onError(cause.message); }
+      finally { reconnecting = false; }
+    };
+    const poll = window.setInterval(refreshConnection, 10000);
     client.activate();
-    return () => client.deactivate();
+    return () => { disposed = true; window.clearInterval(poll); window.clearTimeout(pending); client.deactivate(); };
   }, [deviceId, onEvent, token, onError, onDeleted]);
 }
 
@@ -6993,7 +7150,7 @@ function useLiveCountdown(state) {
     if (!seconds) return 0;
     const timestamp = parseTimestamp(updatedAt);
     if (!Number.isFinite(timestamp)) return seconds;
-    const elapsed = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    const elapsed = Math.max(0, Math.floor((serverNow() - timestamp) / 1000));
     return Math.max(0, seconds - elapsed);
   }, [seconds, updatedAt]);
   const [remaining, setRemaining] = useState(calculate);

@@ -9,5 +9,6 @@ public interface ScreenDeviceRepository extends JpaRepository<ScreenDevice, UUID
   List<ScreenDevice> findByActivityIdOrderByLastSeenAtDesc(UUID activityId);
   List<ScreenDevice> findByActivityIdAndCurrentTemplateId(UUID activityId, UUID currentTemplateId);
   Optional<ScreenDevice> findByIdAndActivityId(UUID id, UUID activityId);
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
   Optional<ScreenDevice> findByIdAndDeviceTokenHash(UUID id, String deviceTokenHash);
 }

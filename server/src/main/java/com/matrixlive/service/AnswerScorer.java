@@ -48,7 +48,7 @@ public final class AnswerScorer {
     String normalizedSubmitted = normalizeText(submitted);
     String normalizedExpected = normalizeText(expected);
     return !normalizedSubmitted.isEmpty() && !normalizedExpected.isEmpty()
-        && (normalizedSubmitted.contains(normalizedExpected) || normalizedExpected.contains(normalizedSubmitted));
+        && (normalizedSubmitted.contains(normalizedExpected));
   }
 
   private static String normalizeText(String value) {

@@ -26,15 +26,18 @@ public class JwtTokenService {
 
   public JwtTokenService(JwtProperties properties) {
     this.properties = properties;
+    if (properties.getSecret() == null || properties.getSecret().isBlank()) throw new IllegalStateException("JWT_SECRET is required");
     byte[] key = Decoders.BASE64.decode(properties.getSecret());
     if (key.length < 32) throw new IllegalStateException("JWT secret must contain at least 256 bits");
     this.signingKey = Keys.hmacShaKeyFor(key);
   }
 
-  public IssuedAccessToken issueAccountToken(UserAccount account) {
+  public IssuedAccessToken issueAccountToken(UserAccount account) { return issueAccountToken(account, UUID.randomUUID()); }
+  public IssuedAccessToken issueAccountToken(UserAccount account, UUID familyId) {
     Instant expiresAt = Instant.now().plus(properties.getAccessTokenTtl());
     UUID tokenId = UUID.randomUUID();
     String token = issue(account.getUsername(), tokenId, expiresAt, Map.of(
+        "sid", familyId.toString(),
         CLAIM_KIND, PrincipalKind.ACCOUNT.name(),
         CLAIM_USER_ID, account.getId().toString(),
         // A non-system account receives no global privilege. STAFF is only a baseline
@@ -43,10 +46,12 @@ public class JwtTokenService {
     return new IssuedAccessToken(token, tokenId, expiresAt);
   }
 
-  public IssuedAccessToken issueParticipantToken(UUID activityId, UUID participantId) {
+  public IssuedAccessToken issueParticipantToken(UUID activityId, UUID participantId) { return issueParticipantToken(activityId, participantId, UUID.randomUUID()); }
+  public IssuedAccessToken issueParticipantToken(UUID activityId, UUID participantId, UUID familyId) {
     Instant expiresAt = Instant.now().plus(properties.getParticipantTokenTtl());
     UUID tokenId = UUID.randomUUID();
     String token = issue("participant:" + participantId, tokenId, expiresAt, Map.of(
+        "sid", familyId.toString(),
         CLAIM_KIND, PrincipalKind.PARTICIPANT.name(),
         CLAIM_PARTICIPANT_ID, participantId.toString(),
         CLAIM_ACTIVITY_ID, activityId.toString(),
@@ -54,10 +59,12 @@ public class JwtTokenService {
     return new IssuedAccessToken(token, tokenId, expiresAt);
   }
 
-  public IssuedAccessToken issueScreenDeviceToken(UUID activityId, UUID deviceId) {
+  public IssuedAccessToken issueScreenDeviceToken(UUID activityId, UUID deviceId) { return issueScreenDeviceToken(activityId, deviceId, UUID.randomUUID()); }
+  public IssuedAccessToken issueScreenDeviceToken(UUID activityId, UUID deviceId, UUID familyId) {
     Instant expiresAt = Instant.now().plus(properties.getParticipantTokenTtl());
     UUID tokenId = UUID.randomUUID();
     String token = issue("screen-device:" + deviceId, tokenId, expiresAt, Map.of(
+        "sid", familyId.toString(),
         CLAIM_KIND, PrincipalKind.SCREEN_DEVICE.name(),
         CLAIM_DEVICE_ID, deviceId.toString(),
         CLAIM_ACTIVITY_ID, activityId.toString(),
@@ -68,8 +75,18 @@ public class JwtTokenService {
   public TokenClaims parse(String token) {
     Claims claims = Jwts.parser().verifyWith(signingKey).requireIssuer(properties.getIssuer()).build()
         .parseSignedClaims(token).getPayload();
+    if (claims.getId() == null || claims.getExpiration() == null || claims.getSubject() == null
+        || claims.get(CLAIM_KIND, String.class) == null || claims.get(CLAIM_ROLE, String.class) == null) {
+      throw new IllegalArgumentException("Missing required token claims");
+    }
     PrincipalKind kind = PrincipalKind.valueOf(claims.get(CLAIM_KIND, String.class));
     UserRole role = UserRole.valueOf(claims.get(CLAIM_ROLE, String.class));
+    if (kind == PrincipalKind.PARTICIPANT && role != UserRole.PARTICIPANT || kind == PrincipalKind.SCREEN_DEVICE && role != UserRole.STAFF)
+      throw new IllegalArgumentException("Role does not match principal kind");
+    if (kind == PrincipalKind.ACCOUNT && parseUuid(claims.get(CLAIM_USER_ID, String.class)) == null
+        || kind == PrincipalKind.PARTICIPANT && (parseUuid(claims.get(CLAIM_PARTICIPANT_ID, String.class)) == null || parseUuid(claims.get(CLAIM_ACTIVITY_ID, String.class)) == null)
+        || kind == PrincipalKind.SCREEN_DEVICE && (parseUuid(claims.get(CLAIM_DEVICE_ID, String.class)) == null || parseUuid(claims.get(CLAIM_ACTIVITY_ID, String.class)) == null))
+      throw new IllegalArgumentException("Missing scoped token identity");
     return new TokenClaims(
         UUID.fromString(claims.getId()),
         kind,
@@ -79,7 +96,7 @@ public class JwtTokenService {
         parseUuid(claims.get(CLAIM_ACTIVITY_ID, String.class)),
         role,
         claims.getSubject(),
-        claims.getExpiration().toInstant());
+        claims.getExpiration().toInstant(), parseUuid(claims.get("sid", String.class)));
   }
 
   private String issue(String subject, UUID tokenId, Instant expiresAt, Map<String, Object> claims) {
@@ -92,5 +109,5 @@ public class JwtTokenService {
 
   public record IssuedAccessToken(String value, UUID tokenId, Instant expiresAt) { }
   public record TokenClaims(UUID tokenId, PrincipalKind kind, UUID userId, UUID participantId, UUID deviceId, UUID activityId,
-                            UserRole role, String username, Instant expiresAt) { }
+                            UserRole role, String username, Instant expiresAt, UUID familyId) { }
 }

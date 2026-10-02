@@ -79,6 +79,11 @@ public class ActivityService {
   private static final Set<String> RESERVED_FIELD_KEYS = Set.of("name", "contact", "organization", "venue");
   private static final SecureRandom LOTTERY_RANDOM = new SecureRandom();
 
+  @org.springframework.beans.factory.annotation.Autowired
+  private org.springframework.context.ApplicationEventPublisher events;
+  @org.springframework.beans.factory.annotation.Autowired
+  private jakarta.validation.Validator validator;
+
   private final ActivityRepository activities;
   private final ActivityMembershipRepository memberships;
   private final VenueRepository venues;
@@ -125,13 +130,16 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public List<ActivityResponse> listActivities() {
     return activities.findAll().stream()
+        .filter(this::canViewActivity)
         .sorted(Comparator.comparing(Activity::getStartsAt, Comparator.nullsLast(Comparator.reverseOrder())))
         .map(this::toActivity).toList();
   }
 
   @Transactional(readOnly = true)
   public ActivityResponse activity(UUID activityId) {
-    return toActivity(requireActivity(activityId));
+    Activity found = requireActivity(activityId);
+    if (!canViewActivity(found)) throw notFound("Activity not found");
+    return toActivity(found);
   }
 
   @Transactional
@@ -154,7 +162,7 @@ public class ActivityService {
   public ActivityResponse updateActivity(UUID activityId, UpdateActivityRequest request) {
     Activity activity = requireActivity(activityId);
     Instant startsAt = request.startsAt() == null ? activity.getStartsAt() : request.startsAt();
-    Instant endsAt = request.endsAt() == null ? activity.getEndsAt() : request.endsAt();
+    Instant endsAt = Boolean.TRUE.equals(request.clearEndsAt()) ? null : request.endsAt() == null ? activity.getEndsAt() : request.endsAt();
     validateTimeRange(startsAt, endsAt);
     activity.update(cleanOptional(request.name()), cleanOptional(request.city()), startsAt, endsAt,
         request.description() == null ? activity.getDescription() : cleanOptional(request.description()));
@@ -177,6 +185,11 @@ public class ActivityService {
     String next = normalizeEnum(request.status(), ACTIVITY_STATUSES, "activity status");
     ensureStatusTransition(activity.getStatus(), next);
     activity.changeStatus(next);
+    if ("PAUSED".equals(next)) {
+      // Resume requires staff to explicitly reopen a question with a fresh timer.
+      activity.updateControl("LOBBY", null, 0, Instant.now());
+      synchronizeControlledScreens(activityId, controlState(activityId));
+    }
     if ("FINISHED".equals(next) || "CANCELLED".equals(next)) closeSubActivities(activityId, next);
     broadcast(activityId, "activity.status_changed");
     return toActivity(activity);
@@ -224,7 +237,11 @@ public class ActivityService {
 
   @Transactional
   public VenueResponse updateVenue(UUID activityId, UUID venueId, UpdateVenueRequest request) {
-    Venue venue = requireVenue(participantScopeActivity(activityId), venueId);
+    UUID scopeId = participantScopeActivity(activityId);
+    activities.findForUpdate(scopeId).orElseThrow(() -> notFound("Activity not found"));
+    Venue venue = requireVenue(scopeId, venueId);
+    if (request.capacity() != null && request.capacity() < participants.countByActivityIdAndVenue(scopeId, venue.getCode()))
+      throw conflict("会场容量不能小于已登记人数");
     venue.update(cleanOptional(request.name()), request.capacity(), request.enabled());
     return toVenue(venue);
   }
@@ -284,7 +301,7 @@ public class ActivityService {
   public ParticipantResponse register(UUID activityId, String venueCode, RegisterParticipantRequest request) {
     Activity activity = requireActivity(activityId);
     UUID scopeId = participantScopeActivity(activityId);
-    ensureRegistrationAllowed(requireActivity(scopeId));
+    ensureRegistrationAllowed(activities.findForUpdate(scopeId).orElseThrow(() -> notFound("Activity not found")));
     String venue = normalizeVenue(venueCode);
     Venue venueEntity = venues.findByActivityIdAndCode(scopeId, venue)
         .orElseThrow(() -> badRequest("Venue is not configured in this activity"));
@@ -294,7 +311,7 @@ public class ActivityService {
       throw conflict("Venue registration capacity has been reached");
     }
     String contact = normalizeContact(request.contact());
-    participants.findByActivityIdAndVenueAndContact(scopeId, venue, contact).ifPresent(existing -> {
+    participants.findByActivityIdAndContact(scopeId, contact).stream().findFirst().ifPresent(existing -> {
       throw conflict("This contact is already registered in the selected venue");
     });
     Map<String, String> customFields = validateCustomFields(scopeId, request.customFields());
@@ -334,13 +351,14 @@ public class ActivityService {
   public ParticipantDetailResponse updateParticipant(UUID activityId, UUID participantId,
       UpdateParticipantRequest request) {
     UUID scopeId = participantScopeActivity(activityId);
+    activities.findForUpdate(scopeId).orElseThrow(() -> notFound("Activity not found"));
     Participant participant = requireParticipantForUpdate(activityId, participantId);
     String venue = request.venue() == null ? participant.getVenue() : normalizeVenue(request.venue());
     String contact = request.contact() == null ? participant.getContact() : normalizeContact(request.contact());
     if (!venue.equals(participant.getVenue()) || !contact.equals(participant.getContact())) {
-      participants.findByActivityIdAndVenueAndContact(scopeId, venue, contact)
+      participants.findByActivityIdAndContact(scopeId, contact).stream()
           .filter(existing -> !existing.getId().equals(participantId))
-          .ifPresent(existing -> { throw conflict("This contact is already registered in the selected venue"); });
+          .findFirst().ifPresent(existing -> { throw conflict("This contact is already registered in the selected venue"); });
     }
     if (!venue.equals(participant.getVenue())) {
       Venue venueEntity = venues.findByActivityIdAndCode(scopeId, venue)
@@ -491,6 +509,23 @@ public class ActivityService {
   }
 
   @Transactional
+  public List<QuestionAdminResponse> importQuestions(UUID activityId, List<QuestionWriteRequest> requests) {
+    requireActivity(activityId);
+    if (requests.isEmpty() || requests.size() > 1000) throw badRequest("每次导入需包含 1 至 1000 道题目");
+    List<QuestionAdminResponse> imported = new ArrayList<>();
+    for (int index=0; index<requests.size(); index++) {
+      QuestionWriteRequest request=requests.get(index);
+      if (request == null) throw badRequest("第 " + (index+1) + " 行为空，未导入任何题目");
+      var violations=validator.validate(request);
+      if (!violations.isEmpty()) throw badRequest("第 " + (index+1) + " 行参数不合法，未导入任何题目：" + violations.iterator().next().getPropertyPath());
+      try { imported.add(createQuestion(activityId, request)); }
+      catch (DomainException exception) { throw badRequest("第 " + (index+1) + " 行导入失败，未导入任何题目：" + exception.getMessage()); }
+    }
+    broadcast(activityId, "questions.imported");
+    return imported;
+  }
+
+  @Transactional
   public void deleteQuestion(UUID activityId, UUID questionId) {
     Question question = requireQuestion(activityId, questionId);
     if (submissions.existsByActivityIdAndQuestionId(activityId, questionId)) throw conflict("Question has submissions and cannot be deleted");
@@ -537,7 +572,7 @@ public class ActivityService {
     int rawPoints = "TEXT".equals(question.getType()) ? (autoTextCorrect ? question.getFullScore() : 0)
         : AnswerScorer.score(question.getType(), answers, new HashSet<>(splitComma(question.getAnswers())),
             question.getFullScore(), question.getPartialCreditPercent());
-    int points = applyScoring(activity, question.getFullScore(), rawPoints, responseRank);
+    int points = requiresManualReview ? 0 : applyScoring(activity, question.getFullScore(), rawPoints, responseRank);
     String outcome = requiresManualReview ? "PENDING_REVIEW" : rawPoints >= question.getFullScore() ? "CORRECT"
         : points > 0 ? "PARTIAL" : "INCORRECT";
     AnswerSubmission submission = submissions.save(new AnswerSubmission(activityId, participant.getId(), question.getId(),
@@ -551,8 +586,7 @@ public class ActivityService {
           "ANSWER", "Auto-scored answer"));
       broadcast(activityId, "answer.scored");
     }
-    screens.refreshQuestionSubmissionCount(activityId, question.getId(),
-        submissions.countByActivityIdAndQuestionId(activityId, question.getId()));
+    events.publishEvent(new SubmissionScreenUpdater.Submitted(activityId, question.getId()));
     return toAnswerResult(submission, participant.getScore(), false, responseRank);
   }
 
@@ -561,13 +595,13 @@ public class ActivityService {
     Activity activity = requireActivity(activityId);
     AnswerSubmission submission = requireSubmission(activityId, submissionId);
     Question question = requireQuestion(activityId, submission.getQuestionId());
-    if (request.awardedPoints() > question.getFullScore()) throw badRequest("Awarded points exceed question score");
+    if (request.awardedPoints() < 0 || request.awardedPoints() > question.getFullScore()) throw badRequest("Awarded points exceed question score");
     Participant participant = requireParticipantForUpdate(activityId, submission.getParticipantId());
     int awarded = request.awardedPoints();
     // A zero score is an explicitly incorrect answer; apply configured deduction rules.
     if (awarded == 0) awarded = applyScoring(activity, question.getFullScore(), 0, submission.getResponseRank());
     int delta = awarded - submission.getAwardedPoints();
-    submission.grade(awarded, cleanOptional(request.feedback()));
+    submission.grade(awarded, cleanOptional(request.feedback()), request.awardedPoints() >= question.getFullScore() ? "CORRECT" : request.awardedPoints() > 0 ? "PARTIAL" : "INCORRECT");
     if (delta != 0) {
       participant.addScore(delta);
       scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), question.getId(), submission.getId(), delta,
@@ -575,6 +609,12 @@ public class ActivityService {
     }
     broadcast(activityId, "answer.graded");
     return toSubmission(submission);
+  }
+
+  @Transactional(readOnly = true)
+  public List<SubmissionResponse> activitySubmissions(UUID activityId) {
+    requireActivity(activityId);
+    return submissions.findByActivityIdOrderBySubmittedAtDesc(activityId).stream().map(this::toSubmission).toList();
   }
 
   @Transactional(readOnly = true)
@@ -588,9 +628,18 @@ public class ActivityService {
   public ScoreLedgerResponse adjustScore(UUID activityId, ManualScoreRequest request) {
     requireActivity(activityId);
     Participant participant = requireParticipantForUpdate(activityId, request.participantId());
+    String key = normalizeIdempotencyKey(request.idempotencyKey());
+    var previous = scoreLedgers.findByActivityIdAndIdempotencyKey(activityId, key);
+    if (previous.isPresent()) {
+      var entry = previous.get();
+      if (!entry.getParticipantId().equals(request.participantId()) || entry.getPoints() != request.points()
+          || !java.util.Objects.equals(entry.getNote(), cleanOptional(request.note()))) throw conflict("幂等键已用于另一笔改分");
+      return toScoreLedger(entry);
+    }
     participant.addScore(request.points());
     ScoreLedger entry = scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), null, null, request.points(),
         "MANUAL_ADJUSTMENT", cleanOptional(request.note())));
+    entry.setIdempotencyKey(key);
     broadcast(activityId, "score.adjusted");
     return toScoreLedger(entry);
   }
@@ -633,8 +682,8 @@ public class ActivityService {
       Participant participant = participantById.get(submission.getParticipantId());
       return new QuestionSubmissionEntry(submission.getParticipantId(),
           participant == null ? "已移除参与者" : participant.getName(),
-          participant == null ? "--" : participant.getVenue(), readSubmittedAnswers(submission.getSubmittedAnswers()),
-          submission.getAwardedPoints(), submission.getStatus(), index + 1, submission.getSubmittedAt());
+          participant == null ? "--" : participant.getVenue(), readSubmittedAnswers(submission.getSubmittedAnswers(), submission.getQuestionId()),
+          submission.getAwardedPoints(), submission.getStatus(), submission.getResponseRank(), submission.getSubmittedAt());
     }).toList();
     return new QuestionResponseStats(questionId, eligibleParticipantCount, answered.size(),
         Math.max(0, eligibleParticipantCount - answered.size()), pendingReviewCount, correctCount, partialCount,
@@ -705,7 +754,7 @@ public class ActivityService {
                 Map<String, Object> response = new HashMap<>();
                 Participant participant = participants.findById(item.getParticipantId()).orElse(null);
                 response.put("participantName", participant == null ? "参与者" : participant.getName());
-                response.put("answers", readSubmittedAnswers(item.getSubmittedAnswers()));
+                response.put("answers", readSubmittedAnswers(item.getSubmittedAnswers(), item.getQuestionId()));
                 response.put("awardedPoints", item.getAwardedPoints());
                 response.put("status", item.getStatus());
                 response.put("submittedAt", item.getSubmittedAt());
@@ -1031,7 +1080,7 @@ public class ActivityService {
   }
 
   private AnswerSubmission requireSubmission(UUID activityId, UUID submissionId) {
-    return submissions.findById(submissionId).filter(submission -> submission.getActivityId().equals(activityId))
+    return submissions.findForUpdate(submissionId).filter(submission -> submission.getActivityId().equals(activityId))
         .orElseThrow(() -> notFound("Answer submission does not exist in this activity"));
   }
 
@@ -1113,14 +1162,14 @@ public class ActivityService {
   }
 
   private void ensureRegistrationAllowed(Activity activity) {
-    if ("FINISHED".equals(activity.getStatus()) || "CANCELLED".equals(activity.getStatus())) {
+    if (Set.of("PAUSED", "FINISHED", "CANCELLED").contains(activity.getStatus())) {
       throw conflict("Registration is closed for this activity");
     }
   }
 
   private void ensureAnsweringAllowed(Activity activity) {
     if ("LOTTERY".equals(activity.getActivityType())) throw conflict("Lottery sub-activities do not accept quiz answers");
-    if ("FINISHED".equals(activity.getStatus()) || "CANCELLED".equals(activity.getStatus())) {
+    if (Set.of("PAUSED", "FINISHED", "CANCELLED").contains(activity.getStatus())) {
       throw conflict("Answering is closed for this activity");
     }
   }
@@ -1260,8 +1309,15 @@ public class ActivityService {
       String value = supplied.get(field.getFieldKey());
       if (field.isRequired() && (value == null || value.isBlank())) throw badRequest("Required registration field is missing: " + field.getFieldKey());
       if (value != null && ("SELECT".equals(field.getType()) || "RADIO".equals(field.getType())
-          || "CHECKBOX".equals(field.getType())) && !splitPipe(field.getOptions()).contains(value)) {
+          ) && !splitPipe(field.getOptions()).contains(value)) {
         throw badRequest("Invalid value for registration field: " + field.getFieldKey());
+      }
+      if (value != null && "CHECKBOX".equals(field.getType())) {
+        List<String> selected;
+        try { selected = objectMapper.readValue(value, new TypeReference<List<String>>() {}); }
+        catch (JsonProcessingException exception) { throw badRequest("多选字段必须为选项数组：" + field.getFieldKey()); }
+        if (selected == null || field.isRequired() && selected.isEmpty() || !splitPipe(field.getOptions()).containsAll(selected))
+          throw badRequest("多选字段包含无效选项：" + field.getFieldKey());
       }
     }
     return Map.copyOf(supplied);
@@ -1428,9 +1484,10 @@ public class ActivityService {
     if (value == null || value.isBlank()) return List.of();
     try {
       List<String> parsed = objectMapper.readValue(value, new TypeReference<List<String>>() { });
-      return parsed == null ? List.of() : List.copyOf(parsed);
+      if (parsed == null) throw conflict("答案数据损坏，请修复题目配置");
+      return List.copyOf(parsed);
     } catch (JsonProcessingException exception) {
-      return List.of();
+      throw conflict("答案数据损坏，请修复题目配置");
     }
   }
 
@@ -1446,8 +1503,8 @@ public class ActivityService {
     return "TEXT".equals(question.getType()) ? writeTextAnswers(answers) : joinComma(answers);
   }
 
-  private List<String> readSubmittedAnswers(String value) {
-    if (value != null && value.stripLeading().startsWith("[")) return readTextAnswers(value);
+  private List<String> readSubmittedAnswers(String value, UUID questionId) {
+    if ("TEXT".equals(questions.findById(questionId).orElseThrow(() -> notFound("Question not found")).getType())) return readTextAnswers(value);
     return splitComma(value);
   }
 
@@ -1466,6 +1523,17 @@ public class ActivityService {
   private void broadcast(UUID activityId, String type) {
     realtime.send("/topic/activities/" + activityId,
         Map.of("type", type, "sentAt", Instant.now().toString()));
+  }
+
+  private boolean canViewActivity(Activity activity) {
+    var authentication = SecurityContextHolder.getContext().getAuthentication();
+    if (authentication == null) return true; // Internal service callers.
+    if (authentication.getPrincipal() instanceof AuthenticatedPrincipal principal) {
+      if (principal.isSystemAdmin()) return true;
+      if (principal.userId() != null && (memberships.findByUserIdAndActivityId(principal.userId(), activity.getId()).isPresent()
+          || activity.getParentActivityId() != null && memberships.findByUserIdAndActivityId(principal.userId(), activity.getParentActivityId()).isPresent())) return true;
+    }
+    return !Set.of("DRAFT", "CANCELLED").contains(activity.getStatus());
   }
 
   private ActivityResponse toActivity(Activity activity) {
@@ -1549,14 +1617,17 @@ public class ActivityService {
   private String writeScoringRules(List<ScoreRule> correct, List<ScoreRule> incorrect) {
     try { return objectMapper.writeValueAsString(Map.of("correct", correct == null ? List.of() : correct,
         "incorrect", incorrect == null ? List.of() : incorrect)); }
-    catch (JsonProcessingException e) { return "{}"; }
+    catch (JsonProcessingException e) { throw new IllegalStateException("Unable to store scoring rules", e); }
   }
 
   private Map<String, List<ScoreRule>> readScoringRules(String raw) {
     if (raw == null || raw.isBlank()) return Map.of("correct", List.of(), "incorrect", List.of());
     try {
-      return objectMapper.readValue(raw, new TypeReference<Map<String, List<ScoreRule>>>() { });
-    } catch (Exception e) { return Map.of("correct", List.of(), "incorrect", List.of()); }
+      var parsed=objectMapper.readValue(raw, new TypeReference<Map<String, List<ScoreRule>>>() { });
+      if (parsed == null || parsed.values().stream().anyMatch(java.util.Objects::isNull)) throw conflict("评分规则数据损坏");
+      parsed.values().forEach(this::validateScoreRules);
+      return parsed;
+    } catch (Exception e) { throw conflict("评分规则数据损坏，请修复活动配置"); }
   }
 
   private VenueResponse toVenue(Venue venue) {
@@ -1634,7 +1705,7 @@ public class ActivityService {
 
   private SubmissionResponse toSubmission(AnswerSubmission submission) {
     return new SubmissionResponse(submission.getId(), submission.getParticipantId(), submission.getQuestionId(),
-        readSubmittedAnswers(submission.getSubmittedAnswers()), submission.getAwardedPoints(), submission.getStatus(),
+        readSubmittedAnswers(submission.getSubmittedAnswers(), submission.getQuestionId()), submission.getAwardedPoints(), submission.getStatus(),
         submission.getFeedback(), submission.getSubmittedAt(), submission.getGradedAt(), submission.getResponseRank());
   }
 

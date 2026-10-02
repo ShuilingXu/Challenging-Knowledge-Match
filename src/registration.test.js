@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { activeVenueCode, buildRegistrationPayload, splitRegistrationOptions } from './registration'
 
 describe('registration request mapping', () => {
+  it('encodes checkbox choices without treating them as one option', () => {
+    expect(buildRegistrationPayload({ name: 'Alex', contact: 'phone' }, { choices: ['A', 'B'] }).customFields)
+      .toEqual({ choices: '["A","B"]' })
+  })
   it('sends configured dynamic values through customFields only', () => {
     expect(buildRegistrationPayload(
       { name: 'Alex', contact: '138 0000 1000', organization: 'Matrix' },

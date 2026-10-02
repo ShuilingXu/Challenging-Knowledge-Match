@@ -39,6 +39,7 @@ public class ObjectStorageService {
     if (!isSupportedMediaType(contentType)) {
       throw new DomainException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Only image, audio, or video files are supported");
     }
+    validateContent(file, contentType);
     StorageTarget target = target();
     validateTarget(target);
     String safeName = sanitize(file.getOriginalFilename());
@@ -55,6 +56,59 @@ public class ObjectStorageService {
     } catch (Exception exception) {
       throw new DomainException(HttpStatus.SERVICE_UNAVAILABLE, "Object storage upload failed");
     }
+  }
+
+  private void validateContent(MultipartFile file, String type) {
+    try (InputStream stream = file.getInputStream()) {
+      byte[] header = stream.readNBytes(32);
+      String ascii = new String(header, java.nio.charset.StandardCharsets.ISO_8859_1);
+      boolean valid = switch (type) {
+        case "image/png" -> header.length >= 8 && java.util.Arrays.equals(java.util.Arrays.copyOf(header, 8), new byte[]{(byte)137,80,78,71,13,10,26,10});
+        case "image/jpeg" -> header.length >= 3 && header[0] == (byte)255 && header[1] == (byte)216 && header[2] == (byte)255;
+        case "image/gif" -> ascii.startsWith("GIF87a") || ascii.startsWith("GIF89a");
+        case "image/webp" -> header.length >= 12 && ascii.startsWith("RIFF") && ascii.substring(8).startsWith("WEBP");
+        case "audio/wav", "audio/x-wav" -> header.length >= 12 && ascii.startsWith("RIFF") && ascii.substring(8).startsWith("WAVE");
+        case "audio/mpeg" -> ascii.startsWith("ID3") || header.length >= 2 && header[0] == (byte)255 && (header[1] & 0xe0) == 0xe0;
+        case "audio/ogg", "video/ogg" -> ascii.startsWith("OggS");
+        case "audio/flac", "audio/x-flac" -> ascii.startsWith("fLaC");
+        case "video/mp4", "audio/mp4", "video/quicktime" -> header.length >= 12 && ascii.substring(4).startsWith("ftyp");
+        case "video/webm", "audio/webm" -> header.length >= 4 && header[0] == 0x1a && header[1] == 0x45 && header[2] == (byte)0xdf && header[3] == (byte)0xa3;
+        default -> false;
+      };
+      if (!valid) throw new DomainException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "文件内容与媒体类型不符，或格式不受支持");
+    } catch (java.io.IOException exception) { throw new DomainException(HttpStatus.BAD_REQUEST, "无法读取上传文件"); }
+  }
+
+  /** Serve private objects through the same-origin API; browsers never see an internal S3 hostname. */
+  public org.springframework.http.ResponseEntity<org.springframework.core.io.InputStreamResource> download(
+      UUID activityId, String category, String fileName, String range) throws Exception {
+    if (!category.matches("[a-z0-9_-][a-z0-9._-]{0,119}") || !fileName.matches("[0-9a-f-]{36}-[a-z0-9._-]+"))
+      throw new DomainException(HttpStatus.BAD_REQUEST, "Invalid media path");
+    var target = target(); validateTarget(target);
+    var storage = client(target);
+    String key = activityId + "/" + category + "/" + fileName;
+    var stat = storage.statObject(io.minio.StatObjectArgs.builder().bucket(target.bucket()).object(key).build());
+    long start = 0, end = stat.size() - 1;
+    if (range != null) {
+      if (!range.matches("bytes=[0-9]*-[0-9]*") || range.equals("bytes=-"))
+        return org.springframework.http.ResponseEntity.status(416).header("Content-Range", "bytes */" + stat.size()).build();
+      try {
+        String[] parts = range.substring(6).split("-", -1);
+        if (parts[0].isEmpty()) start = Math.max(0, stat.size() - Long.parseLong(parts[1]));
+        else { start = Long.parseLong(parts[0]); if (!parts[1].isEmpty()) end = Math.min(end, Long.parseLong(parts[1])); }
+      } catch (NumberFormatException exception) { start = -1; }
+      if (start < 0 || start > end || start >= stat.size())
+        return org.springframework.http.ResponseEntity.status(416).header("Content-Range", "bytes */" + stat.size()).build();
+    }
+    var builder = org.springframework.http.ResponseEntity.status(range == null ? 200 : 206)
+        .cacheControl(org.springframework.http.CacheControl.noStore()).header("Accept-Ranges", "bytes")
+        .header("X-Content-Type-Options", "nosniff")
+        .header("Content-Security-Policy", "sandbox; default-src 'none'")
+        .contentType(org.springframework.http.MediaType.parseMediaType(stat.contentType()))
+        .contentLength(end - start + 1);
+    if (range != null) builder.header("Content-Range", "bytes " + start + "-" + end + "/" + stat.size());
+    InputStream stream = storage.getObject(io.minio.GetObjectArgs.builder().bucket(target.bucket()).object(key).offset(start).length(end - start + 1).build());
+    return builder.body(new org.springframework.core.io.InputStreamResource(stream));
   }
 
   private StorageTarget target() {

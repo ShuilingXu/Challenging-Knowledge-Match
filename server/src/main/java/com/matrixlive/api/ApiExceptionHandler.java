@@ -23,6 +23,11 @@ public class ApiExceptionHandler {
     return ResponseEntity.badRequest().body(Map.of("error", message, "time", Instant.now().toString()));
   }
 
+  @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+  public ResponseEntity<Map<String, Object>> uploadTooLarge(Exception exception) {
+    return ResponseEntity.status(413).body(Map.of("error", "文件超过上传体积限制（默认 20MB）", "time", Instant.now().toString()));
+  }
+
   @ExceptionHandler(DataIntegrityViolationException.class)
   public ResponseEntity<Map<String, Object>> integrity(DataIntegrityViolationException exception) {
     return ResponseEntity.status(409).body(Map.of("error", "The request conflicts with an existing record",

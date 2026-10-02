@@ -18,9 +18,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-@SpringBootTest
+@SpringBootTest(properties = {"APP_BOOTSTRAP_PASSWORD=ChangeMe!2026", "app.security.jwt.secret=VGVzdC1vbmx5LXNlY3JldC1uZXZlci11c2UtaW4tcHJvZHVjdGlvbiE="})
 @AutoConfigureMockMvc
 class SecurityIntegrationTest {
+  @Autowired private com.matrixlive.security.auth.HumanChallengeRepository challenges;
   @Autowired private MockMvc mvc;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private ActivityRepository activities;
@@ -39,13 +40,13 @@ class SecurityIntegrationTest {
     var submission = service.submitAnswer(activityId, new com.matrixlive.api.ApiModels.SubmitAnswerRequest(person.id(),
         question.id(), java.util.Set.of("My answer"), UUID.randomUUID().toString()));
     mvc.perform(post(path + "/scores/adjustments").header("Authorization", "Bearer " + staffToken)
-            .contentType(MediaType.APPLICATION_JSON).content("{\"participantId\":\"" + person.id() + "\",\"points\":-10}"))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"participantId\":\"" + person.id() + "\",\"points\":-10,\"idempotencyKey\":\"staff-adjust-test\"}"))
         .andExpect(status().isOk());
     mvc.perform(post(path + "/submissions/" + submission.submissionId() + "/grade").header("Authorization", "Bearer " + staffToken)
-            .contentType(MediaType.APPLICATION_JSON).content("{\"awardedPoints\":-5,\"feedback\":\"Penalty\"}"))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"awardedPoints\":0,\"feedback\":\"Penalty\"}"))
         .andExpect(status().isOk());
-    org.junit.jupiter.api.Assertions.assertEquals(-15, service.participant(activityId, person.id()).score());
-    service.adjustScore(activityId, new com.matrixlive.api.ApiModels.ManualScoreRequest(person.id(), 15, "Restore test score"));
+    org.junit.jupiter.api.Assertions.assertEquals(-10, service.participant(activityId, person.id()).score());
+    service.adjustScore(activityId, new com.matrixlive.api.ApiModels.ManualScoreRequest(person.id(), 10, "Restore test score"));
     var pool = service.createPrizePool(activityId, new com.matrixlive.api.ApiModels.PrizePoolRequest("batch-" + UUID.randomUUID(),
         "Batch prize", "MANUAL", "PHYSICAL", "", null, 2, 0, 1, null, null, true));
     var first = service.issueAward(activityId, new com.matrixlive.api.ApiModels.IssueAwardRequest(person.id(), pool.id(), ""));
@@ -121,7 +122,7 @@ class SecurityIntegrationTest {
         .andExpect(status().isUnauthorized());
 
     MvcResult participantSession = mvc.perform(post("/api/auth/participant-token").contentType(MediaType.APPLICATION_JSON)
-            .content("{\"activityId\":\"" + activityId + "\",\"venue\":\"south\",\"contact\":\"13800002048\"}"))
+            .content("{\"activityId\":\"" + activityId + "\",\"venue\":\"south\",\"contact\":\"13800002048\",\"challengeId\":\"" + com.matrixlive.security.auth.TestChallenges.create(challenges) + "\",\"challengeAnswer\":\"ABCDE\"}"))
         .andExpect(status().isOk()).andReturn();
     String participantToken = accessToken(participantSession);
 

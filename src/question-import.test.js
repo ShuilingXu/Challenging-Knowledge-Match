@@ -14,4 +14,13 @@ describe("question import", () => {
     expect(parseQuestionImport(csv)[0].title).toBe("题干，含逗号");
     expect(() => parseQuestionImport("type,title\nSINGLE,缺选项")).toThrow("至少需要两个选项");
   });
+  it("preserves semicolons inside an option", () => {
+    const rows = parseQuestionImport('type,title,options,answers\nSINGLE,Question,"甲;乙||丙；丁",B');
+    expect(rows[0].options).toEqual(["甲;乙", "丙；丁"]);
+    expect(rows[0].answers).toEqual(["丙；丁"]);
+  });
+  it("preserves literal single-letter options before attempting answer-letter mapping", () => {
+    const rows = parseQuestionImport('type,title,options,answers\nSINGLE,Question,"B||A",A');
+    expect(rows[0].answers).toEqual(["A"]);
+  });
 });

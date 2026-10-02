@@ -24,11 +24,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/auth")
 public class AuthController {
   private static final String REFRESH_COOKIE = "matrixlive_refresh";
+  private final HumanVerificationService humanVerification;
+  private final ClientSessionService clientSessions;
   private final AuthService auth;
   private final TokenRevocationService revocations;
   private final JwtProperties properties;
 
-  public AuthController(AuthService auth, TokenRevocationService revocations, JwtProperties properties) {
+  public AuthController(AuthService auth, TokenRevocationService revocations, JwtProperties properties, HumanVerificationService humanVerification, ClientSessionService clientSessions) {
+    this.humanVerification = humanVerification;
+    this.clientSessions = clientSessions;
     this.auth = auth;
     this.revocations = revocations;
     this.properties = properties;
@@ -68,8 +72,26 @@ public class AuthController {
     return auth.participantToken(request, servletRequest);
   }
 
+  @GetMapping("/human-challenge")
+  public ResponseEntity<HumanVerificationService.ChallengeResponse> challenge(HttpServletRequest request) {
+    return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(humanVerification.issue(request.getRemoteAddr()));
+  }
+
+  @PostMapping("/client-refresh")
+  public ClientRefreshResponse clientRefresh(@jakarta.validation.Valid @RequestBody ClientRefreshRequest request) {
+    var token = clientSessions.refresh(request.refreshToken());
+    return new ClientRefreshResponse(token.value(), token.expiresAt());
+  }
+
+  @PostMapping("/client-logout")
+  public ResponseEntity<Void> clientLogout(@jakarta.validation.Valid @RequestBody ClientRefreshRequest request) {
+    clientSessions.logout(request.refreshToken());
+    return ResponseEntity.noContent().build();
+  }
+
   @GetMapping("/me")
   public CurrentPrincipalResponse me(@AuthenticationPrincipal AuthenticatedPrincipal principal) {
+    if (principal == null) throw new com.matrixlive.service.DomainException(org.springframework.http.HttpStatus.UNAUTHORIZED, "请先登录");
     return new CurrentPrincipalResponse(principal.kind().name(), principal.userId(), principal.participantId(),
         principal.activityId(), principal.username(), principal.role().name(), principal.expiresAt());
   }

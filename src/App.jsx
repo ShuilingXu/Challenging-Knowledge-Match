@@ -238,7 +238,7 @@ function ParticipantEntryRedirect() {
       <Link to={activityEntry(activity)}><CalendarDays size={22} /><div><strong>{activity.name}</strong><span>{activity.city} · {activityStatusLabels[activity.status]}</span></div><ChevronRight size={20} /></Link>
       {activities.filter((item) => item.parentActivityId === activity.id).map((child) => <Link className="activity-entry-child" to={activityEntry(child)} key={child.id}><Gift size={19} /><div><strong>{child.name}</strong><span>{activityTypeLabel(child.activityType)} · {activityStatusLabels[child.status]}</span></div><ChevronRight size={20} /></Link>)}
     </section>)}
-    {!activities.length && <EmptyState icon={CalendarDays} title="暂无开放活动" />}
+    {!activities.length && <EmptyState icon={CalendarDays} title="暂无开放活动" description="活动开放报名后会显示在这里，请稍后刷新或联系现场工作人员。" />}
   </main>;
 }
 
@@ -656,6 +656,7 @@ function OverviewPage({ activityId, activities }) {
       setScores(board);
       setControl(state);
       setDevices(screens);
+      setError("");
     } catch (cause) {
       setError(cause.message);
     }
@@ -666,6 +667,7 @@ function OverviewPage({ activityId, activities }) {
   useActivityStream(activityId, load, undefined, setError);
   const remaining = useLiveCountdown(control);
   const activity = activities.find((item) => item.id === activityId);
+  const overviewStage = ["FINISHED", "CANCELLED"].includes(activity?.status) ? "ENDED" : control?.stage || "LOBBY";
   return (
     <div className="page-content">
       <PageHeader
@@ -691,9 +693,9 @@ function OverviewPage({ activityId, activities }) {
         <Metric
           icon={Activity}
           label="当前阶段"
-          value={stageLabel(control?.stage || "LOBBY")}
+          value={overviewStage === "QUESTION_OPEN" && remaining === 0 ? "答题已截止" : stageLabel(overviewStage)}
           sub={
-            control?.stage === "QUESTION_OPEN" ? `剩余 ${remaining} 秒` : "等待工作人员开场"
+            overviewStage === "QUESTION_OPEN" ? `剩余 ${remaining} 秒` : overviewStage === "ENDED" ? "本场流程已完成" : "等待工作人员开场"
           }
           tone="violet"
         />
@@ -716,30 +718,36 @@ function OverviewPage({ activityId, activities }) {
         <article className="live-activity-panel">
           <div className="panel-top">
             <div>
-              <p className="eyebrow">活动进行中</p>
+              <p className="eyebrow">{activityStatusLabels[activity?.status] || "活动状态"}</p>
               <h2>{activity?.name || "尚未创建活动"}</h2>
             </div>
             <span
               className={`stage-tag stage-tag--${String(control?.stage || "lobby").toLowerCase()}`}
             >
-              {stageLabel(control?.stage || "LOBBY")}
+              {overviewStage === "QUESTION_OPEN" && remaining === 0 ? "答题已截止" : stageLabel(overviewStage)}
             </span>
           </div>
           <div className="activity-hero">
             <div className="activity-hero__text">
               <span>
                 <i />
-                上海 · 主会场
+                {activity?.city || "活动现场"}
               </span>
               <strong>
-                {control?.stage === "QUESTION_OPEN"
+                {overviewStage === "ENDED" ? "本场活动已结束" : control?.stage === "QUESTION_OPEN" && remaining > 0
                   ? "问题已向所有终端开放"
+                  : control?.stage === "QUESTION_OPEN"
+                    ? "本题答题时间已结束"
+                  : control?.stage === "ANSWER_REVEALED" ? "本题答案已公布"
+                  : control?.stage === "SCOREBOARD" ? "现场积分榜已发布"
+                  : control?.stage === "WINNERS" ? "获奖名单已公布"
+                  : control?.stage === "ENDED" ? "本场活动已结束"
                   : "次元现场即将开启"}
               </strong>
               <small>
-                {control?.seconds
-                  ? `现场倒计时 ${formatSeconds(control.seconds)}`
-                  : "工作人员可从实时控场推进流程"}
+                {overviewStage === "QUESTION_OPEN"
+                  ? `现场倒计时 ${formatSeconds(remaining)}`
+                  : overviewStage === "ENDED" ? "积分与答题记录已保存" : "工作人员可从实时控场推进流程"}
               </small>
             </div>
             <div className="activity-hero__shape" />
@@ -1256,6 +1264,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
         : nextQuestionId;
       selectedQuestionRef.current = nextSelection;
       setSelectedQuestionId(nextSelection);
+      setError("");
       await loadStats(nextSelection);
     } catch (cause) {
       setError(cause.message);
@@ -1272,8 +1281,9 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const navigationIndex = enabledQuestions.findIndex((item) => item.id === navigationQuestion?.id);
   const previousQuestion = navigationIndex > 0 ? enabledQuestions[navigationIndex - 1] : null;
   const nextQuestion = navigationIndex >= 0 ? enabledQuestions[navigationIndex + 1] : enabledQuestions[0];
+  const controlsClosed = ["PAUSED", "FINISHED", "CANCELLED"].includes(activity?.status);
   const selectionIsOpen = Boolean(
-    current && state?.stage === "QUESTION_OPEN" && state.questionId === current.id,
+    !controlsClosed && remaining > 0 && current && state?.stage === "QUESTION_OPEN" && state.questionId === current.id,
   );
   const canJumpToSelection = Boolean(current) && current.id !== state?.questionId;
   const selectQuestion = (questionId) => {
@@ -1283,9 +1293,11 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   };
   const update = async (stage, overrides = {}) => {
     if (!activityId || busy) return;
+    if (stage === "QUESTION_OPEN" && controlsClosed) return;
     if (["QUESTION_OPEN", "ANSWER_REVEALED"].includes(stage) && !current)
       return;
     setBusy(true);
+    setError("");
     try {
       if (stage === "WINNERS") {
         const [board, pools] = await Promise.all([api.scoreboard(activityId), api.prizePools(activityId)]);
@@ -1330,7 +1342,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
               <i />
               LIVE
             </span>
-            <b>{stageLabel(state?.stage || "LOBBY")}</b>
+            <b>{controlsClosed ? activityStatusLabels[activity.status] : state?.stage === "QUESTION_OPEN" && remaining === 0 ? "答题时间已结束" : stageLabel(state?.stage || "LOBBY")}</b>
             <span>活动事件已隔离广播</span>
           </div>
           <article className="control-question">
@@ -1351,7 +1363,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
               </select>
               {current && (
                 <p className="question-selection-status" aria-live="polite">
-                  {selectionIsOpen ? "当前答题题目" : "已选题目，可跳题并开始"}
+                  {controlsClosed ? "活动已暂停或结束，无法开启答题" : selectionIsOpen ? "当前答题题目" : "已选题目，可跳题并开始"}
                 </p>
               )}
               <Link className="text-button" to="/admin/questions">
@@ -1439,7 +1451,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
           <div className="control-actions">
             <button
               className="secondary-button"
-              disabled={busy || !current}
+              disabled={busy || !current || controlsClosed}
               onClick={() => update("QUESTION_OPEN", { seconds: 30 })}
             >
               <Play size={17} />
@@ -1447,7 +1459,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
             </button>
             <button
               className="accent-button"
-              disabled={busy || !canJumpToSelection}
+              disabled={busy || !canJumpToSelection || controlsClosed}
               onClick={() => {
                 selectQuestion(current.id);
                 update("QUESTION_OPEN", {
@@ -1461,7 +1473,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
             </button>
             <button
               className="secondary-button"
-              disabled={busy || !nextQuestion}
+              disabled={busy || !nextQuestion || controlsClosed}
               onClick={() => {
                 if (!nextQuestion) return;
                 selectQuestion(nextQuestion.id);
@@ -1601,6 +1613,7 @@ function QuestionsPage({ activityId, canManage }) {
       setQuestionSets(setList);
       setParticipants(people);
       setSubmissions(await api.activitySubmissions(activityId));
+      setError("");
     } catch (cause) {
       setError(cause.message);
     } finally { questionLoadInFlight.current = false; }
@@ -3718,6 +3731,7 @@ function ScreensPage({ activityId }) {
           ? current
           : deviceList[0]?.id || "",
       );
+      setError("");
     } catch (cause) {
       setError(cause.message);
     }
@@ -5920,10 +5934,14 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
           <Gift size={17} />
           领取你的惊喜
         </div>
-        {siteSettings?.footerCode && (
-          <iframe className="participant-site-footer" title="站点页脚" sandbox="allow-scripts" srcDoc={siteSettings.footerCode} />
-        )}
       </div>
+      {siteSettings?.footerCode && (
+        <footer className="participant-footer">
+          {/<[a-z][\s\S]*>/i.test(siteSettings.footerCode)
+            ? <iframe className="participant-site-footer" title="站点页脚" sandbox="allow-scripts" srcDoc={siteSettings.footerCode} />
+            : <p>{siteSettings.footerCode}</p>}
+        </footer>
+      )}
     </main>
   );
 }
@@ -6762,6 +6780,7 @@ function TemplateScreen({ activityId, display }) {
       ref={containerRef}
       className={`template-screen${imageOnly ? " template-screen--image-only" : ""}`}
       style={{
+        "--template-columns": Math.max(1, Math.min(3, visibleComponents.filter((item) => item.type !== "TEXT").length)),
         background: background.imageUrl
           ? "center / cover no-repeat url(" + background.imageUrl + ")"
           : background.color || "#836c67",
@@ -6838,6 +6857,8 @@ function ScreenQuestion({ question, state, result, responses = [], submittedCoun
             ? "答案已公布"
             : remaining
               ? formatSeconds(remaining)
+              : state?.stage === "QUESTION_OPEN"
+                ? "答题时间已结束"
               : stageLabel(state?.stage || "LOBBY")}
         </strong>
       </div>
@@ -7007,10 +7028,10 @@ function ScreenWinners({ winners, display }) {
           <article key={`${winner.name}-${winner.prizeName}-${index}`}>
             <b>{String(index + 1).padStart(2, "0")}</b>
             <Avatar name={winner.name} />
-            <strong>{winner.name}</strong>
-            <small>
-              {winner.venue || "活动现场"} · {winner.prizeName}
-            </small>
+            <div>
+              <strong>{winner.name}</strong>
+              <small>{winner.venue || "活动现场"} · {winner.prizeName}</small>
+            </div>
             <em>
               {winner.deliveryType === "PHYSICAL" ? "实物" : "兑换"}
               <i>奖</i>
@@ -7313,6 +7334,7 @@ function stageLabel(stage) {
       QUESTION_OPEN: "答题中",
       ANSWER_REVEALED: "答案已公布",
       SCOREBOARD: "积分榜",
+      WINNERS: "获奖名单",
       ENDED: "活动已结束",
     }[stage] || stage
   );

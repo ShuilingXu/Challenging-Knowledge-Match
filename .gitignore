@@ -20,3 +20,4 @@ test-assets/edge-qa-profile/
 **/.*.tmp
 **/.*.tmp/**
 /test-assets
+*.log

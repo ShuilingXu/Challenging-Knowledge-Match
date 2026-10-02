@@ -62,8 +62,11 @@ class ObjectStorageServiceTest {
       } else {
         String range = exchange.getRequestHeaders().getFirst("Range");
         requestedRange.set(range);
-        byte[] body = range == null ? bytes : java.util.Arrays.copyOfRange(bytes, 2, 5);
-        if (range != null) exchange.getResponseHeaders().set("Content-Range", "bytes 2-4/10");
+        // The S3 SDK also sends a range for a full-object offset/length read.
+        int start = range == null ? 0 : Integer.parseInt(range.substring(6).split("-")[0]);
+        int end = range == null ? bytes.length - 1 : Integer.parseInt(range.substring(6).split("-")[1]);
+        byte[] body = java.util.Arrays.copyOfRange(bytes, start, end + 1);
+        if (range != null) exchange.getResponseHeaders().set("Content-Range", "bytes " + start + "-" + end + "/10");
         exchange.sendResponseHeaders(range == null ? 200 : 206, body.length);
         exchange.getResponseBody().write(body);
       }

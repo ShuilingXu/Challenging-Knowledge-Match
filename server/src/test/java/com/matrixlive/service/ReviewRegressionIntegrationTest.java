@@ -86,7 +86,7 @@ class ReviewRegressionIntegrationTest {
 
     var legacy = service.register(activity.id(), "hall", new RegisterParticipantRequest("Legacy", "manual-legacy", null));
     var old = submissions.save(new AnswerSubmission(activity.id(), legacy.id(), q.id(), UUID.randomUUID().toString(),
-        "legacy", -20, "PENDING_REVIEW", null));
+        "[\"legacy\"]", -20, "PENDING_REVIEW", null));
     service.gradeSubmission(activity.id(), old.getId(), new GradeSubmissionRequest(100, null));
     assertEquals(100, service.participant(activity.id(), legacy.id()).score());
     var stats = service.questionResponseStats(activity.id(), q.id());

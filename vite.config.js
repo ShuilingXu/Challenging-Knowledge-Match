@@ -9,6 +9,7 @@ const proxy = {
   },
   '/ws': {
     target: apiProxyTarget.replace(/^http/, 'ws'),
+    changeOrigin: true,
     ws: true,
   },
 }

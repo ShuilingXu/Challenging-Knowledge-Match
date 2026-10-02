@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createIdempotencyKey, refreshSession, request, resolveClientToken, serverNow } from './api'
+import { api, createIdempotencyKey, refreshSession, request, resolveClientToken, serverNow } from './api'
 
 const storage = {
   values: new Map(),
@@ -19,6 +19,16 @@ afterEach(() => {
 })
 
 describe('createIdempotencyKey', () => {
+  it('uses the participant identity for buzzing and restoring a buzz after refresh', async () => {
+    storage.setItem('matrix.session', JSON.stringify({ accessToken: 'host-token' }))
+    const fetchMock = vi.fn(async () => ({ ok: true, headers: { get: () => 'application/json' }, json: async () => [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.buzz('event', { participantId: 'person', questionId: 'question' }, 'participant-token')
+    await api.participantBuzzes('event', 'person', 'question', 'participant-token')
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer participant-token')
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer participant-token')
+    expect(fetchMock.mock.calls[1][0]).toContain('/participants/person/buzzes?questionId=question')
+  })
   it('uses the native UUID API when it is available', () => {
     expect(createIdempotencyKey({ randomUUID: () => 'native-request-id' })).toBe('native-request-id')
   })

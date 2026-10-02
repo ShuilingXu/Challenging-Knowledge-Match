@@ -268,12 +268,12 @@ class ReviewSecurityRegressionTest {
   }
 
   @Test
-  void inheritedLotteryTokenCannotReadSiblingQuizData() throws Exception {
+  void sharedMainIdentityCanJoinQuizButCannotReadHostOnlyData() throws Exception {
     var parent =
         service.createActivity(new CreateActivityRequest("Root scope", "City", Instant.now()));
     service.createVenue(parent.id(), new VenueRequest("a", "A", 20, true));
     var person =
-        service.register(
+        com.matrixlive.service.QuizTestSupport.register(service,
             parent.id(),
             "a",
             new RegisterParticipantRequest("Player", "scoped-" + UUID.randomUUID(), null));
@@ -309,6 +309,8 @@ class ReviewSecurityRegressionTest {
     mvc.perform(
             get("/api/activities/" + quiz.id() + "/questions")
                 .header("Authorization", "Bearer " + token))
+        .andExpect(status().isOk());
+    mvc.perform(get("/api/activities/" + quiz.id() + "/questions/control").header("Authorization", "Bearer " + token))
         .andExpect(status().isForbidden());
     mvc.perform(
             get("/api/activities/" + lottery.id() + "/scoreboard")

@@ -27,6 +27,80 @@ import org.springframework.transaction.annotation.Transactional;
 @SpringBootTest(properties = {"APP_BOOTSTRAP_PASSWORD=ChangeMe!2026", "app.security.jwt.secret=VGVzdC1vbmx5LXNlY3JldC1uZXZlci11c2UtaW4tcHJvZHVjdGlvbiE="})
 @Transactional
 class ActivityServiceIntegrationTest {
+  private com.matrixlive.api.ApiModels.UpdateActivityRequest answerMode(String mode) {
+    return new com.matrixlive.api.ApiModels.UpdateActivityRequest(null, null, null, null, null, null, null,
+        null, null, null, null, null, null, null, null, null, null, mode);
+  }
+
+  @Test
+  void buzzerRequiresOpenWindowAndPersistsOneArrivalPerQuestion() {
+    var activity = service.createActivity(new CreateActivityRequest("Buzzer workflow", "Shanghai", Instant.now()));
+    service.updateActivity(activity.id(), answerMode("BUZZER"));
+    assertEquals("BUZZER", service.activity(activity.id()).answerMode());
+    service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
+    var person = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Buzzer", "buzzer-workflow", null));
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
+        java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
+    var request = new com.matrixlive.api.ApiModels.BuzzRequest(person.id(), question.id());
+    assertEquals(java.util.List.of("A"), service.listQuestionControl(activity.id()).getFirst().answers());
+    assertThrows(DomainException.class, () -> service.buzz(activity.id(), request));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
+    service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
+    assertThrows(DomainException.class, () -> service.updateActivity(activity.id(), answerMode("STANDARD")));
+    assertThrows(DomainException.class, () -> service.submitAnswer(activity.id(),
+        new SubmitAnswerRequest(person.id(), question.id(), Set.of("A"), "bypass-buzzer")));
+    var first = service.buzz(activity.id(), request);
+    assertEquals(1, first.responseRank());
+    entityManager.flush();
+    entityManager.clear();
+    assertEquals(first, service.buzz(activity.id(), request));
+    assertEquals(java.util.List.of(first), service.buzzes(activity.id(), question.id()));
+    assertEquals(java.util.List.of(first), service.participantBuzzes(activity.id(), person.id(), question.id()));
+    assertEquals(0, service.participant(activity.id(), person.id()).score());
+    assertTrue(service.submissions(activity.id(), person.id()).isEmpty());
+    assertThrows(DomainException.class, () -> service.deleteQuestion(activity.id(), question.id()));
+    var late = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Late", "late-buzzer", null));
+    activities.findById(activity.id()).orElseThrow().updateControl("QUESTION_OPEN", question.id(), 30, Instant.now().minusSeconds(60));
+    assertThrows(DomainException.class, () -> service.buzz(activity.id(), new com.matrixlive.api.ApiModels.BuzzRequest(late.id(), question.id())));
+    service.control(activity.id(), new ControlRequest("ANSWER_REVEALED", question.id(), 0));
+    assertThrows(DomainException.class, () -> service.buzz(activity.id(), new com.matrixlive.api.ApiModels.BuzzRequest(late.id(), question.id())));
+    assertEquals(first, service.buzz(activity.id(), request));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
+    service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
+    activities.findById(activity.id()).orElseThrow().changeStatus("PAUSED");
+    assertThrows(DomainException.class, () -> service.buzz(activity.id(), new com.matrixlive.api.ApiModels.BuzzRequest(late.id(), question.id())));
+  }
+
+  @Test
+  @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+  void concurrentBuzzesHaveDistinctRanksAndDuplicateRequestsReuseTheirRank() throws Exception {
+    var activity = service.createActivity(new CreateActivityRequest("Concurrent buzzes", "Shanghai", Instant.now()));
+    service.updateActivity(activity.id(), answerMode("BUZZER"));
+    service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
+    var people = new java.util.ArrayList<com.matrixlive.api.ApiModels.ParticipantResponse>();
+    for (int i = 0; i < 8; i++) people.add(com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Player " + i, "buzz-concurrent-" + i, null)));
+    var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
+        java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
+    service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+      var futures = java.util.stream.IntStream.range(0, 16).mapToObj(i -> executor.submit(() -> {
+        start.await();
+        return service.buzz(activity.id(), new com.matrixlive.api.ApiModels.BuzzRequest(people.get(i % 8).id(), question.id()));
+      })).toList();
+      start.countDown();
+      var unique = new java.util.HashMap<UUID, Integer>();
+      for (var future : futures) {
+        var entry = future.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        Integer previous = unique.putIfAbsent(entry.participantId(), entry.responseRank());
+        if (previous != null) assertEquals(previous.intValue(), entry.responseRank());
+      }
+      var ranks = unique.values().stream().sorted().toList();
+      assertEquals(java.util.List.of(1, 2, 3, 4, 5, 6, 7, 8), ranks);
+      assertEquals(ranks, service.buzzes(activity.id(), question.id()).stream().map(com.matrixlive.api.ApiModels.BuzzResponse::responseRank).toList());
+    }
+  }
   @Autowired private ActivityService service;
   @Autowired private QuestionRepository questions;
   @Autowired private ScreenService screens;
@@ -40,10 +114,11 @@ class ActivityServiceIntegrationTest {
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
     var people = new java.util.ArrayList<com.matrixlive.api.ApiModels.ParticipantResponse>();
     for (int i = 0; i < 8; i++) {
-      people.add(service.register(activity.id(), "hall", new RegisterParticipantRequest("Player " + i, "concurrent-" + i, null)));
+      people.add(com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Player " + i, "concurrent-" + i, null)));
     }
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
         java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
     var start = new java.util.concurrent.CountDownLatch(1);
     try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
@@ -67,11 +142,12 @@ class ActivityServiceIntegrationTest {
   void persistsControlAndMeasuresAnswerTimeFromOpeningInsteadOfReveal() {
     var activity = service.createActivity(new CreateActivityRequest("Timing regression", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
-    var person = service.register(activity.id(), "hall", new RegisterParticipantRequest("Player", "timing@example.test", null));
+    var person = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Player", "timing@example.test", null));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
         java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
     var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
         "Timing screen", 1920, 1080)).device();
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     Instant openedAt = Instant.now().minusSeconds(12).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     activities.findById(activity.id()).orElseThrow().updateControl("QUESTION_OPEN", question.id(), 30, openedAt);
     entityManager.flush();
@@ -94,7 +170,7 @@ class ActivityServiceIntegrationTest {
   void winnerConfirmationIssuesRankingAwardsBeforePublishingAndDoesNotIssueTwice() {
     var activity = service.createActivity(new CreateActivityRequest("Winner regression", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
-    var person = service.register(activity.id(), "hall", new RegisterParticipantRequest("Winner", "winner@example.test", null));
+    var person = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Winner", "winner@example.test", null));
     service.createPrizePool(activity.id(), new com.matrixlive.api.ApiModels.PrizePoolRequest("first", "First prize", "RANKING",
         "DIGITAL", "", "https://example.test/redeem", 2, 0, 1, 1, 1, true));
     var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
@@ -116,7 +192,7 @@ class ActivityServiceIntegrationTest {
         java.util.List.of("A", "B"), Set.of("A"), 100, 0, null, 40, true));
     assertThrows(DomainException.class, () -> service.control(activity.id(), new ControlRequest("ANSWER_REVEALED", question.id(), 0)));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
-    var person = service.register(activity.id(), "hall", new RegisterParticipantRequest("Late", "late@example.test", null));
+    var person = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Late", "late@example.test", null));
     activities.findById(activity.id()).orElseThrow().updateControl("QUESTION_OPEN", question.id(), 30, Instant.now().minusSeconds(31));
     assertThrows(DomainException.class, () -> service.submitAnswer(activity.id(),
         new SubmitAnswerRequest(person.id(), question.id(), Set.of("A"), "late-key")));
@@ -126,14 +202,15 @@ class ActivityServiceIntegrationTest {
   void isolatesRegistrationAndReplaysIdempotentAnswers() {
     var activity = service.createActivity(new CreateActivityRequest("API 测试活动", "上海", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("south", "South Hall", 20, true));
-    var participant = service.register(activity.id(), "south", new RegisterParticipantRequest("测试用户", "138 0000 2048", "QA"));
-    assertThrows(DomainException.class, () -> service.register(activity.id(), "south",
+    var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "south", new RegisterParticipantRequest("测试用户", "138 0000 2048", "QA"));
+    assertThrows(DomainException.class, () -> com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "south",
         new RegisterParticipantRequest("测试用户", "13800002048", "QA")));
 
     Question question = questions.save(new Question(activity.id(), "MULTIPLE", "哪些原则可信？", "A|B|C|D", "A,B,D", 100));
     String idempotencyKey = UUID.randomUUID().toString();
     assertThrows(DomainException.class, () -> service.submitAnswer(activity.id(),
         new SubmitAnswerRequest(participant.id(), question.getId(), Set.of("A", "B", "D"), idempotencyKey)));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.getId(), 30));
     var first = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.getId(), Set.of("A", "B", "D"), idempotencyKey));
     var replay = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.getId(), Set.of("A", "B", "D"), idempotencyKey));
@@ -160,6 +237,7 @@ class ActivityServiceIntegrationTest {
     var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
         "Main stage", 1920, 1080)).device();
 
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 42));
     var questionDisplay = screens.currentDisplay(activity.id(), device.id());
     assertEquals(ScreenDisplayMode.QUESTION, questionDisplay.mode());
@@ -183,6 +261,7 @@ class ActivityServiceIntegrationTest {
     var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
         "Answer stage", 1920, 1080)).device();
 
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 42));
     var opened = screens.currentDisplay(activity.id(), device.id());
     assertEquals(java.util.List.of("https://cdn.example.test/question.png"), opened.data().get("mediaUrls"));

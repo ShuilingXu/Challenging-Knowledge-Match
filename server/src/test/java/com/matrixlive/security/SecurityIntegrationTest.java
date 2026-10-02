@@ -21,6 +21,38 @@ import org.springframework.test.web.servlet.MvcResult;
 @SpringBootTest(properties = {"APP_BOOTSTRAP_PASSWORD=ChangeMe!2026", "app.security.jwt.secret=VGVzdC1vbmx5LXNlY3JldC1uZXZlci11c2UtaW4tcHJvZHVjdGlvbiE="})
 @AutoConfigureMockMvc
 class SecurityIntegrationTest {
+  @Autowired private JwtTokenService jwt;
+
+  @Test
+  void participantsCanBuzzOnlyForThemselvesAndCannotReadHostQueue() throws Exception {
+    var activity = service.createActivity(new com.matrixlive.api.ApiModels.CreateActivityRequest("Buzzer security", "Shanghai", java.time.Instant.now()));
+    service.updateActivity(activity.id(), new com.matrixlive.api.ApiModels.UpdateActivityRequest(null, null, null, null, null,
+        null, null, null, null, null, null, null, null, null, null, null, null, "BUZZER"));
+    service.createVenue(activity.id(), new com.matrixlive.api.ApiModels.VenueRequest("hall", "Hall", 20, true));
+    var person = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new com.matrixlive.api.ApiModels.RegisterParticipantRequest("Player", "buzz-security", null));
+    var other = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new com.matrixlive.api.ApiModels.RegisterParticipantRequest("Other", "buzz-security-other", null));
+    var question = service.createQuestion(activity.id(), new com.matrixlive.api.ApiModels.QuestionWriteRequest("SINGLE", "Pick A",
+        java.util.List.of("A", "B"), java.util.Set.of("A"), 100, 0, null, 40, true));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
+    service.control(activity.id(), new com.matrixlive.api.ApiModels.ControlRequest("QUESTION_OPEN", question.id(), 30));
+    String token = jwt.issueParticipantToken(activity.id(), person.id()).value();
+    String path = "/api/activities/" + activity.id();
+    mvc.perform(post(path + "/buzzes").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+        .content(objectMapper.writeValueAsString(new com.matrixlive.api.ApiModels.BuzzRequest(other.id(), question.id())))).andExpect(status().isForbidden());
+    mvc.perform(post(path + "/buzzes").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+        .content(objectMapper.writeValueAsString(new com.matrixlive.api.ApiModels.BuzzRequest(person.id(), question.id())))).andExpect(status().isOk());
+    mvc.perform(get(path + "/participants/" + person.id() + "/buzzes").param("questionId", question.id().toString())
+        .header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+    mvc.perform(get(path + "/participants/" + other.id() + "/buzzes").param("questionId", question.id().toString())
+        .header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
+    mvc.perform(get(path + "/questions/" + question.id() + "/buzzes").header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
+    mvc.perform(post(path + "/questions/" + question.id() + "/buzzes/" + person.id() + "/grade").header("Authorization", "Bearer " + token)
+        .contentType(MediaType.APPLICATION_JSON).content("{\"correct\":true}")).andExpect(status().isForbidden());
+    mvc.perform(get("/api/activities/" + UUID.randomUUID() + "/participants/" + person.id() + "/buzzes").param("questionId", question.id().toString())
+        .header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
+    String admin = accessToken(login("sysadmin", "ChangeMe!2026"));
+    mvc.perform(get(path + "/questions/" + question.id() + "/buzzes").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
+  }
   @Autowired private com.matrixlive.security.auth.HumanChallengeRepository challenges;
   @Autowired private MockMvc mvc;
   @Autowired private ObjectMapper objectMapper;
@@ -34,10 +66,11 @@ class SecurityIntegrationTest {
     UUID activityId = activities.findAll().getFirst().getId();
     String path = "/api/activities/" + activityId;
     String staffToken = accessToken(login("event-staff", "ChangeMe!2026"));
-    var person = service.register(activityId, "south", new com.matrixlive.api.ApiModels.RegisterParticipantRequest(
+    var person = com.matrixlive.service.QuizTestSupport.register(service, activityId, "south", new com.matrixlive.api.ApiModels.RegisterParticipantRequest(
         "Staff score test", UUID.randomUUID() + "@test.example", null));
     var question = service.createQuestion(activityId, new com.matrixlive.api.ApiModels.QuestionWriteRequest("TEXT", "Explain",
         java.util.List.of(), java.util.Set.of(), 100, 20, null, 40, true));
+    com.matrixlive.service.QuizTestSupport.start(service, activityId);
     service.control(activityId, new com.matrixlive.api.ApiModels.ControlRequest("QUESTION_OPEN", question.id(), 30));
     var submission = service.submitAnswer(activityId, new com.matrixlive.api.ApiModels.SubmitAnswerRequest(person.id(),
         question.id(), java.util.Set.of("My answer"), UUID.randomUUID().toString()));

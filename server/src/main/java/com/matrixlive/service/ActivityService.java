@@ -6,6 +6,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.matrixlive.domain.Activity;
+import com.matrixlive.domain.BuzzEntry;
+import com.matrixlive.repository.BuzzEntryRepository;
 import com.matrixlive.domain.AnswerSubmission;
 import com.matrixlive.domain.LotteryChance;
 import com.matrixlive.domain.LotteryDraw;
@@ -93,6 +95,7 @@ public class ActivityService {
   private final QuestionSetRepository questionSets;
   private final QuestionSetItemRepository questionSetItems;
   private final AnswerSubmissionRepository submissions;
+  private final BuzzEntryRepository buzzEntries;
   private final ScoreLedgerRepository scoreLedgers;
   private final PrizePoolRepository prizePools;
   private final PrizeAwardRepository awards;
@@ -105,7 +108,7 @@ public class ActivityService {
   public ActivityService(ActivityRepository activities, ActivityMembershipRepository memberships, VenueRepository venues,
       RegistrationFieldRepository registrationFields, ParticipantRepository participants,
       QuestionRepository questions, QuestionSetRepository questionSets, QuestionSetItemRepository questionSetItems,
-      AnswerSubmissionRepository submissions, ScoreLedgerRepository scoreLedgers,
+      AnswerSubmissionRepository submissions, BuzzEntryRepository buzzEntries, ScoreLedgerRepository scoreLedgers,
       PrizePoolRepository prizePools, PrizeAwardRepository awards, LotteryDrawRepository lotteryDraws,
       LotteryChanceRepository lotteryChances, RealtimeEventBus realtime, ObjectMapper objectMapper, ScreenService screens) {
     this.activities = activities;
@@ -117,6 +120,7 @@ public class ActivityService {
     this.questionSets = questionSets;
     this.questionSetItems = questionSetItems;
     this.submissions = submissions;
+    this.buzzEntries = buzzEntries;
     this.scoreLedgers = scoreLedgers;
     this.prizePools = prizePools;
     this.awards = awards;
@@ -153,6 +157,8 @@ public class ActivityService {
     configureScoring(activity, request.scoringMode(), request.correctScorePercent(), request.incorrectScorePercent(),
         request.correctRankRules(), request.incorrectRankRules());
     configureActivityHierarchy(activity, request.parentActivityId(), request.activityType());
+    if (Set.of("QUIZ", "LOTTERY").contains(activity.getActivityType())) activity.shareParticipants();
+    configureAnswerMode(activity, request.answerMode());
     activities.save(activity);
     createInitiatorMembership(activity.getId());
     return toActivity(activity);
@@ -160,7 +166,8 @@ public class ActivityService {
 
   @Transactional
   public ActivityResponse updateActivity(UUID activityId, UpdateActivityRequest request) {
-    Activity activity = requireActivity(activityId);
+    Activity activity = activities.findForUpdate(activityId).orElseThrow(() -> notFound("Activity not found"));
+    configureAnswerMode(activity, request.answerMode());
     Instant startsAt = request.startsAt() == null ? activity.getStartsAt() : request.startsAt();
     Instant endsAt = Boolean.TRUE.equals(request.clearEndsAt()) ? null : request.endsAt() == null ? activity.getEndsAt() : request.endsAt();
     validateTimeRange(startsAt, endsAt);
@@ -176,6 +183,7 @@ public class ActivityService {
         request.activityType() == null ? activity.getActivityType() : request.activityType());
     configureScoring(activity, request.scoringMode(), request.correctScorePercent(), request.incorrectScorePercent(),
         request.correctRankRules(), request.incorrectRankRules());
+    broadcast(activityId, "activity.updated");
     return toActivity(activity);
   }
 
@@ -184,11 +192,22 @@ public class ActivityService {
     Activity activity = requireActivity(activityId);
     String next = normalizeEnum(request.status(), ACTIVITY_STATUSES, "activity status");
     ensureStatusTransition(activity.getStatus(), next);
+    if ("LIVE".equals(next) && activity.getParentActivityId() != null
+        && !Set.of("LIVE", "REGISTRATION_OPEN").contains(requireActivity(activity.getParentActivityId()).getStatus())) {
+      throw conflict("请先启用或恢复母活动，再开始子活动");
+    }
     activity.changeStatus(next);
     if ("PAUSED".equals(next)) {
       // Resume requires staff to explicitly reopen a question with a fresh timer.
       activity.updateControl("LOBBY", null, 0, Instant.now());
       synchronizeControlledScreens(activityId, controlState(activityId));
+      for (Activity child : activities.findByParentActivityId(activityId)) {
+        if (!"LIVE".equals(child.getStatus())) continue;
+        child.changeStatus("PAUSED");
+        child.updateControl("LOBBY", null, 0, Instant.now());
+        synchronizeControlledScreens(child.getId(), controlState(child.getId()));
+        broadcast(child.getId(), "activity.status_changed");
+      }
     }
     if ("FINISHED".equals(next) || "CANCELLED".equals(next)) closeSubActivities(activityId, next);
     broadcast(activityId, "activity.status_changed");
@@ -529,6 +548,7 @@ public class ActivityService {
   public void deleteQuestion(UUID activityId, UUID questionId) {
     Question question = requireQuestion(activityId, questionId);
     if (submissions.existsByActivityIdAndQuestionId(activityId, questionId)) throw conflict("Question has submissions and cannot be deleted");
+    if (buzzEntries.countByActivityIdAndQuestionId(activityId, questionId) > 0) throw conflict("题目已有抢答记录，无法删除");
     questions.delete(question);
   }
 
@@ -536,6 +556,7 @@ public class ActivityService {
   public AnswerResult submitAnswer(UUID activityId, SubmitAnswerRequest request) {
     Activity activity = requireActivity(activityId);
     ensureAnsweringAllowed(activity);
+    if ("BUZZER".equals(activity.getAnswerMode())) throw conflict("抢答模式请使用抢答按钮");
     String idempotencyKey = normalizeIdempotencyKey(request.idempotencyKey());
     AnswerSubmission previous = submissions.findByActivityIdAndIdempotencyKey(activityId, idempotencyKey)
         .orElse(null);
@@ -656,19 +677,29 @@ public class ActivityService {
 
   @Transactional(readOnly = true)
   public List<ScoreboardEntry> scoreboard(UUID activityId) {
-    requireActivity(activityId);
-    List<Participant> ordered = participants.findByActivityId(activityId).stream().sorted(participantOrder()).toList();
+    Activity activity = requireActivity(activityId);
+    boolean roundScores = "QUIZ".equals(activity.getActivityType()) && activity.isSharedParticipants();
+    Map<UUID, ScoreLedgerRepository.ParticipantScore> scores = roundScores ? scoreLedgers.activityScores(activityId).stream()
+        .collect(java.util.stream.Collectors.toMap(ScoreLedgerRepository.ParticipantScore::getParticipantId, item -> item)) : Map.of();
+    java.util.function.ToIntFunction<Participant> points = p -> roundScores
+        ? scores.containsKey(p.getId()) ? Math.toIntExact(scores.get(p.getId()).getTotal()) : 0 : p.getScore();
+    Comparator<Participant> order = roundScores ? Comparator.comparingInt(points).reversed()
+        .thenComparing((Participant p) -> scores.containsKey(p.getId()) ? scores.get(p.getId()).getLastScoreAt() : null,
+            Comparator.nullsLast(Comparator.naturalOrder()))
+        .thenComparing(Participant::getRegisteredAt).thenComparing(Participant::getId) : participantOrder();
+    List<Participant> ordered = participants.findByActivityId(participantScopeActivity(activityId)).stream()
+        .sorted(order).toList();
     return IntStream.range(0, ordered.size()).mapToObj(index -> {
       Participant participant = ordered.get(index);
       return new ScoreboardEntry(index + 1, participant.getId(), participant.getName(), participant.getVenue(),
-          participant.getScore());
+          points.applyAsInt(participant));
     }).toList();
   }
 
   @Transactional(readOnly = true)
   public QuestionResponseStats questionResponseStats(UUID activityId, UUID questionId) {
     requireQuestion(activityId, questionId);
-    List<Participant> activityParticipants = participants.findByActivityId(activityId);
+    List<Participant> activityParticipants = participants.findByActivityId(participantScopeActivity(activityId));
     Map<UUID, Participant> participantById = new HashMap<>();
     int eligibleParticipantCount = 0;
     for (Participant participant : activityParticipants) {
@@ -695,8 +726,9 @@ public class ActivityService {
 
   @Transactional
   public ControlState control(UUID activityId, ControlRequest request) {
-    Activity activity = requireActivity(activityId);
+    Activity activity = activities.findForUpdate(activityId).orElseThrow(() -> notFound("Activity not found"));
     String stage = normalizeEnum(request.stage(), Set.of("LOBBY", "QUESTION_OPEN", "ANSWER_REVEALED", "SCOREBOARD", "WINNERS", "ENDED"), "Control stage");
+    if ("QUESTION_OPEN".equals(stage)) ensureAnsweringAllowed(activity);
     if (Set.of("QUESTION_OPEN", "ANSWER_REVEALED").contains(stage) && request.questionId() == null) {
       throw badRequest("A question is required for this stage");
     }
@@ -780,6 +812,10 @@ public class ActivityService {
       payload.put("message", "工作人员将在控场台下发下一步内容。");
     }
     screens.publishActivityDisplay(activityId, mode, payload);
+    Activity source = requireActivity(activityId);
+    if (source.isSharedParticipants() && source.getParentActivityId() != null) {
+      screens.publishActivityDisplay(source.getParentActivityId(), mode, payload);
+    }
   }
 
   @Transactional(readOnly = true)
@@ -814,7 +850,9 @@ public class ActivityService {
 
   @Transactional
   public PrizePoolResponse createPrizePool(UUID activityId, PrizePoolRequest request) {
-    requireActivity(activityId);
+    Activity owner = requireActivity(activityId);
+    if ("LOTTERY".equals(owner.getActivityType()) && "RANKING".equalsIgnoreCase(request.purpose())) throw conflict("摇奖环节请配置摇奖奖池，排名奖励应放在答题环节");
+    if ("QUIZ".equals(owner.getActivityType()) && owner.isSharedParticipants() && "LOTTERY".equalsIgnoreCase(request.purpose())) throw conflict("自助抽奖和摇奖请放在摇奖子活动");
     String code = normalizeCode(request.code(), "prize pool code");
     if (prizePools.findByActivityIdAndCode(activityId, code).isPresent()) throw conflict("Prize pool code already exists");
     PrizeValues values = prizeValues(request.purpose(), request.deliveryType(), request.totalQuantity(), request.minScore(),
@@ -886,11 +924,12 @@ public class ActivityService {
     PrizePool pool = requirePrizePoolForUpdate(activityId, poolId);
     if (!"RANKING".equals(pool.getPurpose())) throw badRequest("Prize pool is not a ranking pool");
     if (pool.getRankFrom() == null || pool.getRankTo() == null) throw badRequest("Ranking pool requires rank range");
-    List<Participant> ranked = participants.findByActivityId(activityId).stream().sorted(participantOrder()).toList();
+    List<ScoreboardEntry> ranked = scoreboard(activityId);
     List<AwardDetailResponse> result = new ArrayList<>();
     for (int index = pool.getRankFrom() - 1; index < ranked.size() && index < pool.getRankTo(); index++) {
-      Participant participant = ranked.get(index);
-      if (!pool.isAvailableFor(participant.getScore())) break;
+      ScoreboardEntry entry = ranked.get(index);
+      Participant participant = requireParticipant(activityId, entry.participantId());
+      if (!pool.isAvailableFor(entry.score())) break;
       if (awards.existsByActivityIdAndPrizePoolIdAndParticipantId(activityId, pool.getId(), participant.getId())) continue;
       PrizeAward award = issuePoolAward(activityId, participant, pool, "Ranking #" + (index + 1));
       result.add(toAwardDetail(award));
@@ -1031,7 +1070,7 @@ public class ActivityService {
 
   private UUID participantScopeActivity(UUID activityId) {
     Activity activity = requireActivity(activityId);
-    return "LOTTERY".equals(activity.getActivityType()) && activity.getParentActivityId() != null
+    return activity.isSharedParticipants() && activity.getParentActivityId() != null
         ? activity.getParentActivityId() : activityId;
   }
 
@@ -1170,29 +1209,26 @@ public class ActivityService {
   }
 
   private void ensureRegistrationAllowed(Activity activity) {
-    if (Set.of("PAUSED", "FINISHED", "CANCELLED").contains(activity.getStatus())) {
-      throw conflict("Registration is closed for this activity");
+    if (!Set.of("REGISTRATION_OPEN", "LIVE").contains(activity.getStatus())) {
+      throw conflict("请先启用母活动报名；活动暂停或结束后不再接受登记");
     }
   }
 
   private void ensureAnsweringAllowed(Activity activity) {
     if ("LOTTERY".equals(activity.getActivityType())) throw conflict("Lottery sub-activities do not accept quiz answers");
-    if (Set.of("PAUSED", "FINISHED", "CANCELLED").contains(activity.getStatus())) {
-      throw conflict("Answering is closed for this activity");
+    ensureLiveOperation(activity);
+  }
+
+  private void ensureLiveOperation(Activity activity) {
+    if (!"LIVE".equals(activity.getStatus())) throw conflict("请先开始活动，再进行答题或摇奖");
+    if (activity.getParentActivityId() != null) {
+      Activity parent = requireActivity(activity.getParentActivityId());
+      if (!Set.of("LIVE", "REGISTRATION_OPEN").contains(parent.getStatus())) throw conflict("母活动尚未启用、已暂停或已结束");
     }
   }
 
   private void ensureLotteryAllowed(Activity activity) {
-    if (Set.of("PAUSED", "FINISHED", "CANCELLED").contains(activity.getStatus())) {
-      throw conflict("Lottery is closed for this activity");
-    }
-    if ("LOTTERY".equals(activity.getActivityType())) {
-      Activity parent = requireActivity(activity.getParentActivityId());
-      if (!"LIVE".equals(activity.getStatus())
-          || !("LIVE".equals(parent.getStatus()) || "REGISTRATION_OPEN".equals(parent.getStatus()))) {
-        throw conflict("The main activity and lottery sub-activity must be enabled before drawing");
-      }
-    }
+    ensureLiveOperation(activity);
   }
 
   private void ensureMatchingReplay(AnswerSubmission previous, SubmitAnswerRequest request) {
@@ -1427,6 +1463,15 @@ public class ActivityService {
 
   private void configureActivityHierarchy(Activity activity, UUID parentActivityId, String activityType) {
     String type = normalizeEnum(activityType == null ? "EVENT" : activityType, ACTIVITY_TYPES, "activity type");
+    if (activity.getId() != null && (!type.equals(activity.getActivityType())
+        || !java.util.Objects.equals(parentActivityId, activity.getParentActivityId()))) {
+      if (participants.countByActivityId(activity.getId()) > 0 || questions.countByActivityId(activity.getId()) > 0
+          || !prizePools.findByActivityIdOrderByCreatedAtAsc(activity.getId()).isEmpty()
+          || !scoreLedgers.findByActivityIdOrderByCreatedAtDesc(activity.getId()).isEmpty()
+          || !awards.findByActivityIdOrderByAwardedAtDesc(activity.getId()).isEmpty()) {
+        throw conflict("已有人员、题目、积分或奖池，不能修改活动类型或所属母活动");
+      }
+    }
     if (parentActivityId != null && parentActivityId.equals(activity.getId())) {
       throw badRequest("An activity cannot be its own parent");
     }
@@ -1438,6 +1483,9 @@ public class ActivityService {
     }
     if (parentActivityId != null) {
       Activity parent = requireActivity(parentActivityId);
+      if (Set.of("FINISHED", "CANCELLED").contains(parent.getStatus())
+          && (activity.getId() == null || !java.util.Objects.equals(parentActivityId, activity.getParentActivityId())
+              || !type.equals(activity.getActivityType()))) throw conflict("已结束或终止的母活动不能新增或接收子活动");
       if (parent.getParentActivityId() != null || !"EVENT".equals(parent.getActivityType())) {
         throw badRequest("Only a top-level activity can own sub-activities");
       }
@@ -1531,6 +1579,17 @@ public class ActivityService {
   private void broadcast(UUID activityId, String type) {
     realtime.send("/topic/activities/" + activityId,
         Map.of("type", type, "sentAt", Instant.now().toString()));
+    Activity source = activities.findById(activityId).orElse(null);
+    if (source != null && (type.startsWith("answer.") || type.startsWith("score.") || type.equals("participant.registered"))) {
+      UUID root = source.isSharedParticipants() ? source.getParentActivityId() : "EVENT".equals(source.getActivityType()) ? activityId : null;
+      if (root != null) {
+        Map<String, String> update = Map.of("type", "score.updated", "sentAt", Instant.now().toString());
+        if (!root.equals(activityId)) realtime.send("/topic/activities/" + root, update);
+        for (Activity child : activities.findByParentActivityId(root)) {
+          if (child.isSharedParticipants() && !child.getId().equals(activityId)) realtime.send("/topic/activities/" + child.getId(), update);
+        }
+      }
+    }
   }
 
   private boolean canViewActivity(Activity activity) {
@@ -1566,7 +1625,111 @@ public class ActivityService {
         activity.getClientThemeColor(), activity.getClientHeroImageUrl(), activity.getClientBackgroundImageUrl(),
         activity.getCreatedAt(), activity.getUpdatedAt(), activity.getParentActivityId(), activity.getActivityType(),
         activity.getActiveQuestionSetId(), viewerRole, activity.getScoringMode(), activity.getCorrectScorePercent(),
-        activity.getIncorrectScorePercent(), rules.getOrDefault("correct", List.of()), rules.getOrDefault("incorrect", List.of()));
+        activity.getIncorrectScorePercent(), rules.getOrDefault("correct", List.of()), rules.getOrDefault("incorrect", List.of()), activity.getAnswerMode(),
+        participantScopeActivity(activity.getId()), "EVENT".equals(activity.getActivityType())
+            && (questions.countByActivityId(activity.getId()) > 0 || !prizePools.findByActivityIdOrderByCreatedAtAsc(activity.getId()).isEmpty()));
+  }
+
+  private void configureAnswerMode(Activity activity, String mode) {
+    if (mode == null) return;
+    String next = normalizeEnum(mode, Set.of("STANDARD", "BUZZER"), "answer mode");
+    if (!next.equals(activity.getAnswerMode()) && "QUESTION_OPEN".equals(activity.getControlStage())) {
+      throw conflict("请先关闭当前题目再切换答题模式");
+    }
+    activity.updateAnswerMode(next);
+  }
+
+  @Transactional
+  public BuzzResponse buzz(UUID activityId, BuzzRequest request) {
+    // Serialize arrivals across API nodes; rank and duplicate checks share this DB lock.
+    Activity activity = activities.findForUpdate(activityId).orElseThrow(() -> notFound("Activity not found"));
+    ensureAnsweringAllowed(activity);
+    if (!"BUZZER".equals(activity.getAnswerMode())) throw conflict("当前活动未启用抢答模式");
+    Participant participant = requireParticipant(activityId, request.participantId());
+    if (!"ACTIVE".equals(participant.getStatus())) throw conflict("Participant is disabled");
+    BuzzEntry previous = buzzEntries.findByActivityIdAndQuestionIdAndParticipantId(activityId, request.questionId(), request.participantId()).orElse(null);
+    if (previous != null) return toBuzz(previous, participant);
+    ControlState state = controlState(activityId);
+    if (!"QUESTION_OPEN".equals(state.stage()) || !request.questionId().equals(state.questionId()) || remainingSeconds(state) <= 0) {
+      throw conflict("当前题目尚未开放抢答或抢答时间已结束");
+    }
+    if (orderedQuestionsForActivity(activityId).stream().noneMatch(q -> q.getId().equals(request.questionId()))) {
+      throw conflict("当前题目不可抢答");
+    }
+    int rank = Math.toIntExact(buzzEntries.countByActivityIdAndQuestionId(activityId, request.questionId()) + 1);
+    BuzzEntry entry = buzzEntries.save(new BuzzEntry(activityId, request.questionId(), participant.getId(), rank));
+    broadcast(activityId, "buzz.received");
+    return toBuzz(entry, participant);
+  }
+
+  @Transactional(readOnly = true)
+  public List<BuzzResponse> buzzes(UUID activityId, UUID questionId) {
+    requireQuestion(activityId, questionId);
+    return buzzEntries.findByActivityIdAndQuestionIdOrderByResponseRankAsc(activityId, questionId).stream()
+        .map(entry -> toBuzz(entry, requireParticipant(activityId, entry.getParticipantId()))).toList();
+  }
+
+  @Transactional(readOnly = true)
+  public List<BuzzResponse> participantBuzzes(UUID activityId, UUID participantId, UUID questionId) {
+    Participant participant = requireParticipant(activityId, participantId);
+    return buzzEntries.findByActivityIdAndQuestionIdAndParticipantId(activityId, questionId, participantId).stream()
+        .map(entry -> toBuzz(entry, participant)).toList();
+  }
+
+  private BuzzResponse toBuzz(BuzzEntry entry, Participant participant) {
+    return new BuzzResponse(participant.getId(), participant.getName(), participant.getVenue(), entry.getResponseRank(), entry.getBuzzedAt(), entry.getAwardedPoints(), entry.getCorrect(), entry.getFeedback());
+  }
+
+  @Transactional
+  public BuzzResponse gradeBuzz(UUID activityId, UUID questionId, UUID participantId, GradeBuzzRequest request) {
+    Activity activity = activities.findForUpdate(activityId).orElseThrow(() -> notFound("Activity not found"));
+    BuzzEntry entry = buzzEntries.findByActivityIdAndQuestionIdAndParticipantId(activityId, questionId, participantId)
+        .orElseThrow(() -> notFound("抢答记录不存在"));
+    Question question = requireQuestion(activityId, questionId);
+    Participant participant = requireParticipantForUpdate(activityId, participantId);
+    int points = applyScoring(activity, question.getFullScore(), Boolean.TRUE.equals(request.correct()) ? question.getFullScore() : 0, entry.getResponseRank());
+    int delta = points - (entry.getAwardedPoints() == null ? 0 : entry.getAwardedPoints());
+    entry.grade(Boolean.TRUE.equals(request.correct()), points, cleanOptional(request.feedback()));
+    if (delta != 0) {
+      participant.addScore(delta);
+      scoreLedgers.save(new ScoreLedger(activityId, participantId, questionId, null, delta, "BUZZ_GRADE", Boolean.TRUE.equals(request.correct()) ? "抢答判对" : "抢答判错"));
+    }
+    broadcast(activityId, "buzz.graded");
+    if (activity.isSharedParticipants()) broadcast(activity.getParentActivityId(), "score.updated");
+    events.publishEvent(new SubmissionScreenUpdater.LiveDataChanged(activityId, questionId));
+    return toBuzz(entry, participant);
+  }
+
+  @Transactional
+  public AwardDetailResponse hostDraw(UUID activityId, HostDrawRequest request) {
+    Activity activity = activities.findForUpdate(activityId).orElseThrow(() -> notFound("Activity not found"));
+    String key = "host:" + normalizeIdempotencyKey(request.idempotencyKey());
+    if (key.length() > 160) throw badRequest("幂等键过长");
+    LotteryDraw previous = lotteryDraws.findByActivityIdAndIdempotencyKey(activityId, key).orElse(null);
+    if (previous != null) {
+      if (!previous.getPrizePoolId().equals(request.prizePoolId())) throw conflict("幂等键已用于另一奖池");
+      return toAwardDetail(requireAward(activityId, previous.getPrizeAwardId()));
+    }
+    ensureLotteryAllowed(activity);
+    if (!"LOTTERY".equals(activity.getActivityType()) && !"EVENT".equals(activity.getActivityType())) throw conflict("请在摇奖子活动中进行主持人摇奖");
+    PrizePool configured = requirePrizePool(activityId, request.prizePoolId());
+    if (!"LOTTERY".equals(configured.getPurpose())) throw conflict("请选择摇奖奖池");
+    List<Participant> eligible = participants.findByActivityId(participantScopeActivity(activityId)).stream()
+        .filter(p -> "ACTIVE".equals(p.getStatus()) && configured.isAvailableFor(p.getScore()))
+        .filter(p -> !awards.existsByActivityIdAndPrizePoolIdAndParticipantId(activityId, configured.getId(), p.getId())).toList();
+    if (eligible.isEmpty()) throw conflict("没有符合积分条件且尚未在此奖池获奖的参与者");
+    Participant selected = eligible.get(LOTTERY_RANDOM.nextInt(eligible.size()));
+    Participant winner = requireParticipantForUpdate(activityId, selected.getId());
+    PrizePool pool = requirePrizePoolForUpdate(activityId, request.prizePoolId());
+    if (!"ACTIVE".equals(winner.getStatus()) || !pool.isAvailableFor(winner.getScore())
+        || awards.existsByActivityIdAndPrizePoolIdAndParticipantId(activityId, pool.getId(), winner.getId())) {
+      throw conflict("摇奖资格或库存已变化，请重试");
+    }
+    PrizeAward award = issuePoolAward(activityId, winner, pool, "主持人摇奖");
+    lotteryDraws.save(new LotteryDraw(activityId, winner.getId(), pool.getId(), award.getId(), key));
+    broadcast(activityId, "lottery.host_drawn");
+    synchronizeControlledScreens(activityId, new ControlState("WINNERS", null, 0, Instant.now()));
+    return toAwardDetail(award);
   }
 
   private void configureScoring(Activity activity, String rawMode, Integer rawCorrect, Integer rawIncorrect,

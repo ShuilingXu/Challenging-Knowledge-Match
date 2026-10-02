@@ -31,7 +31,7 @@ class ReviewRegressionTest {
   }
 
   private ParticipantResponse person(UUID activityId) {
-    return service.register(
+    return com.matrixlive.service.QuizTestSupport.register(service,
         activityId,
         "a",
         new RegisterParticipantRequest("Player", UUID.randomUUID().toString(), null));
@@ -48,6 +48,7 @@ class ReviewRegressionTest {
     activities.findById(a.id()).orElseThrow().updateScoring("SIMPLE", 100, 50, "{}");
     var p = person(a.id());
     var q = service.createQuestion(a.id(), text("City?"));
+    com.matrixlive.service.QuizTestSupport.start(service, a.id());
     service.control(a.id(), new ControlRequest("QUESTION_OPEN", q.id(), 30));
     var answer =
         service.submitAnswer(
@@ -110,6 +111,7 @@ class ReviewRegressionTest {
     var p = person(a.id());
     var q = service.createQuestion(a.id(), text("Question"));
     service.changeActivityStatus(a.id(), new ChangeActivityStatusRequest("LIVE"));
+    com.matrixlive.service.QuizTestSupport.start(service, a.id());
     service.control(a.id(), new ControlRequest("QUESTION_OPEN", q.id(), 30));
     service.changeActivityStatus(a.id(), new ChangeActivityStatusRequest("PAUSED"));
     assertThrows(
@@ -158,6 +160,7 @@ class ReviewRegressionTest {
                 null,
                 40,
                 true));
+    com.matrixlive.service.QuizTestSupport.start(service, a.id());
     service.control(a.id(), new ControlRequest("QUESTION_OPEN", q.id(), 30));
     service.submitAnswer(
         a.id(), new SubmitAnswerRequest(p.id(), q.id(), Set.of("[A] text"), "bracket"));
@@ -173,7 +176,7 @@ class ReviewRegressionTest {
     assertThrows(
         DomainException.class,
         () ->
-            service.register(
+            com.matrixlive.service.QuizTestSupport.register(service,
                 a.id(), "b", new RegisterParticipantRequest("Duplicate", p.contact(), null)));
     person(a.id());
     assertThrows(
@@ -188,7 +191,7 @@ class ReviewRegressionTest {
         a.id(),
         new RegistrationFieldRequest("hobbies", "Hobbies", "CHECKBOX", List.of("A", "B"), true, 0));
     var p =
-        service.register(
+        com.matrixlive.service.QuizTestSupport.register(service,
             a.id(),
             "a",
             new RegisterParticipantRequest(
@@ -197,7 +200,7 @@ class ReviewRegressionTest {
     assertThrows(
         DomainException.class,
         () ->
-            service.register(
+            com.matrixlive.service.QuizTestSupport.register(service,
                 a.id(),
                 "a",
                 new RegisterParticipantRequest(

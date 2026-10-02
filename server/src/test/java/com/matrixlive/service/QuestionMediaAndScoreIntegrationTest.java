@@ -76,9 +76,10 @@ class QuestionMediaAndScoreIntegrationTest {
   void awardsTheConfiguredScoreAfterEditing() {
     var activity = service.createActivity(new CreateActivityRequest("Question score", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 10, true));
-    var participant = service.register(activity.id(), "hall", new RegisterParticipantRequest("Test", "13900006789", ""));
+    var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Test", "13900006789", ""));
     var question = service.createQuestion(activity.id(), request(25, List.of()));
     service.updateQuestion(activity.id(), question.id(), request(37, null));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 60));
     var result = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.id(),
         Set.of("A"), UUID.randomUUID().toString()));

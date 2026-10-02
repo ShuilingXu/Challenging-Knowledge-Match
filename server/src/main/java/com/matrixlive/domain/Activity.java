@@ -54,6 +54,10 @@ public class Activity {
   /** Answer scoring configuration. Percentages are applied to each question's full score. */
   @Column(name = "scoring_mode", nullable = false, length = 16)
   private String scoringMode = "SIMPLE";
+  @Column(name = "answer_mode", nullable = false, length = 16)
+  private String answerMode = "STANDARD";
+  @Column(name = "shared_participants", nullable = false)
+  private boolean sharedParticipants;
   @Column(name = "correct_score_percent", nullable = false)
   private int correctScorePercent = 100;
   @Column(name = "incorrect_score_percent", nullable = false)
@@ -117,6 +121,10 @@ public class Activity {
   public String getClientHeroImageUrl() { return clientHeroImageUrl; }
   public String getClientBackgroundImageUrl() { return clientBackgroundImageUrl; }
   public String getScoringMode() { return scoringMode; }
+  public String getAnswerMode() { return answerMode; }
+  public boolean isSharedParticipants() { return sharedParticipants || "LOTTERY".equals(activityType); }
+  public void shareParticipants() { sharedParticipants = true; }
+  public void updateAnswerMode(String mode) { this.answerMode = mode; }
   public int getCorrectScorePercent() { return correctScorePercent; }
   public int getIncorrectScorePercent() { return incorrectScorePercent; }
   public String getScoringRules() { return scoringRules; }

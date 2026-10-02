@@ -19,7 +19,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { activityActions, activityStatusLabels, availableActivities, activityEntry, participantActivityId, participantMatches } from "./activity-flow";
+import { activityActions, activityStatusLabels, availableActivities, activityEntry, participantActivityId, participantMatches, activityNavigation } from "./activity-flow";
 import {
   Activity,
   ArrowDown,
@@ -411,6 +411,11 @@ function StaffApp() {
   useEffect(() => {
     reloadActivities();
   }, [reloadActivities]);
+  const refreshActivityInfo = useCallback(async () => {
+    try { setActivities((await api.activities()).filter((item) => item.viewerRole)); }
+    catch (cause) { setError(cause.message); }
+  }, []);
+  useActivityStream(activityId, refreshActivityInfo, undefined, setError);
   useEffect(() => {
     if (activityId) localStorage.setItem("matrix.activity-id", activityId);
   }, [activityId]);
@@ -436,6 +441,7 @@ function StaffApp() {
         onClick={() => setSidebarOpen(false)}
       />
       <StaffSidebar
+        activity={currentActivity}
         canManage={canManage}
         user={user}
         open={sidebarOpen}
@@ -453,7 +459,7 @@ function StaffApp() {
           <Route
             path="overview"
             element={
-              <OverviewPage activityId={activityId} activities={activities} />
+              currentActivity?.activityType === "EVENT" ? <MainActivityPage activity={currentActivity} activities={activities} setActivityId={setActivityId} canManage={canManage} reload={reloadActivities} /> : <OverviewPage activityId={activityId} activities={activities} />
             }
           />
           <Route
@@ -469,11 +475,11 @@ function StaffApp() {
           />
           <Route
             path="control"
-            element={lotteryActivity ? <RewardsPage key={activityId} activityId={activityId} canManage={canManage} /> : <ControlPage key={activityId} activityId={activityId} activity={currentActivity} reloadActivities={reloadActivities} canManage={canManage} />}
+            element={lotteryActivity ? <HostLotteryPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : currentActivity?.activityType === "EVENT" && !currentActivity.legacyOperations ? <Navigate to="/admin/overview" replace /> : <ControlPage key={activityId} activityId={activityId} activity={currentActivity} reloadActivities={reloadActivities} canManage={canManage} />}
           />
           <Route
             path="questions"
-            element={lotteryActivity ? <Navigate to="/admin/rewards" replace /> : <QuestionsPage key={activityId} activityId={activityId} canManage={canManage} />}
+            element={lotteryActivity || currentActivity?.activityType === "EVENT" && !currentActivity.legacyOperations ? <Navigate to="/admin/overview" replace /> : <QuestionsPage key={activityId} activityId={activityId} canManage={canManage} />}
           />
           <Route
             path="participants"
@@ -481,7 +487,7 @@ function StaffApp() {
           />
           <Route
             path="rewards"
-            element={<RewardsPage activityId={activityId} canManage={canManage} />}
+            element={<RewardsPage key={activityId} activityId={activityId} activity={currentActivity} canManage={canManage} />}
           />
           <Route
             path="screens"
@@ -505,7 +511,8 @@ function StaffApp() {
   );
 }
 
-function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
+function StaffSidebar({ user, open, onClose, onSignOut, canManage, activity }) {
+  const navigation = activityNavigation(activity);
   const location = useLocation();
   const navigate = useNavigate();
   const active = location.pathname.split("/").pop();
@@ -537,7 +544,10 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
         </small>
       </div>
       <nav>
-        {navItems.filter((item) => canManage || !["activities", "screens", "settings"].includes(item.id)).map((item) => {
+        {navItems.filter((item) => (canManage || !["activities", "screens", "settings"].includes(item.id))
+          && (item.id !== "questions" || navigation.showQuiz)
+          && (item.id !== "control" || activity?.activityType === "LOTTERY" || navigation.showQuiz)
+          && (item.id !== "rewards" || navigation.showRewards)).map((item) => {
           const Icon = item.icon;
           return (
             <button
@@ -547,7 +557,7 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
               onClick={() => go(`/admin/${item.id}`)}
             >
               <Icon size={18} />
-              <span>{item.label}</span>
+              <span>{item.id === "control" ? navigation.controlLabel : item.id === "rewards" ? navigation.rewardsLabel : item.label}</span>
               {item.id === "control" && <em>实况</em>}
             </button>
           );
@@ -576,6 +586,9 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage }) {
 function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
   const location = useLocation();
   const current = activities.find((item) => item.id === activityId);
+  const navigation = activityNavigation(current);
+  const orderedActivities = activities.filter((item) => !item.parentActivityId).flatMap((parent) => [parent, ...activities.filter((child) => child.parentActivityId === parent.id)])
+    .concat(activities.filter((item) => item.parentActivityId && !activities.some((parent) => parent.id === item.parentActivityId)));
   const currentPage = navItems.find(
     (item) => item.id === location.pathname.split("/").pop(),
   );
@@ -590,12 +603,12 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
         <Menu size={19} />
       </button>
       <div className="crumb">
-        <span>活动运营</span>
+        <span>{current?.parentActivityId ? activities.find((item) => item.id === current.parentActivityId)?.name || "母活动" : "母活动管理"}</span>
         <ChevronRight size={14} />
         <strong>{current?.name || "未选择活动"}</strong>
       </div>
       <div className="staff-topbar__mobile-title">
-        <strong>{currentPage?.label || "活动总览"}</strong>
+        <strong>{currentPage?.id === "control" ? navigation.controlLabel : currentPage?.label || "活动总览"}</strong>
         <span>{current?.name || "未选择活动"}</span>
       </div>
       <div className="topbar-actions">
@@ -605,9 +618,9 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
             value={activityId}
             onChange={(event) => setActivityId(event.target.value)}
           >
-            {activities.map((activity) => (
+            {orderedActivities.map((activity) => (
               <option key={activity.id} value={activity.id}>
-                {activity.name} · {activity.city}
+                {activity.parentActivityId ? "└ " : ""}{activity.name} · {activityTypeLabel(activity.activityType)}
               </option>
             ))}
           </select>
@@ -637,7 +650,79 @@ function PageHeader({ eyebrow, title, description, action }) {
   );
 }
 
-function OverviewPage({ activityId, activities }) {
+function MainActivityPage({ activity, activities, setActivityId, canManage, reload }) {
+  const children = activities.filter((item) => item.parentActivityId === activity.id);
+  return <div className="page-content">
+    <PageHeader eyebrow="母活动管理" title={activity.name} description="统一管理报名、人员和总积分；在答题、摇奖子活动中组织现场环节。" />
+    <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />
+    <div className="activity-hub-links"><Link className="secondary-button" to="/admin/participants">统一参与者名单</Link><a className="secondary-button" href={`/join/${activity.id}`} target="_blank" rel="noreferrer">报名与环节入口</a>{canManage && <Link className="primary-button" to="/admin/activities">添加答题或摇奖子活动</Link>}</div>
+    <div className="prize-grid">{children.map((child) => <article className="prize-pool-card" key={child.id}>
+      <span className="type-chip">{activityTypeLabel(child.activityType)} · {activityStatusLabels[child.status]}</span><h2>{child.name}</h2>
+      <p>{child.activityType === "LOTTERY" ? "使用统一名单与总积分筛选，主持人摇奖并公布结果。" : child.participantActivityId === activity.id ? "共用母活动名单，本环节独立计分，得分汇入总积分。" : "旧版独立报名与积分，保留原有数据。"}</p>
+      <Link className="primary-button" to={child.activityType === "LOTTERY" ? "/admin/control" : "/admin/overview"} onClick={() => setActivityId(child.id)}>进入环节<ArrowRight size={16} /></Link>
+    </article>)}</div>
+    {!children.length && <EmptyState icon={CalendarDays} title="尚未添加活动环节" description="到活动管理添加答题或摇奖子活动。参与者只需在母活动登记一次。" />}
+    {activity.legacyOperations && <div className="buzzer-answer-key"><strong>原有母活动业务保留</strong><p>此母活动已有题目或奖池，可通过侧栏继续处理。新增环节请放到子活动。</p></div>}
+    <OverviewPage activityId={activity.id} activities={activities} summaryOnly />
+  </div>;
+}
+
+function HostLotteryPage({ activity, reload, canManage }) {
+  const [pools, setPools] = useState([]);
+  const [people, setPeople] = useState([]);
+  const [awards, setAwards] = useState([]);
+  const [poolId, setPoolId] = useState(() => { try { return JSON.parse(sessionStorage.getItem(`matrix.host-draw.${activity.id}`))?.prizePoolId || ""; } catch { return ""; } });
+  const [rolling, setRolling] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const attempt = useRef(null);
+  useEffect(() => {
+    try { attempt.current = JSON.parse(sessionStorage.getItem(`matrix.host-draw.${activity.id}`)); if (attempt.current) setError("上次摇奖结果尚未确认，请重试确认；不会重复发奖。"); } catch { /* Ignore invalid local data. */ }
+  }, [activity.id]);
+  const load = useCallback(async () => {
+    try {
+      const [nextPools, nextPeople, nextAwards] = await Promise.all([api.prizePools(activity.id), api.participants(activity.id), api.awardsAdmin(activity.id)]);
+      setPools(nextPools.filter((p) => p.purpose === "LOTTERY")); setPeople(nextPeople); setAwards(nextAwards);
+      setPoolId((id) => nextPools.some((p) => p.id === id && p.purpose === "LOTTERY") ? id : nextPools.find((p) => p.purpose === "LOTTERY")?.id || "");
+    } catch (cause) { setError(cause.message); }
+  }, [activity.id]);
+  useEffect(() => { load(); }, [load]);
+  useActivityStream(activity.id, load, undefined, setError);
+  const pool = pools.find((p) => p.id === poolId);
+  const eligible = people.filter((p) => p.status === "ACTIVE" && p.score >= (pool?.minScore || 0)
+    && !awards.some((a) => a.participantId === p.id && a.prizePoolId === poolId));
+  useEffect(() => {
+    if (!rolling || !eligible.length) return;
+    let index = 0;
+    const timer = window.setInterval(() => setDisplayName(eligible[index++ % eligible.length].name), 80);
+    return () => window.clearInterval(timer);
+  }, [rolling, people, poolId, awards]);
+  const stop = async () => {
+    if (confirming) return;
+    setRolling(false); setConfirming(true); setError("");
+    if (!attempt.current) attempt.current = { prizePoolId: poolId, idempotencyKey: createIdempotencyKey() };
+    sessionStorage.setItem(`matrix.host-draw.${activity.id}`, JSON.stringify(attempt.current));
+    try { const winner = await api.hostDraw(activity.id, attempt.current); setResult(winner); setDisplayName(winner.participantName); attempt.current = null; sessionStorage.removeItem(`matrix.host-draw.${activity.id}`); await load(); }
+    catch (cause) { if (cause instanceof ApiError && [400, 403, 404, 409].includes(cause.status)) { attempt.current = null; sessionStorage.removeItem(`matrix.host-draw.${activity.id}`); } setError(cause.message); }
+    finally { setConfirming(false); }
+  };
+  return <div className="page-content">
+    <PageHeader eyebrow="主持人摇奖" title="摇奖控场" description="按母活动总积分筛选参与者，主持人摇奖在同一奖池不重复选中已获奖者；停止后随机选出中奖人并发奖上屏。" />
+    <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />
+    <InlineError text={error} onRetry={attempt.current ? stop : load} />
+    <label className="host-lottery-picker">摇奖奖池<select value={poolId} disabled={rolling || confirming || !!attempt.current} onChange={(e) => { setPoolId(e.target.value); setResult(null); setDisplayName(""); }}><option value="">请选择奖池</option>{pools.map((p) => <option key={p.id} value={p.id}>{p.name} · 剩余 {p.remainingQuantity} 件 · 最低 {p.minScore} 分</option>)}</select></label>
+    <article className="answer-card host-lottery-stage"><span className="type-chip">符合条件 {eligible.length} 人</span><h2 aria-live="polite">{displayName || "等待开始摇奖"}</h2>
+      {confirming ? <p>正在确认中奖结果…</p> : !rolling ? <button className="primary-button" disabled={activity.status !== "LIVE" || !pool?.enabled || !pool.remainingQuantity || !eligible.length || !!attempt.current} onClick={() => { setResult(null); setRolling(true); }}>开始摇奖</button> : <button className="primary-button" onClick={stop}>停止并公布中奖人</button>}
+      {result && <p role="status">{result.participantName} · {result.prizeName} · 已生成领奖记录并同步到大屏</p>}
+    </article>
+    <Link className="secondary-button" to="/admin/rewards">配置奖池、核销或自助抽奖</Link>
+    <div className="control-response-feed"><span>中奖记录</span>{awards.filter((a) => a.status !== "VOID").map((a) => <div key={a.id}><strong>{a.participantName} · {a.prizeName}</strong><small>{formatDate(a.awardedAt)}</small></div>)}</div>
+  </div>;
+}
+
+function OverviewPage({ activityId, activities, summaryOnly = false }) {
   const [participants, setParticipants] = useState([]);
   const [devices, setDevices] = useState([]);
   const [scores, setScores] = useState([]);
@@ -670,7 +755,7 @@ function OverviewPage({ activityId, activities }) {
   const overviewStage = ["FINISHED", "CANCELLED"].includes(activity?.status) ? "ENDED" : control?.stage || "LOBBY";
   return (
     <div className="page-content">
-      <PageHeader
+      {!summaryOnly && <PageHeader
         eyebrow="活动脉冲"
         title="活动总览"
         description="实时读取当前活动、参与者和控场服务的状态。"
@@ -680,7 +765,7 @@ function OverviewPage({ activityId, activities }) {
             进入控场
           </Link>
         }
-      />
+      />}
       {error && <InlineError text={error} onRetry={load} />}
       <section className="metric-grid">
         <Metric
@@ -692,8 +777,8 @@ function OverviewPage({ activityId, activities }) {
         />
         <Metric
           icon={Activity}
-          label="当前阶段"
-          value={overviewStage === "QUESTION_OPEN" && remaining === 0 ? "答题已截止" : stageLabel(overviewStage)}
+          label={summaryOnly ? "母活动状态" : "当前阶段"}
+          value={summaryOnly ? activityStatusLabels[activity?.status] : overviewStage === "QUESTION_OPEN" && remaining === 0 ? "答题已截止" : stageLabel(overviewStage)}
           sub={
             overviewStage === "QUESTION_OPEN" ? `剩余 ${remaining} 秒` : overviewStage === "ENDED" ? "本场流程已完成" : "等待工作人员开场"
           }
@@ -714,8 +799,8 @@ function OverviewPage({ activityId, activities }) {
           tone="rose"
         />
       </section>
-      <section className="overview-grid">
-        <article className="live-activity-panel">
+      <section className="overview-grid" style={summaryOnly ? { display: "block" } : undefined}>
+        {!summaryOnly && <article className="live-activity-panel">
           <div className="panel-top">
             <div>
               <p className="eyebrow">{activityStatusLabels[activity?.status] || "活动状态"}</p>
@@ -763,11 +848,12 @@ function OverviewPage({ activityId, activities }) {
             </Link>
           </div>
         </article>
+        }
         <article className="scoreboard-panel">
           <div className="panel-top">
             <div>
               <p className="eyebrow">积分榜</p>
-              <h2>实时积分榜</h2>
+              <h2>{summaryOnly ? "母活动总积分榜" : "本环节积分榜"}</h2>
             </div>
             <Link to="/admin/participants">
               全部
@@ -795,6 +881,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
     parentActivityId: "",
     activityType: "EVENT",
     scoringMode: "SIMPLE",
+    answerMode: "STANDARD",
     correctScorePercent: 100,
     incorrectScorePercent: 0,
     correctRankRules: [],
@@ -961,7 +1048,10 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
               {activityStatusLabels[activity.status] || activity.status}
             </span>
             <div className="activity-row-actions">
-              {!activity.parentActivityId && <button className="toolbar-icon" type="button" title="添加抽奖子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "LOTTERY" }); setError(""); setDialog("create"); }}><Gift size={16} /></button>}
+              {!activity.parentActivityId && <>
+                <button className="toolbar-icon" type="button" title="添加答题子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "QUIZ" }); setError(""); setDialog("create"); }}><CircleHelp size={16} /></button>
+                <button className="toolbar-icon" type="button" title="添加摇奖子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "LOTTERY" }); setError(""); setDialog("create"); }}><Gift size={16} /></button>
+              </>}
               <button
                 className="toolbar-icon"
                 type="button"
@@ -986,7 +1076,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 </button>
               )}
               <Link
-                to={activity.activityType === "LOTTERY" ? "/admin/rewards" : "/admin/overview"}
+                to={activity.activityType === "LOTTERY" ? "/admin/control" : "/admin/overview"}
                 className="row-action"
                 onClick={() => setActivityId(activity.id)}
               >
@@ -1041,15 +1131,15 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                     })
                   }
                 >
-                  <option value="EVENT">顶层活动</option>
-                  <option value="QUIZ">答题活动</option>
-                  <option value="LOTTERY">抽奖活动</option>
-                  <option value="OTHER">其他活动</option>
+                  <option value="EVENT">母活动（统一报名与管理）</option>
+                  <option value="QUIZ">答题子活动（普通答题 / 抢答）</option>
+                  <option value="LOTTERY">摇奖子活动（主持人摇奖 / 自助抽奖）</option>
+                  {form.activityType === "OTHER" && <option value="OTHER">其他活动（旧版兼容）</option>}
                 </select>
               </label>
               {form.activityType && form.activityType !== "EVENT" && (
                 <label>
-                  所属父活动
+                  所属母活动
                   <select
                     required
                     value={form.parentActivityId || ""}
@@ -1057,7 +1147,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                       setForm({ ...form, parentActivityId: event.target.value })
                     }
                   >
-                    <option value="">选择父活动</option>
+                    <option value="">选择母活动</option>
                     {activities
                       .filter((item) => !item.parentActivityId)
                       .map((item) => (
@@ -1102,8 +1192,16 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 placeholder="说明活动目标、议程或参与须知"
               />
             </label>
-            <fieldset className="brand-fieldset">
+            {(form.activityType === "QUIZ" || form.legacyOperations || form.activityType === "OTHER") && <fieldset className="brand-fieldset">
               <legend>答题计分规则</legend>
+              <label>
+                答题模式
+                <select value={form.answerMode || "STANDARD"} onChange={(event) => setForm({ ...form, answerMode: event.target.value })}>
+                  <option value="STANDARD">普通答题</option>
+                  <option value="BUZZER">抢答模式</option>
+                </select>
+                <small>抢答模式下，参与者开题后只能点击抢答；主持人查看标准答案和抢答顺序，现场组织作答。</small>
+              </label>
               <div className="form-grid">
                 <label>
                   计分模式
@@ -1140,6 +1238,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 </div>)}
               </div>}
             </fieldset>
+            }
             <fieldset className="brand-fieldset">
               <legend>参与端品牌</legend>
               <label>
@@ -1224,6 +1323,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const [scoreboard, setScoreboard] = useState([]);
   const remaining = useLiveCountdown(state);
   const [responseStats, setResponseStats] = useState(null);
+  const [buzzes, setBuzzes] = useState([]);
   const [selectedQuestionId, setSelectedQuestionId] = useState("");
   const selectedQuestionRef = useRef("");
   const [busy, setBusy] = useState(false);
@@ -1232,10 +1332,16 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
     async (questionId) => {
       if (!activityId || !questionId) {
         setResponseStats(null);
+        setBuzzes([]);
         return;
       }
       try {
-        setResponseStats(await api.questionStats(activityId, questionId));
+        const [stats, arrivals] = await Promise.all([
+          api.questionStats(activityId, questionId), api.buzzes(activityId, questionId),
+        ]);
+        if (selectedQuestionRef.current !== questionId) return;
+        setResponseStats(stats);
+        setBuzzes(arrivals);
       } catch (cause) {
         setError(cause.message);
       }
@@ -1281,7 +1387,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const navigationIndex = enabledQuestions.findIndex((item) => item.id === navigationQuestion?.id);
   const previousQuestion = navigationIndex > 0 ? enabledQuestions[navigationIndex - 1] : null;
   const nextQuestion = navigationIndex >= 0 ? enabledQuestions[navigationIndex + 1] : enabledQuestions[0];
-  const controlsClosed = ["PAUSED", "FINISHED", "CANCELLED"].includes(activity?.status);
+  const controlsClosed = activity?.status !== "LIVE";
   const selectionIsOpen = Boolean(
     !controlsClosed && remaining > 0 && current && state?.stage === "QUESTION_OPEN" && state.questionId === current.id,
   );
@@ -1330,7 +1436,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
     <div className="page-content">
       <PageHeader
         eyebrow="实时控场台"
-        title="实时控场"
+        title={activity?.answerMode === "BUZZER" ? "抢答控场" : "答题控场"}
         description="选择题目、设定倒计时，并将流程同步给参与者和受控大屏。"
       />
       <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reloadActivities} />
@@ -1372,6 +1478,13 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
               </Link>
             </div>
             <h2>{current?.title || "请先在题库中创建并启用题目"}</h2>
+            {activity?.answerMode === "BUZZER" && current && (
+              <div className="buzzer-answer-key">
+                <strong>标准答案</strong>
+                <p>{(current.type === "TEXT" ? textAcceptedAnswers(current) : [...answerSet(current)]).join("、") || "未配置标准答案，请现场评判"}</p>
+                <QuestionMedia question={current} answer className="control-question-media" />
+              </div>
+            )}
             <QuestionMedia
               question={current}
               className="control-question-media"
@@ -1405,11 +1518,31 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
               <span>
                 <Users size={16} />
                 {responseStats
-                  ? `已答 ${responseStats.submittedCount}/${responseStats.eligibleParticipantCount} 人`
+                  ? activity?.answerMode === "BUZZER" ? `已抢答 ${buzzes.length}/${responseStats.eligibleParticipantCount} 人` : `已答 ${responseStats.submittedCount}/${responseStats.eligibleParticipantCount} 人`
                   : "等待答题数据"}
               </span>
             </div>
             <section className="control-response-overview" aria-live="polite">
+              {activity?.answerMode === "BUZZER" ? (
+                <div className="control-response-feed buzzer-feed">
+                  <span>抢答顺序 · 已抢答 {buzzes.length} 人</span>
+                  {buzzes.map((entry) => (
+                    <div key={entry.participantId}>
+                      <strong>第 {entry.responseRank} 位 · {entry.participantName}</strong>
+                      <small>{entry.venue} · {formatDate(entry.buzzedAt)}</small>
+                      <small>{entry.awardedPoints == null ? "待判题" : `${entry.correct === true ? "已判对" : entry.correct === false ? "已判错" : "已判题"} · ${entry.awardedPoints} 分`}</small>
+                      <div className="pool-card-actions">
+                        {[true, false].map((correct) => <button key={String(correct)} className="secondary-button" disabled={busy} onClick={async () => {
+                          setBusy(true); setError("");
+                          try { await api.gradeBuzz(activityId, current.id, entry.participantId, { correct }); await loadStats(current.id); }
+                          catch (cause) { setError(cause.message); } finally { setBusy(false); }
+                        }}>{correct ? "判对并计分" : "判错并计分"}</button>)}
+                      </div>
+                    </div>
+                  ))}
+                  {!buzzes.length && <small>尚无人抢答，开题后实时更新</small>}
+                </div>
+              ) : <>
               <div className="control-response-metrics">
                 <span>
                   <b>{responseStats?.unansweredCount || 0}</b>
@@ -1446,6 +1579,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
                 ))}
                 {!responseStats?.submissions?.length && <small>尚无人提交本题</small>}
               </div>
+              </>}
             </section>
           </article>
           <div className="control-actions">
@@ -2863,11 +2997,11 @@ function ParticipantsPage({ activityId }) {
   );
 }
 
-function RewardsPage({ activityId, canManage }) {
+function RewardsPage({ activityId, activity, canManage }) {
   const emptyPool = () => ({
     code: "",
     name: "",
-    purpose: "MANUAL",
+    purpose: activity?.activityType === "LOTTERY" ? "LOTTERY" : "MANUAL",
     deliveryType: "DIGITAL",
     description: "",
     redemptionUrl: "",
@@ -3374,8 +3508,8 @@ function RewardsPage({ activityId, canManage }) {
                 }
               >
                 <option value="MANUAL">人工发放</option>
-                <option value="RANKING">积分排名</option>
-                <option value="LOTTERY">抽奖转盘</option>
+                {(activity?.activityType !== "LOTTERY" || poolForm.purpose === "RANKING") && <option value="RANKING">积分排名</option>}
+                {(activity?.activityType !== "QUIZ" || activity?.participantActivityId === activityId || poolForm.purpose === "LOTTERY") && <option value="LOTTERY">摇奖 / 自助抽奖</option>}
               </select>
             </label>
             <label>
@@ -5742,10 +5876,10 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
       const [questionList, control, board, answerList, activityInfo, siteInfo] =
         await Promise.all([
           lotteryMode ? Promise.resolve([]) : api.questions(activityId, participantToken),
-          api.controlState(identityActivityId, participantToken),
-          api.scoreboard(identityActivityId, participantToken),
+          api.controlState(lotteryMode ? identityActivityId : activityId, participantToken),
+          api.scoreboard(lotteryMode ? identityActivityId : activityId, participantToken),
           participant?.id && !lotteryMode
-            ? api.submissions(identityActivityId, participant.id, participantToken)
+            ? api.submissions(activityId, participant.id, participantToken)
             : Promise.resolve([]),
           api.activity(activityId),
           api.siteSettings(),
@@ -5850,7 +5984,15 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
           ) : (
             <>
               {tab === "play" && !lotteryMode && (
-                <AnswerCard
+                activity?.activityType === "EVENT" && !activity.legacyOperations ? <article className="answer-card"><h2>选择活动环节</h2><p>报名已完成，答题和摇奖共用当前身份。</p>{activities.filter((item) => item.parentActivityId === activityId).map((child) => <Link className="secondary-button" key={child.id} to={activityEntry(child)}>{child.name} · {activityTypeLabel(child.activityType)}<ArrowRight size={16} /></Link>)}{!activities.some((item) => item.parentActivityId === activityId) && <p>等待工作人员启用活动环节。</p>}</article> : activity?.answerMode === "BUZZER" ? <BuzzCard
+                  key={`${activityId}-${question?.id || "waiting"}`}
+                  activityId={activityId}
+                  participant={participant}
+                  participantToken={participantToken}
+                  question={question}
+                  state={state}
+                  activityStatus={activity?.status}
+                /> : <AnswerCard
                   activityId={activityId}
                   participant={participant}
                   participantToken={participantToken}
@@ -5892,7 +6034,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
               onClick={() => setTab("play")}
             >
               <CircleHelp size={18} />
-              答题
+              {activity?.activityType === "EVENT" && !activity.legacyOperations ? "活动环节" : "答题"}
             </button>}
             <button
               className={tab === "rank" ? "is-active" : ""}
@@ -6227,6 +6369,46 @@ function RegistrationFieldInput({ field, value, onChange }) {
         onChange={(event) => onChange(event.target.value)}
       />
     </label>
+  );
+}
+
+function BuzzCard({ activityId, participant, participantToken, question, state, activityStatus }) {
+  const [entry, setEntry] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const remaining = useLiveCountdown(state);
+  const questionId = question?.id;
+  const load = useCallback(async () => {
+    if (!questionId) return;
+    try {
+      const entries = await api.participantBuzzes(activityId, participant.id, questionId, participantToken);
+      setEntry(entries[0] || null);
+    } catch (cause) { setError(cause.message); }
+  }, [activityId, participant.id, participantToken, questionId]);
+  useEffect(() => { setEntry(null); setError(""); load(); }, [load]);
+  useActivityStream(activityId, load, participantToken, setError);
+  const open = questionId && state?.stage === "QUESTION_OPEN" && remaining > 0
+    && !["PAUSED", "FINISHED", "CANCELLED"].includes(activityStatus);
+  const buzz = async () => {
+    if (!open || entry || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      setEntry(await api.buzz(activityId, { participantId: participant.id, questionId }, participantToken));
+    } catch (cause) { setError(cause.message); }
+    finally { setBusy(false); }
+  };
+  if (!question) return <EmptyState icon={Clock3} title="等待主持人开题" description="开题后即可抢答。" />;
+  return (
+    <article className="answer-card buzzer-card">
+      <div className="answer-card__meta"><span>抢答模式</span><strong>{open ? formatSeconds(remaining) : "抢答未开放"}</strong></div>
+      <h2>{question.title}</h2>
+      <QuestionMedia question={question} className="answer-question-media" />
+      {open && !entry && <button className="primary-button buzzer-button" disabled={busy} onClick={buzz}>{busy ? "正在抢答…" : "抢答"}</button>}
+      {entry && <div className="answer-feedback" role="status"><BadgeCheck size={20} /><div><strong>抢答成功 · 第 {entry.responseRank} 位</strong><span>{entry.awardedPoints == null ? "请等待主持人安排作答。" : `${entry.correct === true ? "回答正确" : entry.correct === false ? "回答不正确" : "主持人已判题"} · 本题 ${entry.awardedPoints} 分`}</span></div></div>}
+      {!open && !entry && <p>等待主持人开题，或本题抢答已结束。</p>}
+      {error && <p className="form-error" role="alert">{error}<button className="text-button" onClick={load}>刷新抢答状态</button></p>}
+    </article>
   );
 }
 
@@ -7320,9 +7502,9 @@ function roleLabel(role) {
 function activityTypeLabel(type) {
   return (
     {
-      EVENT: "顶层活动",
-      QUIZ: "答题活动",
-      LOTTERY: "抽奖活动",
+      EVENT: "母活动",
+      QUIZ: "答题子活动",
+      LOTTERY: "摇奖子活动",
       OTHER: "其他活动",
     }[type] || "活动"
   );

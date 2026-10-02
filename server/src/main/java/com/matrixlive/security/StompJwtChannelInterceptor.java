@@ -152,7 +152,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     if (principal.isSystemAdmin()) return true;
     if (principal.isParticipant()) {
       boolean permittedActivity = activityId.equals(principal.activityId()) || activities.findById(activityId)
-          .filter(item -> "LOTTERY".equals(item.getActivityType()) && principal.activityId().equals(item.getParentActivityId()))
+          .filter(item -> item.isSharedParticipants() && principal.activityId().equals(item.getParentActivityId()))
           .isPresent();
       return permittedActivity && !destination.endsWith("/screens");
     }

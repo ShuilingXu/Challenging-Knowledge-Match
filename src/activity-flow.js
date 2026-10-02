@@ -13,6 +13,7 @@ export function activityActions(status) {
 }
 
 export function participantActivityId(activity) {
+  if (activity?.participantActivityId) return activity.participantActivityId
   return activity?.activityType === 'LOTTERY' && activity.parentActivityId
     ? activity.parentActivityId : activity?.id
 }
@@ -31,4 +32,16 @@ export function participantMatches(person, query) {
   const values = [person.name, person.contact, person.id, person.organization, person.venue,
     ...Object.values(person.customFields || {})]
   return values.join(' ').toLowerCase().includes(query.trim().toLowerCase())
+}
+
+export function activityNavigation(activity) {
+  const type = activity?.activityType || 'EVENT'
+  const main = type === 'EVENT'
+  const lottery = type === 'LOTTERY'
+  return {
+    showQuiz: Boolean(!lottery && (!main || activity?.legacyOperations)),
+    showRewards: Boolean(!main || activity?.legacyOperations),
+    controlLabel: lottery ? '摇奖控场' : main ? '原有答题控场' : '答题控场',
+    rewardsLabel: lottery ? '自助抽奖与核销' : '奖品与核销',
+  }
 }

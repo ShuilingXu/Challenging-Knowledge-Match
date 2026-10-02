@@ -24,6 +24,31 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/activities")
 public class ActivityController {
+  @PostMapping("/{activityId}/host-draws")
+  public AwardDetailResponse hostDraw(@PathVariable UUID activityId, @Valid @RequestBody HostDrawRequest request) {
+    return service.hostDraw(activityId, request);
+  }
+
+  @PostMapping("/{activityId}/questions/{questionId}/buzzes/{participantId}/grade")
+  public BuzzResponse gradeBuzz(@PathVariable UUID activityId, @PathVariable UUID questionId,
+      @PathVariable UUID participantId, @Valid @RequestBody GradeBuzzRequest request) {
+    return service.gradeBuzz(activityId, questionId, participantId, request);
+  }
+  @PostMapping("/{activityId}/buzzes")
+  public BuzzResponse buzz(@PathVariable UUID activityId, @Valid @RequestBody BuzzRequest request) {
+    return service.buzz(activityId, request);
+  }
+
+  @GetMapping("/{activityId}/questions/{questionId}/buzzes")
+  public List<BuzzResponse> buzzes(@PathVariable UUID activityId, @PathVariable UUID questionId) {
+    return service.buzzes(activityId, questionId);
+  }
+
+  @GetMapping("/{activityId}/participants/{participantId}/buzzes")
+  public List<BuzzResponse> participantBuzzes(@PathVariable UUID activityId, @PathVariable UUID participantId,
+      @RequestParam UUID questionId) {
+    return service.participantBuzzes(activityId, participantId, questionId);
+  }
   private final ActivityService service;
 
   public ActivityController(ActivityService service) { this.service = service; }

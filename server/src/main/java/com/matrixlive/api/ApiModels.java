@@ -31,7 +31,28 @@ public final class ApiModels {
       @Min(0) @Max(100) Integer correctScorePercent,
       @Min(0) @Max(100) Integer incorrectScorePercent,
       List<ScoreRule> correctRankRules,
+      List<ScoreRule> incorrectRankRules,
+      @Size(max = 16) String answerMode) {
+    public CreateActivityRequest(
+      String name,
+      String city,
+      Instant startsAt,
+      Instant endsAt,
+      String description,
+      String clientDisplayName,
+      String clientThemeColor,
+      String clientHeroImageUrl,
+      String clientBackgroundImageUrl,
+      UUID parentActivityId,
+      String activityType,
+      String scoringMode,
+      Integer correctScorePercent,
+      Integer incorrectScorePercent,
+      List<ScoreRule> correctRankRules,
       List<ScoreRule> incorrectRankRules) {
+      this(name, city, startsAt, endsAt, description, clientDisplayName, clientThemeColor, clientHeroImageUrl, clientBackgroundImageUrl, parentActivityId, activityType, scoringMode, correctScorePercent, incorrectScorePercent, correctRankRules, incorrectRankRules, null);
+    }
+
     public CreateActivityRequest(String name, String city, Instant startsAt) {
       this(name, city, startsAt, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
@@ -60,7 +81,34 @@ public final class ApiModels {
       @Min(0) @Max(100) Integer incorrectScorePercent,
       List<ScoreRule> correctRankRules,
       List<ScoreRule> incorrectRankRules,
-      Boolean clearEndsAt) { }
+      Boolean clearEndsAt,
+      @Size(max = 16) String answerMode) {
+    public UpdateActivityRequest(
+      String name,
+      String city,
+      Instant startsAt,
+      Instant endsAt,
+      String description,
+      String clientDisplayName,
+      String clientThemeColor,
+      String clientHeroImageUrl,
+      String clientBackgroundImageUrl,
+      UUID parentActivityId,
+      String activityType,
+      String scoringMode,
+      Integer correctScorePercent,
+      Integer incorrectScorePercent,
+      List<ScoreRule> correctRankRules,
+      List<ScoreRule> incorrectRankRules,
+      Boolean clearEndsAt) {
+      this(name, city, startsAt, endsAt, description, clientDisplayName, clientThemeColor, clientHeroImageUrl, clientBackgroundImageUrl, parentActivityId, activityType, scoringMode, correctScorePercent, incorrectScorePercent, correctRankRules, incorrectRankRules, clearEndsAt, null);
+    }
+ }
+
+  public record BuzzRequest(@NotNull UUID participantId, @NotNull UUID questionId) { }
+  public record BuzzResponse(UUID participantId, String participantName, String venue, int responseRank, Instant buzzedAt, Integer awardedPoints, Boolean correct, String feedback) { }
+  public record GradeBuzzRequest(@NotNull Boolean correct, @Size(max = 1000) String feedback) { }
+  public record HostDrawRequest(@NotNull UUID prizePoolId, @NotBlank @Size(max = 160) String idempotencyKey) { }
 
   public record ScoreRule(@Min(1) Integer rankFrom, @Min(1) Integer rankTo,
       @Min(0) @Max(100) Integer percent) { }
@@ -72,7 +120,17 @@ public final class ApiModels {
       String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt,
       UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole,
       String scoringMode, int correctScorePercent, int incorrectScorePercent,
+      List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules,
+      String answerMode, UUID participantActivityId, boolean legacyOperations) {
+    public ActivityResponse(UUID id, String name, String city, String status, Instant startsAt,
+      Instant endsAt, String description, String clientDisplayName, String clientThemeColor,
+      String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt,
+      UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole,
+      String scoringMode, int correctScorePercent, int incorrectScorePercent,
       List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules) {
+      this(id, name, city, status, startsAt, endsAt, description, clientDisplayName, clientThemeColor, clientHeroImageUrl, clientBackgroundImageUrl, createdAt, updatedAt, parentActivityId, activityType, activeQuestionSetId, viewerRole, scoringMode, correctScorePercent, incorrectScorePercent, correctRankRules, incorrectRankRules, null, null, false);
+    }
+
     public ActivityResponse(UUID id, String name, String city, String status, Instant startsAt, Instant endsAt,
         String description, String clientDisplayName, String clientThemeColor, String clientHeroImageUrl,
         String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt, UUID parentActivityId,

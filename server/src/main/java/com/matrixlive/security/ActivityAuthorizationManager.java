@@ -62,16 +62,18 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
   private boolean allowsParticipant(HttpServletRequest request, String remainder, UUID activityId,
       AuthenticatedPrincipal principal) {
     if (!activityId.equals(principal.activityId()) && !activities.findById(activityId)
-        .filter(item -> "LOTTERY".equals(item.getActivityType()) && principal.activityId().equals(item.getParentActivityId()))
+        .filter(item -> item.isSharedParticipants() && principal.activityId().equals(item.getParentActivityId()))
         .isPresent()) return false;
-    if (!activityId.equals(principal.activityId()) && !(remainder.equals("draws") || remainder.equals("prize-pools")
-        || remainder.equals("awards") || remainder.matches("participants/[0-9a-fA-F-]{36}(?:/lottery-chances)?"))) return false;
+    if (!activityId.equals(principal.activityId()) && activities.findById(activityId)
+        .filter(item -> "LOTTERY".equals(item.getActivityType())).isPresent()
+        && !(remainder.equals("draws") || remainder.equals("prize-pools") || remainder.equals("awards")
+            || remainder.matches("participants/[0-9a-fA-F-]{36}(?:/lottery-chances)?"))) return false;
     String method = request.getMethod();
     if ("questions".equals(remainder) || "scoreboard".equals(remainder) || "control".equals(remainder)
         || "prize-pools".equals(remainder)) {
       return "GET".equals(method);
     }
-    if ("answers".equals(remainder) || "draws".equals(remainder)) return "POST".equals(method);
+    if ("answers".equals(remainder) || "draws".equals(remainder) || "buzzes".equals(remainder)) return "POST".equals(method);
     if ("awards".equals(remainder) && "GET".equals(method)) {
       String participantId = request.getParameter("participantId");
       return principal.participantId().toString().equals(participantId);
@@ -80,7 +82,7 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
       String[] segments = remainder.split("/");
       if (segments.length < 2 || !principal.participantId().toString().equals(segments[1])) return false;
       return segments.length == 2 || (segments.length == 3
-          && ("submissions".equals(segments[2]) || "score-ledger".equals(segments[2]) || "lottery-chances".equals(segments[2])));
+          && ("submissions".equals(segments[2]) || "buzzes".equals(segments[2]) || "score-ledger".equals(segments[2]) || "lottery-chances".equals(segments[2])));
     }
     return false;
   }
@@ -104,6 +106,8 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
           && !remainder.startsWith("question-sets");
     }
     if ("control".equals(remainder)) return "POST".equals(method);
+    if ("host-draws".equals(remainder)) return "POST".equals(method);
+    if (remainder.matches("questions/[0-9a-fA-F-]{36}/buzzes/[0-9a-fA-F-]{36}/grade")) return "POST".equals(method);
     if ("scores/adjustments".equals(remainder)) return "POST".equals(method);
     if ("awards/redeem-batch".equals(remainder)) return "POST".equals(method);
     if (remainder.matches("submissions/[0-9a-fA-F-]{36}/grade")) return "POST".equals(method);

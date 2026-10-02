@@ -32,18 +32,18 @@ class ActivityDomainWorkflowTest {
     service.createVenue(activity.id(), new VenueRequest("north", "North Hall", 5, true));
     service.createVenue(activity.id(), new VenueRequest("south", "South Hall", 5, true));
 
-    var north = service.register(activity.id(), "north",
+    var north = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "north",
         new RegisterParticipantRequest("Alex", "138 0000 1000", "Matrix", Map.of("department", "Engineering")));
-    var south = service.register(activity.id(), "south",
+    var south = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "south",
         new RegisterParticipantRequest("Alex", "13800001001", "Matrix", Map.of("department", "Operations")));
 
     assertEquals("Engineering", north.customFields().get("department"));
     assertEquals("Operations", south.customFields().get("department"));
     assertEquals(1, service.listParticipants(activity.id(), "north").size());
     assertEquals(1, service.listParticipants(activity.id(), "south").size());
-    assertThrows(DomainException.class, () -> service.register(activity.id(), "north",
+    assertThrows(DomainException.class, () -> com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "north",
         new RegisterParticipantRequest("Duplicate", "13800001000", "Matrix", Map.of("department", "Engineering"))));
-    assertThrows(DomainException.class, () -> service.register(activity.id(), "west",
+    assertThrows(DomainException.class, () -> com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "west",
         new RegisterParticipantRequest("Unknown venue", "13800009999", "Matrix", Map.of("department", "Engineering"))));
   }
 
@@ -51,10 +51,11 @@ class ActivityDomainWorkflowTest {
   void recordsScoreLedgerAndMakesLotteryDrawsPersistentAndIdempotent() {
     var activity = service.createActivity(new CreateActivityRequest("Scoring workflow", "Guangzhou", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
-    var participant = service.register(activity.id(), "hall-a",
+    var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall-a",
         new RegisterParticipantRequest("Taylor", "13900002000", "QA"));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("MULTIPLE", "Select all valid values",
         List.of("A", "B", "C"), Set.of("A", "B"), 100, 0, null, 40, true));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
 
     var answer = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.id(), Set.of("A"),
@@ -102,10 +103,11 @@ class ActivityDomainWorkflowTest {
   void holdsTextAnswersForManualReviewAndAppliesFeedbackWhenGraded() {
     var activity = service.createActivity(new CreateActivityRequest("Text review", "Beijing", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
-    var participant = service.register(activity.id(), "hall-a",
+    var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall-a",
         new RegisterParticipantRequest("Jordan", "13900003000", "Matrix"));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT", "Describe the event highlight",
         List.of(), Set.of(), 100, 0, null, 40, true));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
 
     var answer = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.id(),
@@ -126,10 +128,11 @@ class ActivityDomainWorkflowTest {
   void autoScoresAcceptedTextAndStillAllowsManualAdjustment() {
     var activity = service.createActivity(new CreateActivityRequest("Automatic text scoring", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
-    var participant = service.register(activity.id(), "hall-a",
+    var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall-a",
         new RegisterParticipantRequest("Casey", "13900003001", "Matrix"));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT", "What is the answer?",
         List.of(), Set.of(), 100, 0, null, 40, List.of("the answer"), "FUZZY", true));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
 
     var answer = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.id(),
@@ -150,10 +153,11 @@ class ActivityDomainWorkflowTest {
   void unmatchedTextRemainsPendingAndRegexPatternsAreValidated() {
     var activity = service.createActivity(new CreateActivityRequest("Regex text scoring", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
-    var participant = service.register(activity.id(), "hall-a",
+    var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall-a",
         new RegisterParticipantRequest("Morgan", "13900003002", "Matrix"));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT", "Provide the code",
         List.of(), Set.of(), 100, 0, null, 40, List.of("code\\s+\\d+"), "REGEX", true));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", question.id(), 30));
 
     var answer = service.submitAnswer(activity.id(), new SubmitAnswerRequest(participant.id(), question.id(),

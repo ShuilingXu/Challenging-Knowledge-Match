@@ -50,8 +50,9 @@ class ReviewRegressionIntegrationTest {
   @Test
   void pendingAnswersAreUnpostedAndRepeatedGradingBalancesTheLedgerAndStatistics() {
     var activity = activity();
-    var p = service.register(activity.id(), "hall", new RegisterParticipantRequest("Player", "manual-first", null));
+    var p = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Player", "manual-first", null));
     var q = manual(activity.id());
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", q.id(), 600));
     var s = answer(activity.id(), p.id(), q.id());
     assertEquals(0, s.awardedPoints());
@@ -78,13 +79,14 @@ class ReviewRegressionIntegrationTest {
   void firstIncorrectGradeAndLegacyPendingPenaltyDoNotUseUnpostedAmounts() {
     var activity = activity();
     var q = manual(activity.id());
-    var p = service.register(activity.id(), "hall", new RegisterParticipantRequest("Incorrect", "manual-zero", null));
+    var p = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Incorrect", "manual-zero", null));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", q.id(), 600));
     var s = answer(activity.id(), p.id(), q.id());
     service.gradeSubmission(activity.id(), s.submissionId(), new GradeSubmissionRequest(0, null));
     assertEquals(-20, service.participant(activity.id(), p.id()).score());
 
-    var legacy = service.register(activity.id(), "hall", new RegisterParticipantRequest("Legacy", "manual-legacy", null));
+    var legacy = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Legacy", "manual-legacy", null));
     var old = submissions.save(new AnswerSubmission(activity.id(), legacy.id(), q.id(), UUID.randomUUID().toString(),
         "[\"legacy\"]", -20, "PENDING_REVIEW", null));
     service.gradeSubmission(activity.id(), old.getId(), new GradeSubmissionRequest(100, null));
@@ -96,9 +98,10 @@ class ReviewRegressionIntegrationTest {
   @Test
   void pauseRejectsAnswersWithoutCreatingSubmissionsOrScores() {
     var activity = activity();
-    var p = service.register(activity.id(), "hall", new RegisterParticipantRequest("Paused", "pause", null));
+    var p = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Paused", "pause", null));
     var q = manual(activity.id());
     service.changeActivityStatus(activity.id(), new ChangeActivityStatusRequest("LIVE"));
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", q.id(), 600));
     service.changeActivityStatus(activity.id(), new ChangeActivityStatusRequest("PAUSED"));
     assertEquals(HttpStatus.CONFLICT, assertThrows(DomainException.class,
@@ -111,9 +114,10 @@ class ReviewRegressionIntegrationTest {
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   void scoreAndGradeUpdatesRefreshPublishedDeviceSnapshots() {
     var activity = activity();
-    var p = service.register(activity.id(), "hall", new RegisterParticipantRequest("Live", "screen-live", null));
+    var p = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Live", "screen-live", null));
     var q = manual(activity.id());
     var device = screens.registerDevice(activity.id(), new RegisterScreenDeviceRequest("Live screen", 1920, 1080)).device();
+    com.matrixlive.service.QuizTestSupport.start(service, activity.id());
     service.control(activity.id(), new ControlRequest("QUESTION_OPEN", q.id(), 600));
     var s = answer(activity.id(), p.id(), q.id());
     service.control(activity.id(), new ControlRequest("ANSWER_REVEALED", q.id(), 0));
@@ -132,6 +136,7 @@ class ReviewRegressionIntegrationTest {
   void concurrentRegistrationsRespectCapacityInIndependentTransactions() throws Exception {
     var activity = activity();
     service.createVenue(activity.id(), new VenueRequest("tiny", "Tiny", 1, true));
+    service.changeActivityStatus(activity.id(), new ChangeActivityStatusRequest("REGISTRATION_OPEN"));
     var start = new CountDownLatch(1);
     try (var executor = Executors.newFixedThreadPool(12)) {
       var futures = java.util.stream.IntStream.range(0, 12).mapToObj(i -> executor.submit(() -> {

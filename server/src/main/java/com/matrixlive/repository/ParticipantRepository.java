@@ -16,6 +16,7 @@ public interface ParticipantRepository extends JpaRepository<Participant, UUID> 
   List<Participant> findByActivityId(UUID activityId);
   List<Participant> findByActivityIdAndVenue(UUID activityId, String venue);
   long countByActivityIdAndVenue(UUID activityId, String venue);
+  long countByActivityId(UUID activityId);
 
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select participant from Participant participant where participant.id = :id")

@@ -38,6 +38,7 @@ public class SecurityConfiguration {
         .formLogin(form -> form.disable())
         .httpBasic(basic -> basic.disable())
         .authorizeHttpRequests(authorize -> authorize
+            .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
             .requestMatchers("/api/health", "/actuator/health", "/actuator/health/**", "/api/auth/**", "/api/site-settings").permitAll()
             // Pairing is one-time and validated against a stored hash before a scoped device JWT is issued.
             .requestMatchers(HttpMethod.POST, "/api/activities/*/screens/devices/*/session").permitAll()

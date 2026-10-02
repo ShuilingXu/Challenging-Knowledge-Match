@@ -286,7 +286,7 @@ public class ActivityService {
     UUID scopeId = participantScopeActivity(activityId);
     ensureRegistrationAllowed(requireActivity(scopeId));
     String venue = normalizeVenue(venueCode);
-    Venue venueEntity = venues.findByActivityIdAndCode(scopeId, venue)
+    Venue venueEntity = venues.findForRegistration(scopeId, venue)
         .orElseThrow(() -> badRequest("Venue is not configured in this activity"));
     if (!venueEntity.isEnabled()) throw conflict("Venue is disabled");
     if (venueEntity.getCapacity() != null
@@ -343,7 +343,7 @@ public class ActivityService {
           .ifPresent(existing -> { throw conflict("This contact is already registered in the selected venue"); });
     }
     if (!venue.equals(participant.getVenue())) {
-      Venue venueEntity = venues.findByActivityIdAndCode(scopeId, venue)
+      Venue venueEntity = venues.findForRegistration(scopeId, venue)
           .orElseThrow(() -> notFound("Venue does not exist in this activity"));
       if (!venueEntity.isEnabled()) throw conflict("Venue is disabled");
       if (venueEntity.getCapacity() != null
@@ -537,7 +537,7 @@ public class ActivityService {
     int rawPoints = "TEXT".equals(question.getType()) ? (autoTextCorrect ? question.getFullScore() : 0)
         : AnswerScorer.score(question.getType(), answers, new HashSet<>(splitComma(question.getAnswers())),
             question.getFullScore(), question.getPartialCreditPercent());
-    int points = applyScoring(activity, question.getFullScore(), rawPoints, responseRank);
+    int points = requiresManualReview ? 0 : applyScoring(activity, question.getFullScore(), rawPoints, responseRank);
     String outcome = requiresManualReview ? "PENDING_REVIEW" : rawPoints >= question.getFullScore() ? "CORRECT"
         : points > 0 ? "PARTIAL" : "INCORRECT";
     AnswerSubmission submission = submissions.save(new AnswerSubmission(activityId, participant.getId(), question.getId(),
@@ -550,6 +550,7 @@ public class ActivityService {
       scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), question.getId(), submission.getId(), points,
           "ANSWER", "Auto-scored answer"));
       broadcast(activityId, "answer.scored");
+      refreshLiveScreens(activityId, question.getId());
     }
     screens.refreshQuestionSubmissionCount(activityId, question.getId(),
         submissions.countByActivityIdAndQuestionId(activityId, question.getId()));
@@ -566,14 +567,19 @@ public class ActivityService {
     int awarded = request.awardedPoints();
     // A zero score is an explicitly incorrect answer; apply configured deduction rules.
     if (awarded == 0) awarded = applyScoring(activity, question.getFullScore(), 0, submission.getResponseRank());
-    int delta = awarded - submission.getAwardedPoints();
-    submission.grade(awarded, cleanOptional(request.feedback()));
+    // Legacy pending submissions can contain a proposed penalty that was never posted.
+    int postedPoints = "PENDING_REVIEW".equals(submission.getStatus()) ? 0 : submission.getAwardedPoints();
+    int delta = awarded - postedPoints;
+    String outcome = request.awardedPoints() >= question.getFullScore() ? "CORRECT"
+        : request.awardedPoints() > 0 ? "PARTIAL" : "INCORRECT";
+    submission.grade(awarded, cleanOptional(request.feedback()), outcome);
     if (delta != 0) {
       participant.addScore(delta);
       scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), question.getId(), submission.getId(), delta,
           "GRADE_ADJUSTMENT", "Manual grading adjustment"));
     }
     broadcast(activityId, "answer.graded");
+    refreshLiveScreens(activityId, question.getId());
     return toSubmission(submission);
   }
 
@@ -592,6 +598,7 @@ public class ActivityService {
     ScoreLedger entry = scoreLedgers.save(new ScoreLedger(activityId, participant.getId(), null, null, request.points(),
         "MANUAL_ADJUSTMENT", cleanOptional(request.note())));
     broadcast(activityId, "score.adjusted");
+    refreshLiveScreens(activityId, null);
     return toScoreLedger(entry);
   }
 
@@ -615,7 +622,7 @@ public class ActivityService {
 
   @Transactional(readOnly = true)
   public QuestionResponseStats questionResponseStats(UUID activityId, UUID questionId) {
-    requireQuestion(activityId, questionId);
+    Question question = requireQuestion(activityId, questionId);
     List<Participant> activityParticipants = participants.findByActivityId(activityId);
     Map<UUID, Participant> participantById = new HashMap<>();
     int eligibleParticipantCount = 0;
@@ -624,9 +631,9 @@ public class ActivityService {
       if ("ACTIVE".equals(participant.getStatus())) eligibleParticipantCount++;
     }
     List<AnswerSubmission> answered = submissions.findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, questionId);
-    int correctCount = (int) answered.stream().filter(item -> "CORRECT".equals(item.getStatus())).count();
-    int partialCount = (int) answered.stream().filter(item -> "PARTIAL".equals(item.getStatus())).count();
-    int incorrectCount = (int) answered.stream().filter(item -> "INCORRECT".equals(item.getStatus())).count();
+    int correctCount = (int) answered.stream().filter(item -> "CORRECT".equals(submissionOutcome(item, question.getFullScore()))).count();
+    int partialCount = (int) answered.stream().filter(item -> "PARTIAL".equals(submissionOutcome(item, question.getFullScore()))).count();
+    int incorrectCount = (int) answered.stream().filter(item -> "INCORRECT".equals(submissionOutcome(item, question.getFullScore()))).count();
     int pendingReviewCount = (int) answered.stream().filter(item -> "PENDING_REVIEW".equals(item.getStatus())).count();
     List<QuestionSubmissionEntry> entries = IntStream.range(0, answered.size()).mapToObj(index -> {
       AnswerSubmission submission = answered.get(index);
@@ -699,20 +706,7 @@ public class ActivityService {
           payload.put("answerMediaUrls", question.getAnswerMediaUrls());
           payload.put("answerMediaUrl", question.getAnswerMediaUrls().isEmpty() ? "" : question.getAnswerMediaUrls().get(0));
           payload.put("answers", displayAnswers(question));
-          List<Map<String, Object>> responses = submissions
-              .findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, question.getId()).stream()
-              .map(item -> {
-                Map<String, Object> response = new HashMap<>();
-                Participant participant = participants.findById(item.getParticipantId()).orElse(null);
-                response.put("participantName", participant == null ? "参与者" : participant.getName());
-                response.put("answers", readSubmittedAnswers(item.getSubmittedAnswers()));
-                response.put("awardedPoints", item.getAwardedPoints());
-                response.put("status", item.getStatus());
-                response.put("submittedAt", item.getSubmittedAt());
-                response.put("elapsedSeconds", item.getElapsedSeconds());
-                return response;
-              }).toList();
-          payload.put("responses", responses);
+          payload.put("responses", screenResponses(activityId, question.getId()));
         }
         payload.put("submittedCount", submissions.countByActivityIdAndQuestionId(activityId, question.getId()));
       }
@@ -741,6 +735,33 @@ public class ActivityService {
       payload.put("message", "工作人员将在控场台下发下一步内容。");
     }
     screens.publishActivityDisplay(activityId, mode, payload);
+  }
+
+  private String submissionOutcome(AnswerSubmission submission, int fullScore) {
+    if (!"SCORED".equals(submission.getStatus())) return submission.getStatus();
+    // Classify previously graded rows without rewriting historical score ledgers.
+    return submission.getAwardedPoints() >= fullScore ? "CORRECT"
+        : submission.getAwardedPoints() > 0 ? "PARTIAL" : "INCORRECT";
+  }
+
+  private List<Map<String, Object>> screenResponses(UUID activityId, UUID questionId) {
+    return submissions.findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, questionId).stream()
+        .map(item -> {
+          Map<String, Object> response = new HashMap<>();
+          Participant participant = participants.findById(item.getParticipantId()).orElse(null);
+          response.put("participantName", participant == null ? "参与者" : participant.getName());
+          response.put("answers", readSubmittedAnswers(item.getSubmittedAnswers()));
+          response.put("awardedPoints", item.getAwardedPoints());
+          response.put("status", item.getStatus());
+          response.put("submittedAt", item.getSubmittedAt());
+          response.put("elapsedSeconds", item.getElapsedSeconds());
+          return response;
+        }).toList();
+  }
+
+  private void refreshLiveScreens(UUID activityId, UUID questionId) {
+    screens.refreshLiveData(activityId, () -> scoreboard(activityId), questionId,
+        () -> screenResponses(activityId, questionId));
   }
 
   private int remainingSeconds(ControlState state) {
@@ -1120,7 +1141,7 @@ public class ActivityService {
 
   private void ensureAnsweringAllowed(Activity activity) {
     if ("LOTTERY".equals(activity.getActivityType())) throw conflict("Lottery sub-activities do not accept quiz answers");
-    if ("FINISHED".equals(activity.getStatus()) || "CANCELLED".equals(activity.getStatus())) {
+    if (Set.of("PAUSED", "FINISHED", "CANCELLED").contains(activity.getStatus())) {
       throw conflict("Answering is closed for this activity");
     }
   }

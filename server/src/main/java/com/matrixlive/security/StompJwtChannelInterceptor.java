@@ -10,6 +10,11 @@ import com.matrixlive.screen.ScreenDeviceRepository;
 import io.jsonwebtoken.JwtException;
 import java.util.List;
 import java.util.UUID;
+import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.context.event.EventListener;
+import org.springframework.web.socket.messaging.SessionDisconnectEvent;
+import org.springframework.messaging.simp.SimpMessageType;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.messaging.Message;
@@ -35,6 +40,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
   private final UserAccountRepository users;
   private final ActivityRepository activities;
   private final ScreenDeviceRepository devices;
+  private final ConcurrentHashMap<String, AuthenticatedPrincipal> sessions = new ConcurrentHashMap<>();
 
   public StompJwtChannelInterceptor(JwtTokenService tokens, TokenRevocationService revocations,
       ActivityMembershipRepository memberships, UserAccountRepository users, ActivityRepository activities,
@@ -55,17 +61,50 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
       throw new AccessDeniedException("Clients cannot publish server events");
     }
     if (StompCommand.CONNECT.equals(headers.getCommand())) {
-      headers.setUser(authenticate(headers));
+      Authentication authentication = authenticate(headers);
+      headers.setUser(authentication);
+      if (headers.getSessionId() != null) {
+        sessions.put(headers.getSessionId(), (AuthenticatedPrincipal) authentication.getPrincipal());
+      }
       return message;
     }
     if (StompCommand.SUBSCRIBE.equals(headers.getCommand())) {
       if (!(headers.getUser() instanceof Authentication authentication)
           || !(authentication.getPrincipal() instanceof AuthenticatedPrincipal principal)
+          || !isCurrent(principal)
           || !isAllowedSubscription(principal, headers.getDestination())) {
         throw new AccessDeniedException("Not authorized to subscribe to this topic");
       }
     }
     return message;
+  }
+
+  /** The broker supplies a session id on each delivery, but does not retain simpUser. */
+  public ChannelInterceptor outboundAuthorization() {
+    return new ChannelInterceptor() {
+      @Override public Message<?> preSend(Message<?> message, MessageChannel channel) {
+        StompHeaderAccessor headers = StompHeaderAccessor.wrap(message);
+        if (headers.getMessageType() != SimpMessageType.MESSAGE) return message;
+        AuthenticatedPrincipal principal = headers.getSessionId() == null ? null : sessions.get(headers.getSessionId());
+        return principal != null && isCurrent(principal)
+            && isAllowedSubscription(principal, headers.getDestination()) ? message : null;
+      }
+    };
+  }
+
+  @EventListener
+  public void disconnected(SessionDisconnectEvent event) { sessions.remove(event.getSessionId()); }
+
+  private boolean isCurrent(AuthenticatedPrincipal principal) {
+    if (principal.expiresAt() == null || !principal.expiresAt().isAfter(Instant.now())
+        || revocations.isAccessTokenRevoked(principal.tokenId())) return false;
+    if (principal.kind() == PrincipalKind.ACCOUNT) {
+      return principal.userId() != null && users.findById(principal.userId()).filter(UserAccount::isEnabled)
+          .map(account -> account.getSystemRole() == principal.role()
+              || (account.getSystemRole() == null && principal.role() == UserRole.STAFF)).orElse(false);
+    }
+    return !principal.isScreenDevice() || (principal.deviceId() != null && principal.activityId() != null
+        && devices.findByIdAndActivityId(principal.deviceId(), principal.activityId()).isPresent());
   }
 
   private Authentication authenticate(StompHeaderAccessor headers) {

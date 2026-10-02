@@ -9,5 +9,6 @@ public interface ActivityMembershipRepository extends JpaRepository<ActivityMemb
   Optional<ActivityMembership> findByUserIdAndActivityId(UUID userId, UUID activityId);
   boolean existsByUserIdAndRole(UUID userId, UserRole role);
   List<ActivityMembership> findByActivityIdOrderByCreatedAtAsc(UUID activityId);
+  List<ActivityMembership> findByUserId(UUID userId);
   void deleteByUserIdAndActivityId(UUID userId, UUID activityId);
 }

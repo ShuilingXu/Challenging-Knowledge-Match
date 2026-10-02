@@ -117,7 +117,7 @@ class ActivityDomainWorkflowTest {
 
     var graded = service.gradeSubmission(activity.id(), answer.submissionId(),
         new GradeSubmissionRequest(85, "观点完整，表达清晰。"));
-    assertEquals("SCORED", graded.status());
+    assertEquals("PARTIAL", graded.status());
     assertEquals("观点完整，表达清晰。", graded.feedback());
     assertEquals(85, service.participant(activity.id(), participant.id()).score());
   }

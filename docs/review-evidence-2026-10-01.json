@@ -1,0 +1,404 @@
+{
+  "manualScore": {
+    "submissionBefore": {
+      "submissionId": "98a4274b-236a-409e-8d68-42ccf64c4d18",
+      "awardedPoints": -20,
+      "totalScore": 0,
+      "replayed": false,
+      "status": "PENDING_REVIEW",
+      "feedback": null,
+      "responseRank": 1
+    },
+    "graded": {
+      "id": "98a4274b-236a-409e-8d68-42ccf64c4d18",
+      "participantId": "e9cc95b4-9687-45e6-a099-661d349df5fb",
+      "questionId": "ae78bbf9-6a8d-4cfa-9f21-1111285b1d58",
+      "answers": [
+        "answer"
+      ],
+      "awardedPoints": 100,
+      "status": "SCORED",
+      "feedback": null,
+      "submittedAt": "2026-10-01T08:53:47.653243Z",
+      "gradedAt": "2026-10-01T08:53:47.697386637Z",
+      "responseRank": 1
+    },
+    "scoreboard": [
+      {
+        "rank": 1,
+        "participantId": "e9cc95b4-9687-45e6-a099-661d349df5fb",
+        "name": "Review P1",
+        "venue": "hall",
+        "score": 120
+      },
+      {
+        "rank": 2,
+        "participantId": "f79dac58-0aeb-47b8-8836-cfafc8fe54f2",
+        "name": "Review P2",
+        "venue": "hall",
+        "score": 0
+      }
+    ],
+    "stats": {
+      "questionId": "ae78bbf9-6a8d-4cfa-9f21-1111285b1d58",
+      "eligibleParticipantCount": 2,
+      "submittedCount": 1,
+      "unansweredCount": 1,
+      "pendingReviewCount": 0,
+      "correctCount": 0,
+      "partialCount": 0,
+      "incorrectCount": 0,
+      "submissions": [
+        {
+          "participantId": "e9cc95b4-9687-45e6-a099-661d349df5fb",
+          "participantName": "Review P1",
+          "venue": "hall",
+          "answers": [
+            "answer"
+          ],
+          "awardedPoints": 100,
+          "status": "SCORED",
+          "responseRank": 1,
+          "submittedAt": "2026-10-01T08:53:47.653243Z"
+        }
+      ]
+    }
+  },
+  "pausedAnswer": {
+    "status": 200,
+    "data": {
+      "submissionId": "8d8f2c5e-7b64-4ea5-b374-3128191cbc9e",
+      "awardedPoints": -20,
+      "totalScore": 0,
+      "replayed": false,
+      "status": "PENDING_REVIEW",
+      "feedback": null,
+      "responseRank": 2
+    }
+  },
+  "staleScreen": {
+    "before": [
+      {
+        "rank": 1,
+        "participantId": "e9cc95b4-9687-45e6-a099-661d349df5fb",
+        "name": "Review P1",
+        "venue": "hall",
+        "score": 120
+      },
+      {
+        "rank": 2,
+        "participantId": "f79dac58-0aeb-47b8-8836-cfafc8fe54f2",
+        "name": "Review P2",
+        "venue": "hall",
+        "score": 0
+      }
+    ],
+    "after": [
+      {
+        "rank": 1,
+        "participantId": "e9cc95b4-9687-45e6-a099-661d349df5fb",
+        "name": "Review P1",
+        "venue": "hall",
+        "score": 120
+      },
+      {
+        "rank": 2,
+        "participantId": "f79dac58-0aeb-47b8-8836-cfafc8fe54f2",
+        "name": "Review P2",
+        "venue": "hall",
+        "score": 0
+      }
+    ],
+    "actual": [
+      {
+        "rank": 1,
+        "participantId": "e9cc95b4-9687-45e6-a099-661d349df5fb",
+        "name": "Review P1",
+        "venue": "hall",
+        "score": 130
+      },
+      {
+        "rank": 2,
+        "participantId": "f79dac58-0aeb-47b8-8836-cfafc8fe54f2",
+        "name": "Review P2",
+        "venue": "hall",
+        "score": 0
+      }
+    ]
+  },
+  "capacity": [
+    {
+      "status": 201,
+      "data": {
+        "id": "4007767a-fe86-4db7-a455-0d0f81aa2e66",
+        "name": "Concurrent 0",
+        "contact": "capacity0",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.055411055Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 201,
+      "data": {
+        "id": "2600b1d5-96c5-4ecb-aef7-27a06ebb89cc",
+        "name": "Concurrent 1",
+        "contact": "capacity1",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.060370388Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 201,
+      "data": {
+        "id": "05790c18-6ca3-43fe-ad3f-403e145a8596",
+        "name": "Concurrent 2",
+        "contact": "capacity2",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.060901505Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 201,
+      "data": {
+        "id": "02bb5ed9-86f6-4f7c-9915-a4ec30d41197",
+        "name": "Concurrent 3",
+        "contact": "capacity3",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.060589790Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 201,
+      "data": {
+        "id": "93ecb0c2-961c-454f-b449-d986fdfe1bdf",
+        "name": "Concurrent 4",
+        "contact": "capacity4",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.051470983Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 201,
+      "data": {
+        "id": "8c594313-704f-4926-b299-226889d250b1",
+        "name": "Concurrent 5",
+        "contact": "capacity5",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.056814817Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 201,
+      "data": {
+        "id": "9f4d462b-64d2-4c07-8e67-f4ecfc177355",
+        "name": "Concurrent 6",
+        "contact": "capacity6",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.060889210Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 201,
+      "data": {
+        "id": "9c4776fa-6cff-4607-9e83-3c17a8153017",
+        "name": "Concurrent 7",
+        "contact": "capacity7",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.057125169Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 409,
+      "data": {
+        "error": "Venue registration capacity has been reached",
+        "time": "2026-10-01T08:53:48.066335348Z"
+      }
+    },
+    {
+      "status": 201,
+      "data": {
+        "id": "79943652-b304-4948-ad2a-da363673ea90",
+        "name": "Concurrent 9",
+        "contact": "capacity9",
+        "venue": "tiny",
+        "organization": null,
+        "score": 0,
+        "status": "ACTIVE",
+        "registeredAt": "2026-10-01T08:53:48.060432394Z",
+        "customFields": {}
+      }
+    },
+    {
+      "status": 409,
+      "data": {
+        "error": "Venue registration capacity has been reached",
+        "time": "2026-10-01T08:53:48.061370513Z"
+      }
+    },
+    {
+      "status": 409,
+      "data": {
+        "error": "Venue registration capacity has been reached",
+        "time": "2026-10-01T08:53:48.066126077Z"
+      }
+    }
+  ],
+  "refreshReuse": {
+    "rotation": 200,
+    "replay": 401,
+    "childAfterReplay": 200
+  },
+  "escalation": {
+    "beforeAdminEndpoint": 403,
+    "userList": 200,
+    "attach": 201,
+    "passwordReset": 200,
+    "newLogin": 200,
+    "role": "SYSTEM_ADMIN"
+  },
+  "media": {
+    "smallUpload": 201,
+    "redirect": 302,
+    "redirectHost": "ckm-review-minio:9000",
+    "large2MiB": 401,
+    "boundary": [
+      {
+        "size": 1048576,
+        "status": 201
+      },
+      {
+        "size": 1048577,
+        "status": 401
+      }
+    ]
+  },
+  "activityId": "b86ee77e-cf7a-467c-a076-af7bcfff06cb",
+  "awardWorkflow": {
+    "createPool": 201,
+    "issue": 201,
+    "redeem": 200,
+    "finalStatus": "REDEEMED"
+  },
+  "websocketLogout": {
+    "connected": true,
+    "logout": 204,
+    "httpAfterLogout": 401,
+    "receivedEventAfterLogout": true
+  },
+  "scoreboardClassification": [
+    {
+      "rank": 1,
+      "participantId": "e9cc95b4-9687-45e6-a099-661d349df5fb",
+      "name": "Review P1",
+      "venue": "hall",
+      "score": 131
+    },
+    {
+      "rank": 2,
+      "participantId": "93ecb0c2-961c-454f-b449-d986fdfe1bdf",
+      "name": "Concurrent 4",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 3,
+      "participantId": "4007767a-fe86-4db7-a455-0d0f81aa2e66",
+      "name": "Concurrent 0",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 4,
+      "participantId": "8c594313-704f-4926-b299-226889d250b1",
+      "name": "Concurrent 5",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 5,
+      "participantId": "9c4776fa-6cff-4607-9e83-3c17a8153017",
+      "name": "Concurrent 7",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 6,
+      "participantId": "2600b1d5-96c5-4ecb-aef7-27a06ebb89cc",
+      "name": "Concurrent 1",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 7,
+      "participantId": "79943652-b304-4948-ad2a-da363673ea90",
+      "name": "Concurrent 9",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 8,
+      "participantId": "02bb5ed9-86f6-4f7c-9915-a4ec30d41197",
+      "name": "Concurrent 3",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 9,
+      "participantId": "9f4d462b-64d2-4c07-8e67-f4ecfc177355",
+      "name": "Concurrent 6",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 10,
+      "participantId": "05790c18-6ca3-43fe-ad3f-403e145a8596",
+      "name": "Concurrent 2",
+      "venue": "tiny",
+      "score": 0
+    },
+    {
+      "rank": 11,
+      "participantId": "f79dac58-0aeb-47b8-8836-cfafc8fe54f2",
+      "name": "Review P2",
+      "venue": "hall",
+      "score": -30
+    }
+  ],
+  "concurrentRefresh": [
+    200,
+    200,
+    200
+  ]
+}

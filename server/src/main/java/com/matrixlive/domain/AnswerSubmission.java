@@ -89,10 +89,10 @@ public class AnswerSubmission {
     responseRank = rank;
   }
 
-  public void grade(int awardedPoints, String feedback) {
+  public void grade(int awardedPoints, String feedback, String outcome) {
     this.awardedPoints = awardedPoints;
     this.feedback = feedback;
-    this.status = "SCORED";
+    this.status = outcome;
     this.gradedAt = Instant.now();
   }
 }

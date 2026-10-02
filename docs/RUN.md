@@ -44,6 +44,18 @@ regional AWS endpoint. MinIO and other S3-compatible services should set
 `S3_PUBLIC_BASE_URL` is optional; if it already ends with the bucket name, the
 API appends only the object key, otherwise it appends `/{bucket}/{objectKey}`.
 
+Uploads return a stable URL on the API's own origin. With no
+`S3_PUBLIC_BASE_URL`, that URL streams the object through the API, including
+single HTTP byte ranges for audio/video seeking. The browser therefore does
+not need to resolve Docker's internal MinIO hostname. A configured public base
+URL retains redirects to that externally reachable address.
+
+The default file limit is 20 MiB (`S3_MAX_FILE_SIZE`, bytes), and the multipart
+request limit is 21 MiB (`MEDIA_MAX_REQUEST_SIZE`, bytes) to allow headers and
+form fields. Oversized uploads return HTTP 413. If increasing the file limit,
+also increase the request limit and Nginx's `client_max_body_size` (21 MiB by
+default) to allow multipart overhead.
+
 ## Full local stack
 
 Run `docker compose up --build`. The web app is served on `http://127.0.0.1:4173`, MinIO on ports `9000` and `9001`, and the API is proxied under `/api`.

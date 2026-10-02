@@ -5,8 +5,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.CacheControl;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -33,11 +33,34 @@ public class MediaController {
   }
 
   @GetMapping("/{category}/{fileName}")
-  public ResponseEntity<Void> access(@PathVariable UUID activityId, @PathVariable String category,
-      @PathVariable String fileName) throws Exception {
-    return ResponseEntity.status(HttpStatus.FOUND)
-        .location(java.net.URI.create(storage.accessUrl(activityId, category, fileName)))
-        .cacheControl(CacheControl.noStore()).build();
+  public void access(@PathVariable UUID activityId, @PathVariable String category,
+      @PathVariable String fileName, @RequestHeader(name = "Range", required = false) String range,
+      HttpServletResponse response) throws Exception {
+    response.setHeader("Cache-Control", "no-store");
+    ObjectStorageService.MediaContent content;
+    try {
+      content = storage.access(activityId, category, fileName, range);
+    } catch (ObjectStorageService.InvalidMediaRange exception) {
+      response.setStatus(416);
+      response.setHeader("Content-Range", "bytes */" + exception.size());
+      return;
+    }
+    if (content.location() != null) {
+      response.setStatus(302);
+      response.setHeader("Location", content.location());
+      return;
+    }
+    try (var stream = content.stream()) {
+      response.setStatus(content.partial() ? 206 : 200);
+      response.setContentType(content.contentType());
+      response.setContentLengthLong(content.size());
+      response.setHeader("X-Content-Type-Options", "nosniff");
+      // SVG uploads can contain active content; a direct navigation must not run it on the API origin.
+      response.setHeader("Content-Security-Policy", "sandbox");
+      response.setHeader("Accept-Ranges", "bytes");
+      if (content.contentRange() != null) response.setHeader("Content-Range", content.contentRange());
+      stream.transferTo(response.getOutputStream());
+    }
   }
 
   public record MediaUploadResponse(String objectKey, String url, String contentType, long size) { }

@@ -11,6 +11,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+  @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+  public ResponseEntity<Map<String, Object>> uploadLimit(org.springframework.web.multipart.MaxUploadSizeExceededException exception) {
+    return ResponseEntity.status(413).body(Map.of("error", "Upload exceeds configured file size limit",
+        "time", Instant.now().toString()));
+  }
+
   @ExceptionHandler(DomainException.class)
   public ResponseEntity<Map<String, Object>> domain(DomainException exception) {
     return ResponseEntity.status(exception.getStatus()).body(Map.of("error", exception.getMessage(), "time", Instant.now().toString()));

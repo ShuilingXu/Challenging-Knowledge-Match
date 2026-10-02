@@ -3,20 +3,20 @@ package com.matrixlive.media;
 import com.matrixlive.service.DomainException;
 import com.matrixlive.service.SiteSettingsService;
 import io.minio.BucketExistsArgs;
-import io.minio.GetPresignedObjectUrlArgs;
+import io.minio.GetObjectArgs;
+import io.minio.StatObjectArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.credentials.StaticProvider;
-import io.minio.http.Method;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.time.Duration;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpRange;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -64,14 +64,51 @@ public class ObjectStorageService {
         settings.secretKey(), settings.sessionToken(), settings.publicBaseUrl(), normalizeAddressingStyle(settings.addressingStyle()));
   }
 
-  public String accessUrl(UUID activityId, String category, String fileName) throws Exception {
+  public MediaContent access(UUID activityId, String category, String fileName, String range) {
     if (!category.matches("[a-z0-9_-][a-z0-9._-]{0,119}")
         || !fileName.matches("[0-9a-f-]{36}-[a-z0-9._-]+")) {
       throw new DomainException(HttpStatus.BAD_REQUEST, "Invalid media path");
     }
     StorageTarget target = target();
     validateTarget(target);
-    return publicUrl(client(target), target, activityId + "/" + category + "/" + fileName);
+    String objectKey = activityId + "/" + category + "/" + fileName;
+    if (!blank(target.publicBaseUrl())) {
+      return new MediaContent(publicUrl(target, objectKey), null, null, 0, null, false);
+    }
+    try {
+      MinioClient storage = client(target);
+      var metadata = storage.statObject(StatObjectArgs.builder().bucket(target.bucket()).object(objectKey).build());
+      long size = metadata.size();
+      long start = 0;
+      long end = size - 1;
+      boolean partial = range != null;
+      if (partial) {
+        try {
+          var ranges = HttpRange.parseRanges(range);
+          if (ranges.size() != 1 || size == 0) throw new IllegalArgumentException();
+          start = ranges.getFirst().getRangeStart(size);
+          end = ranges.getFirst().getRangeEnd(size);
+          if (start >= size || end < start) throw new IllegalArgumentException();
+        } catch (IllegalArgumentException exception) {
+          throw new InvalidMediaRange(size);
+        }
+      }
+      var request = GetObjectArgs.builder().bucket(target.bucket()).object(objectKey);
+      if (partial) request.offset(start).length(end - start + 1);
+      InputStream stream = storage.getObject(request.build());
+      String contentType = blank(metadata.contentType()) ? "application/octet-stream" : metadata.contentType();
+      return new MediaContent(null, stream, contentType, partial ? end - start + 1 : size,
+          partial ? "bytes " + start + "-" + end + "/" + size : null, partial);
+    } catch (DomainException exception) {
+      throw exception;
+    } catch (io.minio.errors.ErrorResponseException exception) {
+      if ("NoSuchKey".equals(exception.errorResponse().code()) || "NoSuchObject".equals(exception.errorResponse().code())) {
+        throw new DomainException(HttpStatus.NOT_FOUND, "Media does not exist");
+      }
+      throw new DomainException(HttpStatus.SERVICE_UNAVAILABLE, "Object storage download failed");
+    } catch (Exception exception) {
+      throw new DomainException(HttpStatus.SERVICE_UNAVAILABLE, "Object storage download failed");
+    }
   }
 
   private MinioClient client(StorageTarget target) {
@@ -118,15 +155,11 @@ public class ObjectStorageService {
     }
   }
 
-  private String publicUrl(MinioClient storage, StorageTarget target, String objectKey) throws Exception {
-    if (target.publicBaseUrl() != null && !target.publicBaseUrl().isBlank()) {
-      String base = target.publicBaseUrl().trim().replaceAll("/+$", "");
-      String bucketSuffix = "/" + target.bucket();
-      if (base.endsWith(bucketSuffix)) return base + "/" + objectKey;
-      return base + bucketSuffix + "/" + objectKey;
-    }
-    return storage.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder().method(Method.GET).bucket(target.bucket())
-        .object(objectKey).expiry((int) Duration.ofHours(1).toSeconds()).build());
+  private String publicUrl(StorageTarget target, String objectKey) {
+    String base = target.publicBaseUrl().trim().replaceAll("/+$", "");
+    String bucketSuffix = "/" + target.bucket();
+    if (base.endsWith(bucketSuffix)) return base + "/" + objectKey;
+    return base + bucketSuffix + "/" + objectKey;
   }
 
   private String sanitize(String value) {
@@ -193,6 +226,18 @@ public class ObjectStorageService {
   }
 
   public record StoredObject(String objectKey, String url, String contentType, long size) { }
+
+  public record MediaContent(String location, InputStream stream, String contentType, long size,
+      String contentRange, boolean partial) { }
+
+  public static class InvalidMediaRange extends DomainException {
+    private final long size;
+    InvalidMediaRange(long size) {
+      super(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE, "Invalid media byte range");
+      this.size = size;
+    }
+    public long size() { return size; }
+  }
 
   private record StorageTarget(boolean enabled, String endpoint, String region, String bucket, String accessKey,
       String secretKey, String sessionToken, String publicBaseUrl, String addressingStyle) { }

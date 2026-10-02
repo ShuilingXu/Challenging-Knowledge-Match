@@ -63,10 +63,16 @@ public class AuthService {
     return session;
   }
 
-  @Transactional
+  @Transactional(noRollbackFor = DomainException.class)
   public AuthenticatedSession refresh(String rawToken, HttpServletRequest servletRequest) {
     if (rawToken == null || rawToken.isBlank()) throw new DomainException(HttpStatus.UNAUTHORIZED, "Refresh token is required");
     String tokenHash = hash(rawToken);
+    // Lock the stable owner before loading any token entity. Locking only the
+    // presented token would not serialize a replay against its active descendant.
+    UUID ownerId = refreshTokens.findUserIdByTokenHash(tokenHash)
+        .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
+    users.findByIdForUpdate(ownerId)
+        .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "Account is unavailable"));
     RefreshToken existing = refreshTokens.findByTokenHash(tokenHash)
         .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
     if (!existing.isActive(Instant.now())) {
@@ -104,6 +110,7 @@ public class AuthService {
   @Transactional
   public void logout(String rawRefreshToken, HttpServletRequest servletRequest, UUID accountId) {
     if (rawRefreshToken != null && !rawRefreshToken.isBlank()) {
+      refreshTokens.findUserIdByTokenHash(hash(rawRefreshToken)).ifPresent(users::findByIdForUpdate);
       refreshTokens.findByTokenHash(hash(rawRefreshToken)).filter(token -> token.isActive(Instant.now()))
           .ifPresent(token -> token.revoke(null));
     }

@@ -2,7 +2,7 @@ spring:
   servlet:
     multipart:
       max-file-size: ${S3_MAX_FILE_SIZE:20971520}
-      max-request-size: 24MB
+      max-request-size: ${MEDIA_MAX_REQUEST_SIZE:25165824}
   application:
     name: knowledge-match-api
   datasource:
@@ -24,6 +24,8 @@ spring:
       repositories:
         enabled: false
 server:
+  tomcat:
+    max-swallow-size: -1
   port: 8080
   forward-headers-strategy: framework
 

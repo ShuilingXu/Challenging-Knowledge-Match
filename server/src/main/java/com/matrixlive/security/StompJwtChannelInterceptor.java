@@ -63,6 +63,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     if (StompCommand.SUBSCRIBE.equals(headers.getCommand())) {
       if (!(headers.getUser() instanceof Authentication authentication)
           || !(authentication.getPrincipal() instanceof AuthenticatedPrincipal principal)
+          || !isCurrent(principal)
           || !isAllowedSubscription(principal, headers.getDestination())) {
         throw new AccessDeniedException("Not authorized to subscribe to this topic");
       }
@@ -73,11 +74,36 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
   public Message<?> outbound(Message<?> message) {
     var headers = org.springframework.messaging.simp.SimpMessageHeaderAccessor.wrap(message);
     if (headers.getMessageType() != org.springframework.messaging.simp.SimpMessageType.MESSAGE) return message;
-    TokenClaims claims = sessions.get(headers.getSessionId());
-    if (claims == null || !claims.expiresAt().isAfter(java.time.Instant.now()) || revocations.isAccessTokenRevoked(claims)) return null;
-    if (claims.kind() == PrincipalKind.ACCOUNT && !isEnabledAccount(claims)) return null;
-    if (claims.kind() == PrincipalKind.SCREEN_DEVICE && devices.findByIdAndActivityId(claims.deviceId(),claims.activityId()).isEmpty()) return null;
+    TokenClaims claims = headers.getSessionId() == null ? null : sessions.get(headers.getSessionId());
+    if (claims == null || !isCurrent(principal(claims))) return null;
+    if (!isAllowedSubscription(principal(claims), headers.getDestination())) return null;
     return message;
+  }
+
+  public ChannelInterceptor outboundAuthorization() {
+    return new ChannelInterceptor() {
+      @Override public Message<?> preSend(Message<?> message, MessageChannel channel) {
+        return outbound(message);
+      }
+    };
+  }
+
+  private AuthenticatedPrincipal principal(TokenClaims claims) {
+    return new AuthenticatedPrincipal(claims.tokenId(), claims.kind(), claims.userId(),
+        claims.participantId(), claims.deviceId(), claims.activityId(), claims.role(), claims.username(),
+        claims.expiresAt(), claims.familyId());
+  }
+
+  private boolean isCurrent(AuthenticatedPrincipal principal) {
+    if (principal.expiresAt() == null || !principal.expiresAt().isAfter(java.time.Instant.now())
+        || revocations.isAccessTokenRevoked(principal.tokenId())
+        || principal.familyId() != null && revocations.isAccessTokenRevoked(principal.familyId())) return false;
+    if (principal.kind() == PrincipalKind.ACCOUNT) {
+      return principal.userId() != null && users.findById(principal.userId()).filter(UserAccount::isEnabled)
+          .map(account -> account.getSystemRole() == principal.role()
+              || account.getSystemRole() == null && principal.role() == UserRole.STAFF).orElse(false);
+    }
+    return !principal.isScreenDevice() || devices.findByIdAndActivityId(principal.deviceId(), principal.activityId()).isPresent();
   }
 
   @org.springframework.context.event.EventListener

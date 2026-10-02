@@ -303,7 +303,7 @@ public class ActivityService {
     UUID scopeId = participantScopeActivity(activityId);
     ensureRegistrationAllowed(activities.findForUpdate(scopeId).orElseThrow(() -> notFound("Activity not found")));
     String venue = normalizeVenue(venueCode);
-    Venue venueEntity = venues.findByActivityIdAndCode(scopeId, venue)
+    Venue venueEntity = venues.findForRegistration(scopeId, venue)
         .orElseThrow(() -> badRequest("Venue is not configured in this activity"));
     if (!venueEntity.isEnabled()) throw conflict("Venue is disabled");
     if (venueEntity.getCapacity() != null
@@ -361,7 +361,7 @@ public class ActivityService {
           .findFirst().ifPresent(existing -> { throw conflict("This contact is already registered in the selected venue"); });
     }
     if (!venue.equals(participant.getVenue())) {
-      Venue venueEntity = venues.findByActivityIdAndCode(scopeId, venue)
+      Venue venueEntity = venues.findForRegistration(scopeId, venue)
           .orElseThrow(() -> notFound("Venue does not exist in this activity"));
       if (!venueEntity.isEnabled()) throw conflict("Venue is disabled");
       if (venueEntity.getCapacity() != null
@@ -600,7 +600,8 @@ public class ActivityService {
     int awarded = request.awardedPoints();
     // A zero score is an explicitly incorrect answer; apply configured deduction rules.
     if (awarded == 0) awarded = applyScoring(activity, question.getFullScore(), 0, submission.getResponseRank());
-    int delta = awarded - submission.getAwardedPoints();
+    int postedPoints = "PENDING_REVIEW".equals(submission.getStatus()) ? 0 : submission.getAwardedPoints();
+    int delta = awarded - postedPoints;
     submission.grade(awarded, cleanOptional(request.feedback()), request.awardedPoints() >= question.getFullScore() ? "CORRECT" : request.awardedPoints() > 0 ? "PARTIAL" : "INCORRECT");
     if (delta != 0) {
       participant.addScore(delta);
@@ -608,6 +609,7 @@ public class ActivityService {
           "GRADE_ADJUSTMENT", "Manual grading adjustment"));
     }
     broadcast(activityId, "answer.graded");
+    events.publishEvent(new SubmissionScreenUpdater.LiveDataChanged(activityId, question.getId()));
     return toSubmission(submission);
   }
 
@@ -641,6 +643,7 @@ public class ActivityService {
         "MANUAL_ADJUSTMENT", cleanOptional(request.note())));
     entry.setIdempotencyKey(key);
     broadcast(activityId, "score.adjusted");
+    events.publishEvent(new SubmissionScreenUpdater.LiveDataChanged(activityId, null));
     return toScoreLedger(entry);
   }
 
@@ -748,20 +751,7 @@ public class ActivityService {
           payload.put("answerMediaUrls", question.getAnswerMediaUrls());
           payload.put("answerMediaUrl", question.getAnswerMediaUrls().isEmpty() ? "" : question.getAnswerMediaUrls().get(0));
           payload.put("answers", displayAnswers(question));
-          List<Map<String, Object>> responses = submissions
-              .findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, question.getId()).stream()
-              .map(item -> {
-                Map<String, Object> response = new HashMap<>();
-                Participant participant = participants.findById(item.getParticipantId()).orElse(null);
-                response.put("participantName", participant == null ? "参与者" : participant.getName());
-                response.put("answers", readSubmittedAnswers(item.getSubmittedAnswers(), item.getQuestionId()));
-                response.put("awardedPoints", item.getAwardedPoints());
-                response.put("status", item.getStatus());
-                response.put("submittedAt", item.getSubmittedAt());
-                response.put("elapsedSeconds", item.getElapsedSeconds());
-                return response;
-              }).toList();
-          payload.put("responses", responses);
+          payload.put("responses", screenResponses(activityId, question.getId()));
         }
         payload.put("submittedCount", submissions.countByActivityIdAndQuestionId(activityId, question.getId()));
       }
@@ -790,6 +780,24 @@ public class ActivityService {
       payload.put("message", "工作人员将在控场台下发下一步内容。");
     }
     screens.publishActivityDisplay(activityId, mode, payload);
+  }
+
+  @Transactional(readOnly = true)
+  public List<Map<String, Object>> screenResponses(UUID activityId, UUID questionId) {
+    requireQuestion(activityId, questionId);
+    return submissions
+              .findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, questionId).stream()
+              .map(item -> {
+                Map<String, Object> response = new HashMap<>();
+                Participant participant = participants.findById(item.getParticipantId()).orElse(null);
+                response.put("participantName", participant == null ? "参与者" : participant.getName());
+                response.put("answers", readSubmittedAnswers(item.getSubmittedAnswers(), item.getQuestionId()));
+                response.put("awardedPoints", item.getAwardedPoints());
+                response.put("status", item.getStatus());
+                response.put("submittedAt", item.getSubmittedAt());
+                response.put("elapsedSeconds", item.getElapsedSeconds());
+                return response;
+              }).toList();
   }
 
   private int remainingSeconds(ControlState state) {

@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -245,7 +246,7 @@ public class ScreenService {
   @Transactional
   public void refreshQuestionSubmissionCount(UUID activityId, UUID questionId, long submittedCount) {
     requireActivity(activityId);
-    for (ScreenDevice device : devices.findByActivityIdOrderByLastSeenAtDesc(activityId)) {
+    for (ScreenDevice device : devices.findForDisplayUpdate(activityId)) {
       ScreenDisplayMode mode = ScreenDisplayMode.valueOf(device.getDisplayMode());
       if (mode != ScreenDisplayMode.QUESTION && mode != ScreenDisplayMode.RESULT) continue;
       Map<String, Object> data = readMap(device.getDisplayPayloadJson());
@@ -253,6 +254,29 @@ public class ScreenService {
       data.put("submittedCount", submittedCount);
       device.updateDisplayPayload(writeJson(data));
       broadcastDevice(activityId, device, "screen.submissions.updated", toDisplay(device));
+    }
+  }
+
+  /** Refresh live data without resetting a device's layout, scroll position, or display mode. */
+  @Transactional
+  public void refreshLiveData(UUID activityId, Supplier<?> scoreboard, UUID questionId,
+      Supplier<?> responses) {
+    Object rows = null;
+    Object answerRows = null;
+    for (ScreenDevice device : devices.findForDisplayUpdate(activityId)) {
+      Map<String, Object> data = readMap(device.getDisplayPayloadJson());
+      if (ScreenDisplayMode.SCOREBOARD.name().equals(device.getDisplayMode())) {
+        if (rows == null) rows = scoreboard.get();
+        data.put("rows", rows);
+      } else if (questionId != null && ScreenDisplayMode.RESULT.name().equals(device.getDisplayMode())
+          && questionId.toString().equals(String.valueOf(data.get("questionId")))) {
+        if (answerRows == null) answerRows = responses.get();
+        data.put("responses", answerRows);
+      } else {
+        continue;
+      }
+      device.updateDisplayPayload(writeJson(data));
+      broadcastDevice(activityId, device, "screen.display.updated", toDisplay(device));
     }
   }
 

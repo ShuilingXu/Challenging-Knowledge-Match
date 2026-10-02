@@ -26,6 +26,8 @@ class SecurityIntegrationTest {
   @Autowired private ObjectMapper objectMapper;
   @Autowired private ActivityRepository activities;
   @Autowired private com.matrixlive.service.ActivityService service;
+  @Autowired private com.matrixlive.security.auth.AuthService auth;
+  @Autowired private com.matrixlive.security.auth.RefreshTokenRepository refreshTokens;
 
   @Test
   void floorStaffCanAdjustAndGradeScoresButCannotReverseOrVoidAwards() throws Exception {
@@ -233,6 +235,136 @@ class SecurityIntegrationTest {
     return mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
             .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
         .andExpect(status().isOk()).andReturn();
+  }
+
+  @Test
+  void activityCredentialsCannotTakeOverGlobalOrSharedAccounts() throws Exception {
+    UUID activityId = activities.findAll().getFirst().getId();
+    String path = "/api/activities/" + activityId + "/memberships";
+    String scopedToken = accessToken(login("activity-admin", "ChangeMe!2026"));
+    MvcResult systemLogin = login("sysadmin", "ChangeMe!2026");
+    String systemId = objectMapper.readTree(systemLogin.getResponse().getContentAsString()).get("userId").asText();
+    String systemToken = accessToken(systemLogin);
+    mvc.perform(post(path).header("Authorization", "Bearer " + scopedToken).contentType(MediaType.APPLICATION_JSON)
+        .content("{\"userId\":\"" + systemId + "\",\"role\":\"STAFF\"}")).andExpect(status().isCreated());
+    try {
+      mvc.perform(patch(path + "/users/" + systemId).header("Authorization", "Bearer " + scopedToken)
+          .contentType(MediaType.APPLICATION_JSON)
+          .content("{\"username\":\"sysadmin\",\"displayName\":\"Taken over\",\"password\":\"Attacker!2026\"}"))
+          .andExpect(status().isForbidden());
+      login("sysadmin", "ChangeMe!2026");
+    } finally {
+      mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(path + "/" + systemId)
+          .header("Authorization", "Bearer " + systemToken)).andExpect(status().isNoContent());
+    }
+    String username = "scoped-" + UUID.randomUUID();
+    MvcResult member = mvc.perform(post(path + "/users").header("Authorization", "Bearer " + scopedToken)
+        .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(java.util.Map.of(
+            "username", username, "displayName", "Scoped", "password", "Initial!2026", "role", "STAFF"))))
+        .andExpect(status().isCreated()).andReturn();
+    String userId = objectMapper.readTree(member.getResponse().getContentAsString()).get("userId").asText();
+    String update = objectMapper.writeValueAsString(java.util.Map.of("username", username,
+        "displayName", "Updated", "password", "ScopedNew!2026"));
+    mvc.perform(patch(path + "/users/" + userId).header("Authorization", "Bearer " + scopedToken)
+        .contentType(MediaType.APPLICATION_JSON).content(update)).andExpect(status().isOk());
+    login(username, "ScopedNew!2026");
+    MvcResult activity = mvc.perform(post("/api/activities").header("Authorization", "Bearer " + systemToken)
+        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Shared identity test\",\"city\":\"Shanghai\"}"))
+        .andExpect(status().isCreated()).andReturn();
+    String otherId = objectMapper.readTree(activity.getResponse().getContentAsString()).get("id").asText();
+    mvc.perform(post("/api/activities/" + otherId + "/memberships").header("Authorization", "Bearer " + systemToken)
+        .contentType(MediaType.APPLICATION_JSON).content("{\"userId\":\"" + userId + "\",\"role\":\"STAFF\"}"))
+        .andExpect(status().isCreated());
+    mvc.perform(patch(path + "/users/" + userId).header("Authorization", "Bearer " + scopedToken)
+        .contentType(MediaType.APPLICATION_JSON).content(update)).andExpect(status().isForbidden());
+  }
+
+  @Test
+  void refreshReplayCommitsFamilyRevocation() {
+    var first = auth.login(new com.matrixlive.security.auth.AuthModels.LoginRequest("sysadmin", "ChangeMe!2026"), null);
+    var second = auth.refresh(first.refreshToken(), null);
+    expireRefreshGrace(first.refreshToken());
+    org.junit.jupiter.api.Assertions.assertThrows(com.matrixlive.service.DomainException.class,
+        () -> auth.refresh(first.refreshToken(), null));
+    org.junit.jupiter.api.Assertions.assertThrows(com.matrixlive.service.DomainException.class,
+        () -> auth.refresh(second.refreshToken(), null));
+  }
+
+  @Test
+  void concurrentRefreshCannotLeaveASecondActiveBranch() throws Exception {
+    var first = auth.login(new com.matrixlive.security.auth.AuthModels.LoginRequest("sysadmin", "ChangeMe!2026"), null);
+    var ready = new java.util.concurrent.CountDownLatch(2);
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+      java.util.concurrent.Callable<Boolean> refresh = () -> {
+        ready.countDown();
+        start.await();
+        try { auth.refresh(first.refreshToken(), null); return true; }
+        catch (com.matrixlive.service.DomainException exception) { return false; }
+      };
+      var one = executor.submit(refresh);
+      var two = executor.submit(refresh);
+      org.junit.jupiter.api.Assertions.assertTrue(ready.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      start.countDown();
+      int successes = (one.get(15, java.util.concurrent.TimeUnit.SECONDS) ? 1 : 0)
+          + (two.get(15, java.util.concurrent.TimeUnit.SECONDS) ? 1 : 0);
+      org.junit.jupiter.api.Assertions.assertEquals(2, successes);
+      String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+          .digest(first.refreshToken().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+      new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+        UUID family = refreshTokens.findByTokenHash(hash).orElseThrow().getFamilyId();
+        org.junit.jupiter.api.Assertions.assertEquals(1, refreshTokens.findByFamilyIdAndRevokedAtIsNull(family).size());
+      });
+    }
+  }
+
+  @Test
+  void replayAndConcurrentDescendantRotationCannotLeaveAnOrphanToken() throws Exception {
+    var first = auth.login(new com.matrixlive.security.auth.AuthModels.LoginRequest("sysadmin", "ChangeMe!2026"), null);
+    var second = auth.refresh(first.refreshToken(), null);
+    expireRefreshGrace(first.refreshToken());
+    var ready = new java.util.concurrent.CountDownLatch(2);
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+      java.util.concurrent.Callable<Void> replay = () -> {
+        ready.countDown(); start.await();
+        try { auth.refresh(first.refreshToken(), null); org.junit.jupiter.api.Assertions.fail("Replay must fail"); }
+        catch (com.matrixlive.service.DomainException expected) { }
+        return null;
+      };
+      java.util.concurrent.Callable<Void> rotate = () -> {
+        ready.countDown(); start.await();
+        try { auth.refresh(second.refreshToken(), null); }
+        catch (com.matrixlive.service.DomainException expected) { }
+        return null;
+      };
+      var one = executor.submit(replay);
+      var two = executor.submit(rotate);
+      org.junit.jupiter.api.Assertions.assertTrue(ready.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      start.countDown();
+      one.get(15, java.util.concurrent.TimeUnit.SECONDS);
+      two.get(15, java.util.concurrent.TimeUnit.SECONDS);
+      String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+          .digest(first.refreshToken().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+      new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+        UUID family = refreshTokens.findByTokenHash(hash).orElseThrow().getFamilyId();
+        org.junit.jupiter.api.Assertions.assertTrue(refreshTokens.findByFamilyIdAndRevokedAtIsNull(family).isEmpty());
+      });
+    }
+  }
+
+  @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+  private void expireRefreshGrace(String raw) {
+    new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+      try {
+        String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+            .digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        var token = refreshTokens.findByTokenHash(hash).orElseThrow();
+        org.springframework.test.util.ReflectionTestUtils.setField(token, "revokedAt", java.time.Instant.now().minusSeconds(20));
+        refreshTokens.saveAndFlush(token);
+      } catch (java.security.NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }
+    });
   }
 
   private String accessToken(MvcResult result) throws Exception {

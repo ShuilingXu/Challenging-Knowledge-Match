@@ -14,14 +14,17 @@ public class SubmissionScreenUpdater {
   private static final Logger LOG = LoggerFactory.getLogger(SubmissionScreenUpdater.class);
   private final AnswerSubmissionRepository submissions;
   private final ScreenService screens;
+  private final org.springframework.beans.factory.ObjectProvider<ActivityService> activities;
   private final org.springframework.transaction.support.TransactionTemplate transaction;
 
   public SubmissionScreenUpdater(
       AnswerSubmissionRepository submissions,
       ScreenService screens,
+      org.springframework.beans.factory.ObjectProvider<ActivityService> activities,
       org.springframework.transaction.PlatformTransactionManager manager) {
     this.submissions = submissions;
     this.screens = screens;
+    this.activities = activities;
     this.transaction = new org.springframework.transaction.support.TransactionTemplate(manager);
     this.transaction.setPropagationBehavior(
         org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -31,12 +34,14 @@ public class SubmissionScreenUpdater {
   public void submitted(Submitted event) {
     try {
       transaction.executeWithoutResult(
-          status ->
+          status -> {
               screens.refreshQuestionSubmissionCount(
                   event.activityId(),
                   event.questionId(),
                   submissions.countByActivityIdAndQuestionId(
-                      event.activityId(), event.questionId())));
+                      event.activityId(), event.questionId()));
+              refreshLiveData(event.activityId(), event.questionId());
+          });
     } catch (Exception exception) {
       LOG.warn(
           "Answer committed; screen count update will be recovered on the next display read",
@@ -44,5 +49,21 @@ public class SubmissionScreenUpdater {
     }
   }
 
+  @TransactionalEventListener
+  public void changed(LiveDataChanged event) {
+    try {
+      transaction.executeWithoutResult(status -> refreshLiveData(event.activityId(), event.questionId()));
+    } catch (Exception exception) {
+      LOG.warn("Score committed; screen snapshot update failed", exception);
+    }
+  }
+
+  private void refreshLiveData(UUID activityId, UUID questionId) {
+    ActivityService service = activities.getObject();
+    screens.refreshLiveData(activityId, () -> service.scoreboard(activityId), questionId,
+        () -> service.screenResponses(activityId, questionId));
+  }
+
   public record Submitted(UUID activityId, UUID questionId) {}
+  public record LiveDataChanged(UUID activityId, UUID questionId) {}
 }

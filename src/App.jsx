@@ -5762,6 +5762,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
     load();
   }, [load]);
   useActivityStream(activityId, load, participantToken, setError);
+  useActivityStream(identityActivityId !== activityId ? identityActivityId : null, load, participantToken, setError);
   if (loading) return <LoadingPage label="正在连接活动现场" />;
   if (error && !questions.length)
     return <BackendProblem message={error} onRetry={load} />;
@@ -6967,51 +6968,26 @@ function ScreenScoreboard({ board, display }) {
   const scrollRef = useRef(null);
   useScreenScroll(scrollRef, display, "scoreboard");
   const entries = Array.isArray(board) ? board : [];
-  const answeredCorrectly = (item) => {
-    if (item?.correct === false || item?.isCorrect === false) return false;
-    const status = String(item?.status || item?.result || "").toUpperCase();
-    return item?.correct === true || item?.isCorrect === true || ["CORRECT", "PARTIAL"].includes(status);
-  };
-  const isRanking = entries.every((item) => Object.hasOwn(item, "score"));
-  const correct = entries.filter(answeredCorrectly);
-  const incorrect = entries.filter((item) => !answeredCorrectly(item));
-  const deltaFor = (item) => item?.scoreDelta ?? item?.pointsDelta ?? item?.delta ?? item?.change;
-  const scoreLabel = (item) => {
-    const delta = Number(deltaFor(item));
-    if (!Number.isFinite(delta)) return `${item?.score ?? 0} 分`;
-    return `${delta > 0 ? "+" : ""}${delta} 分 → ${item?.score ?? 0} 分`;
-  };
-  const renderColumn = (title, items, tone) => (
-    <section className={`screen-scoreboard-column screen-scoreboard-column--${tone}`}>
-      <h2>{title}</h2>
-      <div className="screen-scoreboard-list">
-        {items.map((item, index) => (
-          <article key={item.participantId || `${tone}-${index}`}>
+  return (
+    <div ref={scrollRef} className="screen-scoreboard-new screen-scrollable">
+      <div>
+        <span>实时积分榜</span>
+        <h1>勇者积分榜</h1>
+        <p>按累计积分排名，积分实时同步。</p>
+      </div>
+      <div className="screen-scoreboard-list screen-ranking-list" aria-label="累计积分排行">
+        {entries.map((item, index) => (
+          <article key={item.participantId || index}>
             <b>{item.rank ?? index + 1}</b>
             <Avatar name={item.name} />
             <div>
               <strong>{item.name || "未命名参与者"}</strong>
               <small>{item.venue || "活动现场"}</small>
             </div>
-            <em>{scoreLabel(item)}</em>
+            <em>{item.score ?? 0} 分</em>
           </article>
         ))}
-        {!items.length && <p className="screen-scoreboard-empty">暂无记录</p>}
-      </div>
-    </section>
-  );
-  return (
-    <div ref={scrollRef} className="screen-scoreboard-new screen-scrollable">
-      <div>
-        <span>实时积分榜</span>
-        <h1>勇者积分榜</h1>
-        <p>答对积攒能量，答错扣除能量，积分实时同步。</p>
-      </div>
-      <div className="screen-scoreboard-columns">
-        {isRanking ? renderColumn("积分排名", entries, "correct") : <>
-          {renderColumn("答对", correct, "correct")}
-          {renderColumn("答错", incorrect, "incorrect")}
-        </>}
+        {!entries.length && <p className="screen-scoreboard-empty">暂无积分记录</p>}
       </div>
     </div>
   );

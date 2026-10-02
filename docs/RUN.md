@@ -41,13 +41,20 @@ For AWS S3, set `S3_ENABLED=true`, `S3_REGION`, `S3_BUCKET`,
 `S3_SECRET_KEY` aliases) and leave `S3_ENDPOINT` empty. The API derives the
 regional AWS endpoint. MinIO and other S3-compatible services should set
 `S3_ENDPOINT`; `S3_ADDRESSING_STYLE` accepts `AUTO`, `PATH`, or `VIRTUAL`.
-`S3_PUBLIC_BASE_URL` is optional; if it already ends with the bucket name, the
-API appends only the object key, otherwise it appends `/{bucket}/{objectKey}`.
+Uploads return a stable same-origin API path. The server streams private
+objects, including single HTTP byte ranges for audio/video seeking. Browsers
+never need to resolve Docker's internal MinIO hostname. The current API does
+not redirect to `S3_PUBLIC_BASE_URL` and does not require an anonymous bucket.
+
+The default file limit is 20 MiB (`S3_MAX_FILE_SIZE`, bytes), and the multipart
+request limit is 24 MiB (`MEDIA_MAX_REQUEST_SIZE`, bytes). Oversized uploads
+return HTTP 413. If increasing the file limit, also increase the request limit
+and Nginx's `client_max_body_size` (24 MiB by default).
 
 ## Full local stack
 
 Run `docker compose up --build`. The web app is served on `http://127.0.0.1:4173`, MinIO on ports `9000` and `9001`, and the API is proxied under `/api`.
 
-The Compose profile uses PostgreSQL. Passwords in `docker-compose.yml` are development-only values; provide non-default values through your deployment environment.
+The Compose profile uses PostgreSQL. Compose requires JWT, bootstrap and storage secrets from the environment. Provide non-default database credentials for production.
 
 For production, set a unique base64-encoded 256-bit-or-longer `JWT_SECRET`, a stable `JWT_ISSUER`, `JWT_REFRESH_COOKIE_SECURE=true`, non-default database credentials, and `APP_BOOTSTRAP_PASSWORD` before the first deployment. Flyway owns the schema; do not use Hibernate DDL updates in deployment.

@@ -1,0 +1,42 @@
+{
+  "manualScore": {
+    "score": 100,
+    "correctCount": 1
+  },
+  "pausedAnswer": 409,
+  "screenScore": 110,
+  "capacity": {
+    "created": 1,
+    "rejected": 11
+  },
+  "refreshReplay": {
+    "old": 401,
+    "child": 401
+  },
+  "refreshConcurrency": [
+    200,
+    401,
+    401
+  ],
+  "accountTakeover": {
+    "reset": 403,
+    "login": 401
+  },
+  "media": {
+    "download": 200,
+    "range": 206,
+    "invalidRange": 416,
+    "upload2MiB": 201,
+    "oversize": 413
+  },
+  "websocket": {
+    "beforeLogoutReceived": true,
+    "afterLogoutReceived": false
+  },
+  "pairingConcurrency": [
+    200,
+    401,
+    401
+  ],
+  "activityId": "1bf21953-8c28-49c3-937d-1f142ab717c9"
+}

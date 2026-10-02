@@ -51,9 +51,15 @@ public class IdentityAdminService {
   @Transactional
   public UserResponse updateActivityUser(UUID activityId, UUID userId, UpdateUserRequest request) {
     requireActivity(activityId);
+    UserAccount user = users.findByIdForUpdate(userId)
+        .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "User does not exist"));
     memberships.findByUserIdAndActivityId(userId, activityId)
         .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "User is not a member of this activity"));
-    UserAccount user = requireUser(userId);
+    if (user.getSystemRole() != null || memberships.findByUserId(userId).stream()
+        .anyMatch(membership -> !activityId.equals(membership.getActivityId()))) {
+      throw new DomainException(HttpStatus.FORBIDDEN,
+          "Global or shared accounts must be edited by a system administrator");
+    }
     updateAccount(user, request);
     return toUser(user);
   }
@@ -79,7 +85,7 @@ public class IdentityAdminService {
   @Transactional
   public MembershipResponse upsertMembership(UUID activityId, MembershipRequest request) {
     requireActivity(activityId);
-    users.findById(request.userId()).orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "User does not exist"));
+    users.findByIdForUpdate(request.userId()).orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "User does not exist"));
     if (request.role() != UserRole.ACTIVITY_ADMIN && request.role() != UserRole.STAFF) {
       throw new DomainException(HttpStatus.BAD_REQUEST, "Membership role must be ACTIVITY_ADMIN or STAFF");
     }

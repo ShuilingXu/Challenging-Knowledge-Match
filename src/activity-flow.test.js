@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { availableActivities, participantActivityId, activityEntry, participantMatches, activityNavigation } from './activity-flow'
 
 describe('participant activity routing', () => {
+  it('keeps turtle soup out of participant entries and exposes only its screen controls', () => {
+    expect(availableActivities([{ id: 'soup', activityType: 'TURTLE_SOUP', status: 'LIVE' }])).toEqual([])
+    expect(activityNavigation({ activityType: 'TURTLE_SOUP' })).toMatchObject({ showQuiz: false, showRewards: false, showControl: true, controlLabel: '海龟汤控场' })
+  })
   it('shares the main identity for new quizzes and retains the local identity for legacy quizzes', () => {
     expect(participantActivityId({ id: 'quiz', parentActivityId: 'main', activityType: 'QUIZ', participantActivityId: 'main' })).toBe('main')
     expect(participantActivityId({ id: 'old-quiz', parentActivityId: 'main', activityType: 'QUIZ', participantActivityId: 'old-quiz' })).toBe('old-quiz')

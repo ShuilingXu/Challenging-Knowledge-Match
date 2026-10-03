@@ -6,6 +6,7 @@ public enum ScreenDisplayMode {
   TEMPLATE,
   QUESTION,
   RESULT,
+  TURTLE_SOUP,
   SCOREBOARD,
   LEADERBOARD,
   WINNERS,

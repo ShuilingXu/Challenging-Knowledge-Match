@@ -71,7 +71,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ActivityService {
   private static final Set<String> ACTIVITY_STATUSES = Set.of(
       "DRAFT", "REGISTRATION_OPEN", "LIVE", "PAUSED", "FINISHED", "CANCELLED");
-  private static final Set<String> ACTIVITY_TYPES = Set.of("EVENT", "QUIZ", "LOTTERY", "OTHER");
+  private static final Set<String> ACTIVITY_TYPES = Set.of("EVENT", "QUIZ", "LOTTERY", "TURTLE_SOUP", "OTHER");
   private static final Set<String> QUESTION_TYPES = Set.of("SINGLE", "MULTIPLE", "TEXT");
   private static final Set<String> TEXT_MATCH_MODES = Set.of("FUZZY", "REGEX", "MANUAL");
   private static final Set<String> FIELD_TYPES = Set.of(
@@ -191,6 +191,7 @@ public class ActivityService {
   public ActivityResponse changeActivityStatus(UUID activityId, ChangeActivityStatusRequest request) {
     Activity activity = requireActivity(activityId);
     String next = normalizeEnum(request.status(), ACTIVITY_STATUSES, "activity status");
+    if ("TURTLE_SOUP".equals(activity.getActivityType()) && "REGISTRATION_OPEN".equals(next)) throw conflict("海龟汤无需报名，请直接开始环节");
     ensureStatusTransition(activity.getStatus(), next);
     if ("LIVE".equals(next) && activity.getParentActivityId() != null
         && !Set.of("LIVE", "REGISTRATION_OPEN").contains(requireActivity(activity.getParentActivityId()).getStatus())) {
@@ -319,6 +320,7 @@ public class ActivityService {
   @Transactional
   public ParticipantResponse register(UUID activityId, String venueCode, RegisterParticipantRequest request) {
     Activity activity = requireActivity(activityId);
+    if ("TURTLE_SOUP".equals(activity.getActivityType())) throw conflict("海龟汤仅用于大屏展示，无需报名");
     UUID scopeId = participantScopeActivity(activityId);
     ensureRegistrationAllowed(activities.findForUpdate(scopeId).orElseThrow(() -> notFound("Activity not found")));
     String venue = normalizeVenue(venueCode);
@@ -727,6 +729,7 @@ public class ActivityService {
   @Transactional
   public ControlState control(UUID activityId, ControlRequest request) {
     Activity activity = activities.findForUpdate(activityId).orElseThrow(() -> notFound("Activity not found"));
+    if ("TURTLE_SOUP".equals(activity.getActivityType())) throw conflict("请使用海龟汤控场");
     String stage = normalizeEnum(request.stage(), Set.of("LOBBY", "QUESTION_OPEN", "ANSWER_REVEALED", "SCOREBOARD", "WINNERS", "ENDED"), "Control stage");
     if ("QUESTION_OPEN".equals(stage)) ensureAnsweringAllowed(activity);
     if (Set.of("QUESTION_OPEN", "ANSWER_REVEALED").contains(stage) && request.questionId() == null) {
@@ -760,6 +763,18 @@ public class ActivityService {
   }
 
   private void synchronizeControlledScreens(UUID activityId, ControlState state) {
+    Activity controlled = requireActivity(activityId);
+    if ("TURTLE_SOUP".equals(controlled.getActivityType())) {
+      if (controlled.getTurtleSoup() != null) {
+        try {
+          var previous = objectMapper.readValue(controlled.getTurtleSoup(), TurtleSoupService.State.class);
+          controlled.updateTurtleSoup(objectMapper.writeValueAsString(new TurtleSoupService.State(previous.content(), "LOBBY", 0, previous.revision() + 1)));
+        } catch (java.io.IOException exception) { throw new IllegalStateException(exception); }
+      }
+      screens.publishActivityDisplay(activityId, ScreenDisplayMode.TURTLE_SOUP, Map.of("stage", "LOBBY"));
+      screens.publishActivityDisplay(controlled.getParentActivityId(), ScreenDisplayMode.TURTLE_SOUP, Map.of("stage", "LOBBY"));
+      return;
+    }
     String stage = state.stage().trim().toUpperCase(Locale.ROOT);
     Map<String, Object> payload = new HashMap<>();
     ScreenDisplayMode mode = ScreenDisplayMode.LOBBY;
@@ -1215,7 +1230,7 @@ public class ActivityService {
   }
 
   private void ensureAnsweringAllowed(Activity activity) {
-    if ("LOTTERY".equals(activity.getActivityType())) throw conflict("Lottery sub-activities do not accept quiz answers");
+    if (Set.of("LOTTERY", "TURTLE_SOUP").contains(activity.getActivityType())) throw conflict("此子活动不接受答题");
     ensureLiveOperation(activity);
   }
 
@@ -1465,7 +1480,7 @@ public class ActivityService {
     String type = normalizeEnum(activityType == null ? "EVENT" : activityType, ACTIVITY_TYPES, "activity type");
     if (activity.getId() != null && (!type.equals(activity.getActivityType())
         || !java.util.Objects.equals(parentActivityId, activity.getParentActivityId()))) {
-      if (participants.countByActivityId(activity.getId()) > 0 || questions.countByActivityId(activity.getId()) > 0
+      if (activity.getTurtleSoup() != null || participants.countByActivityId(activity.getId()) > 0 || questions.countByActivityId(activity.getId()) > 0
           || !prizePools.findByActivityIdOrderByCreatedAtAsc(activity.getId()).isEmpty()
           || !scoreLedgers.findByActivityIdOrderByCreatedAtDesc(activity.getId()).isEmpty()
           || !awards.findByActivityIdOrderByAwardedAtDesc(activity.getId()).isEmpty()) {
@@ -1600,7 +1615,7 @@ public class ActivityService {
       if (principal.userId() != null && (memberships.findByUserIdAndActivityId(principal.userId(), activity.getId()).isPresent()
           || activity.getParentActivityId() != null && memberships.findByUserIdAndActivityId(principal.userId(), activity.getParentActivityId()).isPresent())) return true;
     }
-    return !Set.of("DRAFT", "CANCELLED").contains(activity.getStatus());
+    return !"TURTLE_SOUP".equals(activity.getActivityType()) && !Set.of("DRAFT", "CANCELLED").contains(activity.getStatus());
   }
 
   private ActivityResponse toActivity(Activity activity) {

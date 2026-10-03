@@ -3,7 +3,8 @@ export const activityStatusLabels = {
   FINISHED: '已结束', CANCELLED: '已终止',
 }
 
-export function activityActions(status) {
+export function activityActions(status, type) {
+  if (type === 'TURTLE_SOUP' && status === 'DRAFT') return [['LIVE', '开始活动']]
   return {
     DRAFT: [['REGISTRATION_OPEN', '启用报名'], ['LIVE', '开始活动']],
     REGISTRATION_OPEN: [['LIVE', '开始活动']],
@@ -20,7 +21,7 @@ export function participantActivityId(activity) {
 
 export function availableActivities(activities) {
   const open = (item) => ['REGISTRATION_OPEN', 'LIVE', 'PAUSED'].includes(item?.status)
-  return activities.filter((item) => open(item) && (!item.parentActivityId
+  return activities.filter((item) => item.activityType !== 'TURTLE_SOUP' && open(item) && (!item.parentActivityId
     || open(activities.find((parent) => parent.id === item.parentActivityId))))
 }
 
@@ -38,10 +39,12 @@ export function activityNavigation(activity) {
   const type = activity?.activityType || 'EVENT'
   const main = type === 'EVENT'
   const lottery = type === 'LOTTERY'
+  const soup = type === 'TURTLE_SOUP'
   return {
-    showQuiz: Boolean(!lottery && (!main || activity?.legacyOperations)),
-    showRewards: Boolean(!main || activity?.legacyOperations),
-    controlLabel: lottery ? '摇奖控场' : main ? '原有答题控场' : '答题控场',
+    showQuiz: Boolean(!soup && !lottery && (!main || activity?.legacyOperations)),
+    showRewards: Boolean(!soup && (!main || activity?.legacyOperations)),
+    showControl: soup || lottery || Boolean(!main || activity?.legacyOperations),
+    controlLabel: soup ? '海龟汤控场' : lottery ? '摇奖控场' : main ? '原有答题控场' : '答题控场',
     rewardsLabel: lottery ? '自助抽奖与核销' : '奖品与核销',
   }
 }

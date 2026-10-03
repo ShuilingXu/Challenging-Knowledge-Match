@@ -143,6 +143,17 @@ public class ScreenService {
       device.updateDisplay(initialTemplate.getId(), ScreenDisplayMode.TEMPLATE,
           writeJson(Map.of("templateId", initialTemplate.getId(), "source", "device-registration")));
     }
+    var activity = requireActivity(activityId);
+    if ("TURTLE_SOUP".equals(activity.getActivityType())) {
+      Map<String, Object> soupData = Map.of("stage", "LOBBY");
+      if (activity.getTurtleSoup() != null) {
+        try {
+          soupData = com.matrixlive.service.TurtleSoupService.display(objectMapper.readValue(
+              activity.getTurtleSoup(), com.matrixlive.service.TurtleSoupService.State.class));
+        } catch (java.io.IOException exception) { throw new IllegalStateException(exception); }
+      }
+      device.updateDisplay(null, ScreenDisplayMode.TURTLE_SOUP, writeJson(soupData));
+    }
     device = devices.save(device);
     ScreenDeviceResponse response = toDevice(device);
     broadcastActivity(activityId, "screen.device.registered", response);

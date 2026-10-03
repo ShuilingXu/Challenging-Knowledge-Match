@@ -61,6 +61,7 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
 
   private boolean allowsParticipant(HttpServletRequest request, String remainder, UUID activityId,
       AuthenticatedPrincipal principal) {
+    if (activities.findById(activityId).filter(item -> "TURTLE_SOUP".equals(item.getActivityType())).isPresent()) return false;
     if (!activityId.equals(principal.activityId()) && !activities.findById(activityId)
         .filter(item -> item.isSharedParticipants() && principal.activityId().equals(item.getParentActivityId()))
         .isPresent()) return false;
@@ -106,6 +107,7 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
           && !remainder.startsWith("question-sets");
     }
     if ("control".equals(remainder)) return "POST".equals(method);
+    if ("turtle-soup/control".equals(remainder)) return "POST".equals(method);
     if ("host-draws".equals(remainder)) return "POST".equals(method);
     if (remainder.matches("questions/[0-9a-fA-F-]{36}/buzzes/[0-9a-fA-F-]{36}/grade")) return "POST".equals(method);
     if ("scores/adjustments".equals(remainder)) return "POST".equals(method);

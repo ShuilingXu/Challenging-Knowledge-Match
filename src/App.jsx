@@ -1,3 +1,4 @@
+import { TurtleSoupConsole, TurtleSoupScreen } from "./TurtleSoup";
 import { Client } from "@stomp/stompjs";
 import {
   createContext,
@@ -431,6 +432,7 @@ function StaffApp() {
   );
   const currentActivity = activities.find((item) => item.id === activityId);
   const lotteryActivity = currentActivity?.activityType === "LOTTERY";
+  const soupActivity = currentActivity?.activityType === "TURTLE_SOUP";
   return (
     <div className="staff-shell">
       <button
@@ -459,7 +461,7 @@ function StaffApp() {
           <Route
             path="overview"
             element={
-              currentActivity?.activityType === "EVENT" ? <MainActivityPage activity={currentActivity} activities={activities} setActivityId={setActivityId} canManage={canManage} reload={reloadActivities} /> : <OverviewPage activityId={activityId} activities={activities} />
+              soupActivity ? <TurtleSoupPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : currentActivity?.activityType === "EVENT" ? <MainActivityPage activity={currentActivity} activities={activities} setActivityId={setActivityId} canManage={canManage} reload={reloadActivities} /> : <OverviewPage activityId={activityId} activities={activities} />
             }
           />
           <Route
@@ -475,19 +477,19 @@ function StaffApp() {
           />
           <Route
             path="control"
-            element={lotteryActivity ? <HostLotteryPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : currentActivity?.activityType === "EVENT" && !currentActivity.legacyOperations ? <Navigate to="/admin/overview" replace /> : <ControlPage key={activityId} activityId={activityId} activity={currentActivity} reloadActivities={reloadActivities} canManage={canManage} />}
+            element={soupActivity ? <TurtleSoupPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : lotteryActivity ? <HostLotteryPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : currentActivity?.activityType === "EVENT" && !currentActivity.legacyOperations ? <Navigate to="/admin/overview" replace /> : <ControlPage key={activityId} activityId={activityId} activity={currentActivity} reloadActivities={reloadActivities} canManage={canManage} />}
           />
           <Route
             path="questions"
-            element={lotteryActivity || currentActivity?.activityType === "EVENT" && !currentActivity.legacyOperations ? <Navigate to="/admin/overview" replace /> : <QuestionsPage key={activityId} activityId={activityId} canManage={canManage} />}
+            element={soupActivity || lotteryActivity || currentActivity?.activityType === "EVENT" && !currentActivity.legacyOperations ? <Navigate to="/admin/overview" replace /> : <QuestionsPage key={activityId} activityId={activityId} canManage={canManage} />}
           />
           <Route
             path="participants"
-            element={<ParticipantsPage activityId={activityId} />}
+            element={soupActivity ? <Navigate to="/admin/control" replace /> : <ParticipantsPage activityId={activityId} />}
           />
           <Route
             path="rewards"
-            element={<RewardsPage key={activityId} activityId={activityId} activity={currentActivity} canManage={canManage} />}
+            element={soupActivity ? <Navigate to="/admin/control" replace /> : <RewardsPage key={activityId} activityId={activityId} activity={currentActivity} canManage={canManage} />}
           />
           <Route
             path="screens"
@@ -546,7 +548,8 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage, activity }) {
       <nav>
         {navItems.filter((item) => (canManage || !["activities", "screens", "settings"].includes(item.id))
           && (item.id !== "questions" || navigation.showQuiz)
-          && (item.id !== "control" || activity?.activityType === "LOTTERY" || navigation.showQuiz)
+          && (item.id !== "control" || navigation.showControl)
+          && (item.id !== "participants" || activity?.activityType !== "TURTLE_SOUP")
           && (item.id !== "rewards" || navigation.showRewards)).map((item) => {
           const Icon = item.icon;
           return (
@@ -653,18 +656,23 @@ function PageHeader({ eyebrow, title, description, action }) {
 function MainActivityPage({ activity, activities, setActivityId, canManage, reload }) {
   const children = activities.filter((item) => item.parentActivityId === activity.id);
   return <div className="page-content">
-    <PageHeader eyebrow="母活动管理" title={activity.name} description="统一管理报名、人员和总积分；在答题、摇奖子活动中组织现场环节。" />
+    <PageHeader eyebrow="母活动管理" title={activity.name} description="统一管理报名、人员和总积分；在答题、摇奖和海龟汤子活动中组织现场环节。" />
     <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />
-    <div className="activity-hub-links"><Link className="secondary-button" to="/admin/participants">统一参与者名单</Link><a className="secondary-button" href={`/join/${activity.id}`} target="_blank" rel="noreferrer">报名与环节入口</a>{canManage && <Link className="primary-button" to="/admin/activities">添加答题或摇奖子活动</Link>}</div>
+    <div className="activity-hub-links"><Link className="secondary-button" to="/admin/participants">统一参与者名单</Link><a className="secondary-button" href={`/join/${activity.id}`} target="_blank" rel="noreferrer">报名与环节入口</a>{canManage && <Link className="primary-button" to="/admin/activities">添加子活动</Link>}</div>
     <div className="prize-grid">{children.map((child) => <article className="prize-pool-card" key={child.id}>
       <span className="type-chip">{activityTypeLabel(child.activityType)} · {activityStatusLabels[child.status]}</span><h2>{child.name}</h2>
-      <p>{child.activityType === "LOTTERY" ? "使用统一名单与总积分筛选，主持人摇奖并公布结果。" : child.participantActivityId === activity.id ? "共用母活动名单，本环节独立计分，得分汇入总积分。" : "旧版独立报名与积分，保留原有数据。"}</p>
-      <Link className="primary-button" to={child.activityType === "LOTTERY" ? "/admin/control" : "/admin/overview"} onClick={() => setActivityId(child.id)}>进入环节<ArrowRight size={16} /></Link>
+      <p>{child.activityType === "TURTLE_SOUP" ? "主持人展示汤面、自由选择线索和揭晓汤底，仅在大屏参与。" : child.activityType === "LOTTERY" ? "使用统一名单与总积分筛选，主持人摇奖并公布结果。" : child.participantActivityId === activity.id ? "共用母活动名单，本环节独立计分，得分汇入总积分。" : "旧版独立报名与积分，保留原有数据。"}</p>
+      <Link className="primary-button" to={["LOTTERY", "TURTLE_SOUP"].includes(child.activityType) ? "/admin/control" : "/admin/overview"} onClick={() => setActivityId(child.id)}>进入环节<ArrowRight size={16} /></Link>
     </article>)}</div>
-    {!children.length && <EmptyState icon={CalendarDays} title="尚未添加活动环节" description="到活动管理添加答题或摇奖子活动。参与者只需在母活动登记一次。" />}
+    {!children.length && <EmptyState icon={CalendarDays} title="尚未添加活动环节" description="到活动管理添加子活动。参与者只需在母活动登记一次。" />}
     {activity.legacyOperations && <div className="buzzer-answer-key"><strong>原有母活动业务保留</strong><p>此母活动已有题目或奖池，可通过侧栏继续处理。新增环节请放到子活动。</p></div>}
     <OverviewPage activityId={activity.id} activities={activities} summaryOnly />
   </div>;
+}
+
+function TurtleSoupPage({ activity, reload, canManage }) {
+  return <TurtleSoupConsole activity={activity} canManage={canManage} useStream={useActivityStream}
+    lifecycle={<ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />} />;
 }
 
 function HostLotteryPage({ activity, reload, canManage }) {
@@ -1051,6 +1059,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
               {!activity.parentActivityId && <>
                 <button className="toolbar-icon" type="button" title="添加答题子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "QUIZ" }); setError(""); setDialog("create"); }}><CircleHelp size={16} /></button>
                 <button className="toolbar-icon" type="button" title="添加摇奖子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "LOTTERY" }); setError(""); setDialog("create"); }}><Gift size={16} /></button>
+                <button className="toolbar-icon" type="button" title="添加海龟汤子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "TURTLE_SOUP" }); setError(""); setDialog("create"); }}><CircleHelp size={16} /></button>
               </>}
               <button
                 className="toolbar-icon"
@@ -1060,7 +1069,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
               >
                 <Pencil size={16} />
               </button>
-              {activityActions(activity.status).map(([status, label]) => (
+              {activityActions(activity.status, activity.activityType).map(([status, label]) => (
                 <button className="text-button" type="button" key={status}
                   disabled={busy === `status-${activity.id}`}
                   onClick={() => changeStatus(activity, status)}>{label}</button>
@@ -1076,7 +1085,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                 </button>
               )}
               <Link
-                to={activity.activityType === "LOTTERY" ? "/admin/control" : "/admin/overview"}
+                to={["LOTTERY", "TURTLE_SOUP"].includes(activity.activityType) ? "/admin/control" : "/admin/overview"}
                 className="row-action"
                 onClick={() => setActivityId(activity.id)}
               >
@@ -1134,6 +1143,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                   <option value="EVENT">母活动（统一报名与管理）</option>
                   <option value="QUIZ">答题子活动（普通答题 / 抢答）</option>
                   <option value="LOTTERY">摇奖子活动（主持人摇奖 / 自助抽奖）</option>
+                  <option value="TURTLE_SOUP">海龟汤子活动（仅大屏展示）</option>
                   {form.activityType === "OTHER" && <option value="OTHER">其他活动（旧版兼容）</option>}
                 </select>
               </label>
@@ -1239,7 +1249,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
               </div>}
             </fieldset>
             }
-            <fieldset className="brand-fieldset">
+            {form.activityType !== "TURTLE_SOUP" && <fieldset className="brand-fieldset">
               <legend>参与端品牌</legend>
               <label>
                 显示名称
@@ -1286,7 +1296,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                   placeholder="https://..."
                 />
               </label>
-            </fieldset>
+            </fieldset>}
             <div className="member-readonly">
               <ShieldCheck size={16} />
               <span>
@@ -4191,7 +4201,7 @@ function ScreensPage({ activityId }) {
                   <strong>{device.name}</strong>
                   <small>
                     {device.viewportWidth || 1920} ×{" "}
-                    {device.viewportHeight || 1080} · {device.displayMode}
+                    {device.viewportHeight || 1080} · {device.displayMode === "TURTLE_SOUP" ? "海龟汤" : device.displayMode}
                   </small>
                 </div>
                 <span
@@ -6881,6 +6891,12 @@ function ScreenPairingNotice({ status, error }) {
   );
 }
 
+function TurtleSoupDisplay({ display }) {
+  const scrollRef = useRef(null);
+  useScreenScroll(scrollRef, display, `soup-${display.data?.stage}`);
+  return <TurtleSoupScreen data={display.data} scrollRef={scrollRef} />;
+}
+
 function ScreenDisplay({ activityId, display, mode }) {
   if (!display || mode === "LOBBY")
     return (
@@ -6893,6 +6909,7 @@ function ScreenDisplay({ activityId, display, mode }) {
   if (mode === "TEMPLATE" && display.template)
     return <TemplateScreen activityId={activityId} display={display} />;
   const payload = display.data || {};
+  if (mode === "TURTLE_SOUP") return <TurtleSoupDisplay display={display} />;
   const rows = payload.rows || payload.scoreboard || [];
   if (mode === "SCOREBOARD" || mode === "LEADERBOARD")
     return <ScreenScoreboard board={rows} display={display} />;
@@ -7120,7 +7137,7 @@ function ActivityLifecycle({ activity, canManage, onChanged }) {
     finally { setBusy(false); }
   };
   return <div className="activity-lifecycle"><strong>{activityStatusLabels[activity?.status]}</strong>
-    {canManage && activityActions(activity?.status).map(([status, label]) => <button className="secondary-button" type="button" key={status} disabled={busy} onClick={() => change(status)}>{label}</button>)}
+    {canManage && activityActions(activity?.status, activity?.activityType).map(([status, label]) => <button className="secondary-button" type="button" key={status} disabled={busy} onClick={() => change(status)}>{label}</button>)}
     <InlineError text={error} />
   </div>;
 }
@@ -7505,6 +7522,7 @@ function activityTypeLabel(type) {
       EVENT: "母活动",
       QUIZ: "答题子活动",
       LOTTERY: "摇奖子活动",
+      TURTLE_SOUP: "海龟汤子活动",
       OTHER: "其他活动",
     }[type] || "活动"
   );

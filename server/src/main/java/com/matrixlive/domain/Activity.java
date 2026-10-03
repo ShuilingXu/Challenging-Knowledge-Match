@@ -77,6 +77,12 @@ public class Activity {
   private Instant controlUpdatedAt;
   private Instant questionOpenedAt;
 
+  @Column(columnDefinition = "text")
+  private String turtleSoup;
+
+  public String getTurtleSoup() { return turtleSoup; }
+  public void updateTurtleSoup(String value) { turtleSoup = value; }
+
   @Version
   private long version;
 

@@ -247,6 +247,9 @@ export async function logout() {
 }
 
 export const api = {
+  turtleSoup: (id) => request(`/api/activities/${id}/turtle-soup`),
+  saveTurtleSoup: (id, payload) => request(`/api/activities/${id}/turtle-soup`, { method: 'PUT', body: payload }),
+  controlTurtleSoup: (id, payload) => request(`/api/activities/${id}/turtle-soup/control`, { method: 'POST', body: payload }),
   siteSettings: () => request('/api/site-settings', { auth: false }),
   adminSiteSettings: () => request('/api/admin/site-settings'),
   updateSiteSettings: (payload) => request('/api/admin/site-settings', { method: 'PATCH', body: payload }),

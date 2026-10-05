@@ -24,7 +24,7 @@ class ReviewRegressionTest {
 
   private ActivityResponse activity() {
     var activity =
-        service.createActivity(
+        QuizTestSupport.create(service,
             new CreateActivityRequest("Review regression", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("a", "A", 10, true));
     return activity;

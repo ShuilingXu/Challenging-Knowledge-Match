@@ -46,14 +46,9 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
     if (principal.isParticipant()) return new AuthorizationDecision(allowsParticipant(request, remainder, activityId, principal));
     if (principal.isScreenDevice()) return new AuthorizationDecision(allowsScreenDevice(request, remainder, activityId, principal));
     if (principal.userId() == null) return new AuthorizationDecision(false);
-    UserRole membershipRole = memberships.findByUserIdAndActivityId(principal.userId(), activityId)
+    UUID memberScope=ActivityScopes.membershipActivity(activities,activityId);
+    UserRole membershipRole = memberships.findByUserIdAndActivityId(principal.userId(), memberScope)
         .map(item -> item.getRole()).orElse(null);
-    UUID parentId = activities.findById(activityId).map(item -> item.getParentActivityId()).orElse(null);
-    if (parentId != null) {
-      UserRole inherited = memberships.findByUserIdAndActivityId(principal.userId(), parentId)
-          .map(item -> item.getRole()).orElse(null);
-      if (membershipRole == null || inherited == UserRole.ACTIVITY_ADMIN) membershipRole = inherited;
-    }
     if (membershipRole == null) return new AuthorizationDecision(false);
     if (membershipRole == UserRole.ACTIVITY_ADMIN) return new AuthorizationDecision(true);
     return new AuthorizationDecision(allowsStaff(request, remainder));
@@ -102,7 +97,8 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
     String method = request.getMethod();
     // Viewing operational data is sufficient for the floor team, except answer keys exposed by the admin question route.
     if ("GET".equals(method)) {
-      return !"questions/admin".equals(remainder)
+      return !"questions/source".equals(remainder)
+          && !"questions/admin".equals(remainder)
           && !remainder.startsWith("memberships")
           && !remainder.startsWith("question-sets");
     }

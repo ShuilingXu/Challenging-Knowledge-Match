@@ -152,7 +152,7 @@ class ActivityHierarchyIntegrationTest {
   void lotterySharesMainRegistrationButKeepsItsChancesAndAwardsSeparate() throws Exception {
     var parent = mainActivity();
     var lottery = lottery(parent.id());
-    service.createVenue(parent.id(), new VenueRequest("main", "Main Hall", 10, true));
+    service.updateVenue(parent.id(), service.listVenues(parent.id()).getFirst().id(), new UpdateVenueRequest("Main Hall",10,true));
     service.createRegistrationField(parent.id(), new RegistrationFieldRequest("team", "Team", "TEXT", List.of(), true, 0));
     var person = com.matrixlive.service.QuizTestSupport.register(service, lottery.id(), "main",
         new RegisterParticipantRequest("Taylor", "13800000001", "QA", Map.of("team", "A")));
@@ -228,7 +228,7 @@ class ActivityHierarchyIntegrationTest {
 
   private ActivityResponse mainActivity() {
     SecurityContextHolder.clearContext();
-    return service.createActivity(new CreateActivityRequest("Main event", "Shanghai", Instant.now()));
+    return QuizTestSupport.venue(service, new CreateActivityRequest("Main event", "Shanghai", Instant.now()));
   }
 
   private ActivityResponse lottery(UUID parentId) {

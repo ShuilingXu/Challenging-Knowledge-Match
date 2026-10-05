@@ -26,7 +26,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void isolatesVenuesAndPersistsConfiguredRegistrationFields() {
-    var activity = service.createActivity(new CreateActivityRequest("Venue workflow", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Venue workflow", "Shanghai", Instant.now()));
     service.createRegistrationField(activity.id(), new RegistrationFieldRequest("department", "Department", "SELECT",
         List.of("Engineering", "Operations"), true, 0));
     service.createVenue(activity.id(), new VenueRequest("north", "North Hall", 5, true));
@@ -49,7 +49,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void recordsScoreLedgerAndMakesLotteryDrawsPersistentAndIdempotent() {
-    var activity = service.createActivity(new CreateActivityRequest("Scoring workflow", "Guangzhou", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Scoring workflow", "Guangzhou", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
     var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall-a",
         new RegisterParticipantRequest("Taylor", "13900002000", "QA"));
@@ -69,28 +69,31 @@ class ActivityDomainWorkflowTest {
     assertEquals(70, service.participant(activity.id(), participant.id()).score());
     assertEquals(2, service.scoreLedger(activity.id(), participant.id()).size());
 
-    var pool = service.createPrizePool(activity.id(), new PrizePoolRequest("draw-badge", "Digital badge", "LOTTERY",
+    var lottery = service.createActivity(new CreateActivityRequest("Lottery round", "Guangzhou", Instant.now(), null, null,
+        null, null, null, null, activity.parentActivityId(), "LOTTERY"));
+    QuizTestSupport.start(service, lottery.id());
+    var pool = service.createPrizePool(lottery.id(), new PrizePoolRequest("draw-badge", "Digital badge", "LOTTERY",
         "DIGITAL", "", "https://rewards.example.test/redeem", 1, 0, 1, null, null, true));
-    service.grantLotteryChances(activity.id(), participant.id(), new GrantLotteryChancesRequest(1, "quiz completion"));
+    service.grantLotteryChances(lottery.id(), participant.id(), new GrantLotteryChancesRequest(1, "quiz completion"));
     String key = UUID.randomUUID().toString();
-    var first = service.draw(activity.id(), new DrawRequest(participant.id(), pool.id(), key));
-    var replay = service.draw(activity.id(), new DrawRequest(participant.id(), pool.id(), key));
+    var first = service.draw(lottery.id(), new DrawRequest(participant.id(), pool.id(), key));
+    var replay = service.draw(lottery.id(), new DrawRequest(participant.id(), pool.id(), key));
 
     assertFalse(first.replayed());
     assertTrue(replay.replayed());
     assertEquals(first.awardId(), replay.awardId());
-    assertEquals(0, service.listPrizePools(activity.id()).getFirst().remainingQuantity());
-    assertEquals("REDEEMED", service.redeem(activity.id(), first.awardId()).status());
-    assertThrows(DomainException.class, () -> service.draw(activity.id(), new DrawRequest(participant.id(), pool.id(),
+    assertEquals(0, service.listPrizePools(lottery.id()).getFirst().remainingQuantity());
+    assertEquals("REDEEMED", service.redeem(lottery.id(), first.awardId()).status());
+    assertThrows(DomainException.class, () -> service.draw(lottery.id(), new DrawRequest(participant.id(), pool.id(),
         UUID.randomUUID().toString())));
-    service.grantLotteryChances(activity.id(), participant.id(), new GrantLotteryChancesRequest(1, "venue validation"));
-    assertThrows(DomainException.class, () -> service.draw(activity.id(), new DrawRequest(participant.id(), pool.id(), "other-hall",
+    service.grantLotteryChances(lottery.id(), participant.id(), new GrantLotteryChancesRequest(1, "venue validation"));
+    assertThrows(DomainException.class, () -> service.draw(lottery.id(), new DrawRequest(participant.id(), pool.id(), "other-hall",
         UUID.randomUUID().toString())));
   }
 
   @Test
   void rankingAwardsRequireFinishedActivityOrWinnerConfirmation() {
-    var activity = service.createActivity(new CreateActivityRequest("Ranking workflow", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Ranking workflow", "Shanghai", Instant.now()));
     var pool = service.createPrizePool(activity.id(), new PrizePoolRequest("rank-1", "Top prize", "RANKING",
         "DIGITAL", "", null, 1, 0, 1, 1, 1, true));
     assertThrows(DomainException.class, () -> service.issueRankingAwards(activity.id(), pool.id()));
@@ -101,7 +104,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void holdsTextAnswersForManualReviewAndAppliesFeedbackWhenGraded() {
-    var activity = service.createActivity(new CreateActivityRequest("Text review", "Beijing", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Text review", "Beijing", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
     var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall-a",
         new RegisterParticipantRequest("Jordan", "13900003000", "Matrix"));
@@ -126,7 +129,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void autoScoresAcceptedTextAndStillAllowsManualAdjustment() {
-    var activity = service.createActivity(new CreateActivityRequest("Automatic text scoring", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Automatic text scoring", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
     var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall-a",
         new RegisterParticipantRequest("Casey", "13900003001", "Matrix"));
@@ -151,7 +154,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void unmatchedTextRemainsPendingAndRegexPatternsAreValidated() {
-    var activity = service.createActivity(new CreateActivityRequest("Regex text scoring", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Regex text scoring", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall-a", "Hall A", 20, true));
     var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall-a",
         new RegisterParticipantRequest("Morgan", "13900003002", "Matrix"));
@@ -171,7 +174,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void questionSetsControlPublishedOrderAndActivitiesSupportOneLevelSubActivities() {
-    var parent = service.createActivity(new CreateActivityRequest("Shanghai knowledge event", "Shanghai", Instant.now(),
+    var parent = QuizTestSupport.venue(service, new CreateActivityRequest("Shanghai knowledge event", "Shanghai", Instant.now(),
         null, "Parent event", null, null, null, null, null, "EVENT"));
     var quiz = service.createActivity(new CreateActivityRequest("Knowledge quiz", "Shanghai", Instant.now(), null,
         "Quiz child", null, null, null, null, parent.id(), "QUIZ"));
@@ -196,7 +199,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void disabledQuestionsAreExcludedWhenNoQuestionSetIsActive() {
-    var activity = service.createActivity(new CreateActivityRequest("Enabled question fallback", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Enabled question fallback", "Shanghai", Instant.now()));
     var enabled = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Enabled", List.of("A", "B"),
         Set.of("A"), 10, 0, null, 40, true));
     service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Disabled", List.of("A", "B"),
@@ -208,7 +211,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void updatesExistingQuestionContentAndScoringConfiguration() {
-    var activity = service.createActivity(new CreateActivityRequest("Question editing", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Question editing", "Shanghai", Instant.now()));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Old title",
         List.of("A", "B"), Set.of("A"), 10, 0, null, 40, true));
     var updated = service.updateQuestion(activity.id(), question.id(), new QuestionWriteRequest("MULTIPLE", "New title",
@@ -235,7 +238,7 @@ class ActivityDomainWorkflowTest {
 
   @Test
   void migratesRetiredAdvancedModeWithoutChangingScoringConfiguration() {
-    var activity = service.createActivity(new CreateActivityRequest("Legacy scoring", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Legacy scoring", "Shanghai", Instant.now()));
     var legacyRules = "{\"correct\":[{\"rankFrom\":1,\"rankTo\":2,\"percent\":70}],\"incorrect\":[{\"rankFrom\":3,\"rankTo\":5,\"percent\":30}]}";
     activities.findById(activity.id()).orElseThrow().updateScoring("ADVANCED", 80, 20, legacyRules);
     entityManager.flush();

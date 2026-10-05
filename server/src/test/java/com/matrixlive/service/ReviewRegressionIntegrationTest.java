@@ -30,7 +30,7 @@ class ReviewRegressionIntegrationTest {
   @Autowired AnswerSubmissionRepository submissions;
 
   private ActivityResponse activity() {
-    var activity = service.createActivity(new CreateActivityRequest("Review regression", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Review regression", "Shanghai", Instant.now()));
     service.updateActivity(activity.id(), new UpdateActivityRequest(null, null, null, null, null, null, null,
         null, null, null, null, "SIMPLE", 100, 20, null, null, null));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));

@@ -6,6 +6,20 @@ import java.util.UUID;
 /** Existing answer tests must arrange a live event before opening a question. */
 public final class QuizTestSupport {
   private QuizTestSupport() { }
+  public static com.matrixlive.api.ApiModels.ActivityResponse venue(ActivityService service,
+      com.matrixlive.api.ApiModels.CreateActivityRequest request) {
+    var main = service.createActivity(request);
+    service.changeActivityStatus(main.id(), new ChangeActivityStatusRequest("LIVE"));
+    return service.createActivity(new com.matrixlive.api.ApiModels.CreateActivityRequest(request.name(), request.city(), request.startsAt(),
+        request.endsAt(), request.description(), null, null, null, null, main.id(), "VENUE"));
+  }
+  public static com.matrixlive.api.ApiModels.ActivityResponse create(ActivityService service,
+      com.matrixlive.api.ApiModels.CreateActivityRequest request) {
+    var venue = venue(service, request);
+    service.changeActivityStatus(venue.id(), new ChangeActivityStatusRequest("REGISTRATION_OPEN"));
+    return service.createActivity(new com.matrixlive.api.ApiModels.CreateActivityRequest(request.name(), request.city(), request.startsAt(),
+        request.endsAt(), request.description(), null, null, null, null, venue.id(), "QUIZ"));
+  }
   public static com.matrixlive.api.ApiModels.ParticipantResponse register(ActivityService service, UUID activityId,
       String venue, com.matrixlive.api.ApiModels.RegisterParticipantRequest request) {
     var activity = service.activity(activityId);

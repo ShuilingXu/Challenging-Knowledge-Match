@@ -25,7 +25,7 @@ class SecurityIntegrationTest {
 
   @Test
   void participantsCanBuzzOnlyForThemselvesAndCannotReadHostQueue() throws Exception {
-    var activity = service.createActivity(new com.matrixlive.api.ApiModels.CreateActivityRequest("Buzzer security", "Shanghai", java.time.Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new com.matrixlive.api.ApiModels.CreateActivityRequest("Buzzer security", "Shanghai", java.time.Instant.now()));
     service.updateActivity(activity.id(), new com.matrixlive.api.ApiModels.UpdateActivityRequest(null, null, null, null, null,
         null, null, null, null, null, null, null, null, null, null, null, null, "BUZZER"));
     service.createVenue(activity.id(), new com.matrixlive.api.ApiModels.VenueRequest("hall", "Hall", 20, true));
@@ -63,7 +63,7 @@ class SecurityIntegrationTest {
 
   @Test
   void floorStaffCanAdjustAndGradeScoresButCannotReverseOrVoidAwards() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     String path = "/api/activities/" + activityId;
     String staffToken = accessToken(login("event-staff", "ChangeMe!2026"));
     var person = com.matrixlive.service.QuizTestSupport.register(service, activityId, "south", new com.matrixlive.api.ApiModels.RegisterParticipantRequest(
@@ -149,7 +149,7 @@ class SecurityIntegrationTest {
 
   @Test
   void enforcesActivityRolesAndParticipantScope() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     String activityPath = "/api/activities/" + activityId;
 
     mvc.perform(post(activityPath + "/control").contentType(MediaType.APPLICATION_JSON)
@@ -199,7 +199,7 @@ class SecurityIntegrationTest {
 
   @Test
   void activityAdminCanListAccountsForActivityAccessManagement() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     String activityPath = "/api/activities/" + activityId;
     String activityAdminToken = accessToken(login("activity-admin", "ChangeMe!2026"));
     String staffToken = accessToken(login("event-staff", "ChangeMe!2026"));
@@ -214,7 +214,7 @@ class SecurityIntegrationTest {
 
   @Test
   void systemAdminCanCreateAssignAndEditAnActivityUserAccount() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     String adminToken = accessToken(login("sysadmin", "ChangeMe!2026"));
     String username = "acceptance-" + UUID.randomUUID().toString().replace("-", "").substring(0, 10);
 
@@ -239,7 +239,7 @@ class SecurityIntegrationTest {
 
   @Test
   void pairedScreenDeviceGetsOnlyItsScopedStateAndHeartbeatAccess() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     String activityPath = "/api/activities/" + activityId;
     String adminToken = accessToken(login("activity-admin", "ChangeMe!2026"));
     MvcResult registered = mvc.perform(post(activityPath + "/screens/devices/register")
@@ -272,7 +272,7 @@ class SecurityIntegrationTest {
 
   @Test
   void activityCredentialsCannotTakeOverGlobalOrSharedAccounts() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     String path = "/api/activities/" + activityId + "/memberships";
     String scopedToken = accessToken(login("activity-admin", "ChangeMe!2026"));
     MvcResult systemLogin = login("sysadmin", "ChangeMe!2026");

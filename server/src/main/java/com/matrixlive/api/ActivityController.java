@@ -159,6 +159,17 @@ public class ActivityController {
     return service.listQuestionAdministration(activityId);
   }
 
+  @GetMapping("/{activityId}/questions/source")
+  public List<QuestionAdminResponse> sourceQuestions(@PathVariable UUID activityId) {
+    return service.sourceQuestions(activityId);
+  }
+
+  @PostMapping("/{activityId}/questions/sync")
+  public List<QuestionAdminResponse> syncQuestions(@PathVariable UUID activityId,
+      @Valid @RequestBody SyncQuestionsRequest request) {
+    return service.syncQuestions(activityId, request);
+  }
+
   @GetMapping("/{activityId}/questions/control")
   public List<QuestionControlResponse> controlQuestions(@PathVariable UUID activityId) {
     return service.listQuestionControl(activityId);

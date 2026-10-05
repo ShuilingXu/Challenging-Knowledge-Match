@@ -15,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TurtleSoupService {
+  public record Template(UUID id, Content content) { }
+  public record SyncTemplate(@NotNull UUID templateId) { }
   public record Content(@NotBlank @Size(max=160) String title,
       @NotBlank @Size(max=8000) String surface,
       @NotNull @Size(max=50) List<@NotBlank @Size(max=2000) String> clues,
@@ -64,9 +66,12 @@ public class TurtleSoupService {
     if (command.revision()!=current.revision()) throw conflict("其他主持人已更新展示，请刷新后重试");
     String action=command.action();
     if (!"RESET".equals(action)) {
-      Activity parent=activities.findById(activity.getParentActivityId()).orElseThrow(() -> conflict("母活动不存在"));
-      if (!"LIVE".equals(activity.getStatus()) || !Set.of("LIVE", "REGISTRATION_OPEN").contains(parent.getStatus()))
-        throw conflict("请先启用母活动并开始海龟汤环节");
+      if (!"LIVE".equals(activity.getStatus())) throw conflict("请先开始海龟汤环节");
+      Activity ancestor=activity;
+      while (ancestor.getParentActivityId()!=null) {
+        ancestor=activities.findById(ancestor.getParentActivityId()).orElseThrow(() -> conflict("上级活动不存在"));
+        if (!Set.of("LIVE", "REGISTRATION_OPEN").contains(ancestor.getStatus())) throw conflict("请先启用所属会场及母活动");
+      }
       if (current.content()==null) throw conflict("请先保存汤稿");
     }
     String stage=current.stage();
@@ -135,6 +140,45 @@ public class TurtleSoupService {
         .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "活动不存在"));
     if (!"TURTLE_SOUP".equals(activity.getActivityType())) throw conflict("请选择海龟汤子活动");
     return activity;
+  }
+
+  private Activity libraryOwner(UUID id, boolean lock) {
+    Activity owner=activities.findById(id).orElseThrow(() -> conflict("活动不存在"));
+    while (owner.getParentActivityId()!=null) owner=activities.findById(owner.getParentActivityId()).orElseThrow();
+    if (!"EVENT".equals(owner.getActivityType())) throw conflict("总汤库不存在");
+    return lock ? activities.findForUpdate(owner.getId()).orElseThrow() : owner;
+  }
+
+  private List<Template> readLibrary(Activity owner) {
+    if (owner.getTurtleSoup()==null) return List.of();
+    try { return mapper.readValue(owner.getTurtleSoup(), new com.fasterxml.jackson.core.type.TypeReference<List<Template>>() { }); }
+    catch (Exception e) { throw new IllegalStateException("Invalid soup library", e); }
+  }
+
+  @Transactional(readOnly=true)
+  public List<Template> templates(UUID id) { return readLibrary(libraryOwner(id, false)); }
+
+  @Transactional
+  public Template saveTemplate(UUID id, UUID templateId, Content content) {
+    Activity owner=libraryOwner(id, true);
+    if (!owner.getId().equals(id)) throw conflict("请在母活动编辑总汤库");
+    if (Set.of("FINISHED", "CANCELLED").contains(owner.getStatus())) throw conflict("母活动已结束");
+    List<Template> entries=new ArrayList<>(readLibrary(owner));
+    if (templateId!=null && entries.stream().noneMatch(t -> t.id().equals(templateId))) throw conflict("汤稿不存在");
+    if (templateId==null && entries.size()>=500) throw conflict("总汤库最多保存 500 份汤稿");
+    Template next=new Template(templateId==null ? UUID.randomUUID() : templateId, content);
+    entries.removeIf(t -> t.id().equals(next.id())); entries.add(next);
+    try { owner.updateTurtleSoup(mapper.writeValueAsString(entries)); } catch(Exception e) { throw new IllegalStateException(e); }
+    return next;
+  }
+
+  @Transactional
+  public State syncTemplate(UUID id, UUID templateId) {
+    Activity target=require(id, true);
+    if (!"DRAFT".equals(target.getStatus())) throw conflict("仅可在草稿阶段同步总汤库");
+    Content content=templates(id).stream().filter(t -> t.id().equals(templateId)).findFirst()
+        .orElseThrow(() -> conflict("汤稿不存在")).content();
+    return save(id, content);
   }
   private State read(Activity activity) {
     if (activity.getTurtleSoup()==null) return new State(null, "LOBBY", 0, 0);

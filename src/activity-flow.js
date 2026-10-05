@@ -4,6 +4,7 @@ export const activityStatusLabels = {
 }
 
 export function activityActions(status, type) {
+  if (type === 'EVENT' && status === 'DRAFT') return [['LIVE', '启用母活动']]
   if (type === 'TURTLE_SOUP' && status === 'DRAFT') return [['LIVE', '开始活动']]
   return {
     DRAFT: [['REGISTRATION_OPEN', '启用报名'], ['LIVE', '开始活动']],
@@ -21,8 +22,15 @@ export function participantActivityId(activity) {
 
 export function availableActivities(activities) {
   const open = (item) => ['REGISTRATION_OPEN', 'LIVE', 'PAUSED'].includes(item?.status)
-  return activities.filter((item) => item.activityType !== 'TURTLE_SOUP' && open(item) && (!item.parentActivityId
-    || open(activities.find((parent) => parent.id === item.parentActivityId))))
+  const ancestorsOpen = (item, seen = new Set()) => {
+    if (!item.parentActivityId) return true
+    if (seen.has(item.id)) return false
+    seen.add(item.id)
+    const parent = activities.find((entry) => entry.id === item.parentActivityId)
+    // Public API hides mother activities; venue status remains the public gate.
+    return parent ? open(parent) && ancestorsOpen(parent, seen) : item.activityType === 'VENUE'
+  }
+  return activities.filter((item) => !['EVENT', 'TURTLE_SOUP'].includes(item.activityType) && open(item) && ancestorsOpen(item))
 }
 
 export function activityEntry(activity) {
@@ -41,9 +49,9 @@ export function activityNavigation(activity) {
   const lottery = type === 'LOTTERY'
   const soup = type === 'TURTLE_SOUP'
   return {
-    showQuiz: Boolean(!soup && !lottery && (!main || activity?.legacyOperations)),
-    showRewards: Boolean(!soup && (!main || activity?.legacyOperations)),
-    showControl: soup || lottery || Boolean(!main || activity?.legacyOperations),
+    showQuiz: Boolean(!soup && !lottery),
+    showRewards: Boolean(!soup && !main && type !== 'VENUE'),
+    showControl: soup || lottery || Boolean(!main && type !== 'VENUE'),
     controlLabel: soup ? '海龟汤控场' : lottery ? '摇奖控场' : main ? '原有答题控场' : '答题控场',
     rewardsLabel: lottery ? '自助抽奖与核销' : '奖品与核销',
   }

@@ -14,4 +14,8 @@ public class TurtleSoupController {
   @GetMapping public State state(@PathVariable UUID activityId) { return service.state(activityId); }
   @PutMapping public State save(@PathVariable UUID activityId, @Valid @RequestBody Content content) { return service.save(activityId, content); }
   @PostMapping("/control") public State control(@PathVariable UUID activityId, @Valid @RequestBody Command command) { return service.control(activityId, command); }
+  @GetMapping("/templates") public java.util.List<Template> templates(@PathVariable UUID activityId) { return service.templates(activityId); }
+  @PostMapping("/templates") public Template createTemplate(@PathVariable UUID activityId, @Valid @RequestBody Content content) { return service.saveTemplate(activityId, null, content); }
+  @PutMapping("/templates/{templateId}") public Template updateTemplate(@PathVariable UUID activityId, @PathVariable UUID templateId, @Valid @RequestBody Content content) { return service.saveTemplate(activityId, templateId, content); }
+  @PostMapping("/sync") public State syncTemplate(@PathVariable UUID activityId, @Valid @RequestBody SyncTemplate request) { return service.syncTemplate(activityId, request.templateId()); }
 }

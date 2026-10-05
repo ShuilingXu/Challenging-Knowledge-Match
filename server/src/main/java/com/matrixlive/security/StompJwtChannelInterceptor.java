@@ -157,8 +157,6 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
       return permittedActivity && !destination.endsWith("/screens");
     }
     if (principal.userId() == null) return false;
-    if (memberships.findByUserIdAndActivityId(principal.userId(), activityId).isPresent()) return true;
-    return activities.findById(activityId).map(item -> item.getParentActivityId())
-        .flatMap(parentId -> memberships.findByUserIdAndActivityId(principal.userId(), parentId)).isPresent();
+    return memberships.findByUserIdAndActivityId(principal.userId(), ActivityScopes.membershipActivity(activities,activityId)).isPresent();
   }
 }

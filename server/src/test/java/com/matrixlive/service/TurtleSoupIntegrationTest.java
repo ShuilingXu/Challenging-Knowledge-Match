@@ -30,7 +30,7 @@ class TurtleSoupIntegrationTest {
   @Autowired com.matrixlive.security.auth.ActivityMembershipRepository memberships;
   @Autowired com.matrixlive.repository.ActivityRepository repository;
   private ActivityResponse create() {
-    var parent=activities.createActivity(new CreateActivityRequest("Soup main", "Shanghai", Instant.now()));
+    var parent=QuizTestSupport.venue(activities, new CreateActivityRequest("Soup main", "Shanghai", Instant.now()));
     return activities.createActivity(new CreateActivityRequest("Soup round", "Shanghai", Instant.now(), null, null,
         null, null, null, null, parent.id(), "TURTLE_SOUP"));
   }

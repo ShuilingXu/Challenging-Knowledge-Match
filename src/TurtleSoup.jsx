@@ -27,6 +27,9 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   const [notice, setNotice] = useState('')
   const [confirmReveal, setConfirmReveal] = useState(false)
   const [manualClue, setManualClue] = useState('')
+  const [templates, setTemplates] = useState([])
+  const [templateId, setTemplateId] = useState('')
+  useEffect(() => { if (canManage) api.soupTemplates(activity.id).then(setTemplates).catch((e) => setError(e.message)) }, [activity.id, canManage])
   const load = useCallback(async () => {
     try {
       const next = await api.turtleSoup(activity.id)
@@ -47,7 +50,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   }
   const control = async (action, extra = {}) => {
     setBusy(true); setError(''); setConfirmReveal(false); setNotice('')
-    try { setState(await api.controlTurtleSoup(activity.id, { action, revision: state.revision, ...extra })); if (action === 'ADD_CLUE') setManualClue(''); setNotice(action === 'ADD_CLUE' && !extra.publishNow ? '临时线索已保存，尚未公开。' : '已同步到本环节和母活动的大屏。') }
+    try { setState(await api.controlTurtleSoup(activity.id, { action, revision: state.revision, ...extra })); if (action === 'ADD_CLUE') setManualClue(''); setNotice(action === 'ADD_CLUE' && !extra.publishNow ? '临时线索已保存，尚未公开。' : '已同步到本环节和所属会场的大屏。') }
     catch (cause) { setError(cause.message); await load() }
     finally { setBusy(false) }
   }
@@ -62,6 +65,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   return <div className="page-content">
     <div className="page-header"><div><p className="eyebrow">仅大屏展示 · 现场推理</p><h1>海龟汤控场</h1><p className="page-header__description">准备汤稿 → 展示汤面 → 自由选择线索 → 揭晓汤底。观众在现场提问，无需手机报名或作答。</p></div></div>
     {lifecycle}
+    {canManage && activity.status === 'DRAFT' && <section className="answer-card"><h2>从总汤库选择汤稿</h2><p>复制后可以在本会场独立修改，不影响其他会场。</p><label>总汤库<select value={templateId} onChange={(e) => setTemplateId(e.target.value)}><option value="">请选择汤稿</option>{templates.map((entry) => <option key={entry.id} value={entry.id}>{entry.content.title}</option>)}</select></label><button className="secondary-button" disabled={busy || !templateId} onClick={async () => { if ((dirty || state?.content) && !window.confirm('复制会替换当前汤稿，是否继续？')) return; setBusy(true); setError(''); try { const next = await api.syncSoupTemplate(activity.id, templateId); dirtyRef.current = false; setDirty(false); setState(next); setDraft(next.content); setNotice('汤稿已复制，可独立修改。'); } catch (e) { setError(e.message); } finally { setBusy(false); } }}>复制所选汤稿</button></section>}
     {error && <div className="soup-message soup-message--error" role="alert">{error}<button type="button" onClick={load}>刷新状态</button></div>}
     {notice && <p className="soup-message" role="status">{notice}</p>}
     {!state ? <p>正在读取汤稿…</p> : <div className="soup-console-grid">

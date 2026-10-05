@@ -26,7 +26,7 @@ class QuestionMediaAndScoreIntegrationTest {
 
   @Test
   void persistsOrderedMediaAndExposesItToEveryQuestionView() {
-    var activity = service.createActivity(new CreateActivityRequest("Question media", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Question media", "Shanghai", Instant.now()));
     var urls = List.of("https://example.test/first.png?caption=%22quoted%22", "https://example.test/second.png");
     var answerUrls = List.of("https://example.test/answer.png");
     var question = service.createQuestion(activity.id(), request(25, urls, answerUrls));
@@ -56,7 +56,7 @@ class QuestionMediaAndScoreIntegrationTest {
 
   @Test
   void readsLegacyMediaAndAllowsLegacyClientsToReplaceOrRemoveIt() {
-    var activity = service.createActivity(new CreateActivityRequest("Legacy question", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Legacy question", "Shanghai", Instant.now()));
     var legacy = questions.save(new Question(activity.id(), "SINGLE", "Pick A", "A|B", "A", 15,
         0, "https://example.test/legacy.png", 40, "[]", "MANUAL"));
     entityManager.flush();
@@ -74,7 +74,7 @@ class QuestionMediaAndScoreIntegrationTest {
 
   @Test
   void awardsTheConfiguredScoreAfterEditing() {
-    var activity = service.createActivity(new CreateActivityRequest("Question score", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Question score", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 10, true));
     var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Test", "13900006789", ""));
     var question = service.createQuestion(activity.id(), request(25, List.of()));
@@ -89,7 +89,7 @@ class QuestionMediaAndScoreIntegrationTest {
 
   @Test
   void rejectsOutOfRangeScoresAndMediaLists() {
-    var activity = service.createActivity(new CreateActivityRequest("Question validation", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Question validation", "Shanghai", Instant.now()));
     assertThrows(DomainException.class, () -> service.createQuestion(activity.id(), request(0, List.of())));
     assertThrows(DomainException.class, () -> service.createQuestion(activity.id(), request(100001, List.of())));
     assertThrows(DomainException.class, () -> service.createQuestion(activity.id(), request(10,

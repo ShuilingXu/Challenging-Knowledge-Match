@@ -20,15 +20,19 @@ public class DemoData {
       VenueRepository venues) {
     return args -> {
       if (activities.count() > 0) return;
-      Activity activity = activities.save(new Activity("2024 知识挑战赛", "上海", "LIVE", Instant.now()));
-      venues.save(new Venue(activity.getId(), "south", "南区会场", 500));
-      venues.save(new Venue(activity.getId(), "north", "北区会场", 500));
+      Activity main = activities.save(new Activity("示例母活动", "上海", "LIVE", Instant.now()));
+      Activity hall = new Activity("示例会场", "上海", "LIVE", Instant.now());
+      hall.configureHierarchy(main.getId(), "VENUE"); activities.save(hall);
+      Activity activity = new Activity("2024 知识挑战赛", "上海", "LIVE", Instant.now());
+      activity.configureHierarchy(hall.getId(), "QUIZ"); activity.shareParticipants(); activities.save(activity);
+      venues.save(new Venue(hall.getId(), "south", "南区会场", 500));
+      venues.save(new Venue(hall.getId(), "north", "北区会场", 500));
       questions.save(new Question(activity.getId(), "SINGLE", "以下哪项技术最贴近将数据转化为集体智能的核心定义？",
           "云端备份与自动归档|机器学习模型持续从数据中发现模式|通过压缩降低存储成本|以规则引擎替代人的决策", "机器学习模型持续从数据中发现模式", 100));
       questions.save(new Question(activity.getId(), "MULTIPLE", "构建可信赖的数据产品时，哪些原则应被优先考虑？",
           "数据最小化|可追溯的决策过程|默认公开所有原始数据|清晰的用户告知与授权", "数据最小化,可追溯的决策过程,清晰的用户告知与授权", 100));
-      participants.save(new Participant(activity.getId(), "south", "13800002048", "林舒", "澜台科技"));
-      participants.save(new Participant(activity.getId(), "south", "13800002049", "陈澈", "NOVA Lab"));
+      participants.save(new Participant(hall.getId(), "south", "13800002048", "林舒", "澜台科技"));
+      participants.save(new Participant(hall.getId(), "south", "13800002049", "陈澈", "NOVA Lab"));
     };
   }
 }

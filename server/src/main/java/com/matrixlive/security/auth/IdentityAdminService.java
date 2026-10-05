@@ -79,7 +79,8 @@ public class IdentityAdminService {
 
   public List<UserResponse> listActivityUsers(UUID activityId) {
     requireActivity(activityId);
-    return users.findAll().stream().map(this::toUser).toList();
+    return memberships.findByActivityIdOrderByCreatedAtAsc(activityId).stream()
+        .map(member -> users.findById(member.getUserId()).orElseThrow()).map(this::toUser).toList();
   }
 
   @Transactional
@@ -114,6 +115,11 @@ public class IdentityAdminService {
   public void removeMembership(UUID activityId, UUID userId) {
     requireActivity(activityId);
     memberships.deleteByUserIdAndActivityId(userId, activityId);
+  }
+
+  public UUID membershipScope(UUID activityId) {
+    requireActivity(activityId);
+    return com.matrixlive.security.ActivityScopes.membershipActivity(activities,activityId);
   }
 
   private void requireActivity(UUID activityId) {

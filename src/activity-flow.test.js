@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { availableActivities, participantActivityId, activityEntry, participantMatches, activityNavigation } from './activity-flow'
 
 describe('participant activity routing', () => {
+  it('hides mother entries and supports venue portals when public APIs omit mothers', () => {
+    const main = { id: 'main', activityType: 'EVENT', status: 'LIVE' }
+    const venue = { id: 'venue', parentActivityId: 'main', activityType: 'VENUE', status: 'LIVE' }
+    const quiz = { id: 'quiz', parentActivityId: 'venue', activityType: 'QUIZ', status: 'LIVE' }
+    expect(availableActivities([main, venue, quiz]).map((item) => item.id)).toEqual(['venue', 'quiz'])
+    expect(availableActivities([venue, quiz]).map((item) => item.id)).toEqual(['venue', 'quiz'])
+    expect(activityNavigation(venue)).toMatchObject({ showQuiz: true, showControl: false, showRewards: false })
+  })
+  it('checks the full venue hierarchy before exposing a child entry', () => {
+    const main = { id: 'main', activityType: 'EVENT', status: 'FINISHED' }
+    const venue = { id: 'venue', parentActivityId: 'main', activityType: 'VENUE', status: 'LIVE' }
+    const quiz = { id: 'quiz', parentActivityId: 'venue', activityType: 'QUIZ', status: 'LIVE' }
+    expect(availableActivities([main, venue, quiz])).toEqual([])
+  })
   it('keeps turtle soup out of participant entries and exposes only its screen controls', () => {
     expect(availableActivities([{ id: 'soup', activityType: 'TURTLE_SOUP', status: 'LIVE' }])).toEqual([])
     expect(activityNavigation({ activityType: 'TURTLE_SOUP' })).toMatchObject({ showQuiz: false, showRewards: false, showControl: true, controlLabel: '海龟汤控场' })
@@ -11,7 +25,7 @@ describe('participant activity routing', () => {
     expect(participantActivityId({ id: 'old-quiz', parentActivityId: 'main', activityType: 'QUIZ', participantActivityId: 'old-quiz' })).toBe('old-quiz')
   })
   it('separates main management, quiz controls and host lottery controls while preserving legacy entries', () => {
-    expect(activityNavigation({ activityType: 'EVENT' }).showQuiz).toBe(false)
+    expect(activityNavigation({ activityType: 'EVENT' })).toMatchObject({ showQuiz: true, showControl: false, showRewards: false })
     expect(activityNavigation({ activityType: 'EVENT', legacyOperations: true }).showQuiz).toBe(true)
     expect(activityNavigation({ activityType: 'QUIZ' }).controlLabel).toBe('答题控场')
     expect(activityNavigation({ activityType: 'LOTTERY' })).toMatchObject({ showQuiz: false, controlLabel: '摇奖控场', rewardsLabel: '自助抽奖与核销' })

@@ -25,6 +25,8 @@ public class Question {
   @Column(nullable = false)
   private UUID activityId;
 
+  private UUID sourceQuestionId;
+
   @Column(nullable = false, length = 24)
   private String type;
 
@@ -93,6 +95,8 @@ public class Question {
 
   public UUID getId() { return id; }
   public UUID getActivityId() { return activityId; }
+  public UUID getSourceQuestionId() { return sourceQuestionId; }
+  public void setSourceQuestionId(UUID id) { sourceQuestionId = id; }
   public String getType() { return type; }
   public String getTitle() { return title; }
   public String getOptions() { return options; }

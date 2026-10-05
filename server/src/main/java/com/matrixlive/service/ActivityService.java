@@ -71,7 +71,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ActivityService {
   private static final Set<String> ACTIVITY_STATUSES = Set.of(
       "DRAFT", "REGISTRATION_OPEN", "LIVE", "PAUSED", "FINISHED", "CANCELLED");
-  private static final Set<String> ACTIVITY_TYPES = Set.of("EVENT", "QUIZ", "LOTTERY", "TURTLE_SOUP", "OTHER");
+  private static final Set<String> ACTIVITY_TYPES = Set.of("EVENT", "VENUE", "QUIZ", "LOTTERY", "TURTLE_SOUP", "OTHER");
   private static final Set<String> QUESTION_TYPES = Set.of("SINGLE", "MULTIPLE", "TEXT");
   private static final Set<String> TEXT_MATCH_MODES = Set.of("FUZZY", "REGEX", "MANUAL");
   private static final Set<String> FIELD_TYPES = Set.of(
@@ -161,6 +161,9 @@ public class ActivityService {
     configureAnswerMode(activity, request.answerMode());
     activities.save(activity);
     createInitiatorMembership(activity.getId());
+    if ("VENUE".equals(activity.getActivityType())) {
+      venues.save(new Venue(activity.getId(), "main", activity.getName(), null));
+    }
     return toActivity(activity);
   }
 
@@ -193,6 +196,7 @@ public class ActivityService {
     String next = normalizeEnum(request.status(), ACTIVITY_STATUSES, "activity status");
     if ("TURTLE_SOUP".equals(activity.getActivityType()) && "REGISTRATION_OPEN".equals(next)) throw conflict("海龟汤无需报名，请直接开始环节");
     ensureStatusTransition(activity.getStatus(), next);
+    if (Set.of("LIVE", "REGISTRATION_OPEN").contains(next)) ensureAncestorsOpen(activity);
     if ("LIVE".equals(next) && activity.getParentActivityId() != null
         && !Set.of("LIVE", "REGISTRATION_OPEN").contains(requireActivity(activity.getParentActivityId()).getStatus())) {
       throw conflict("请先启用或恢复母活动，再开始子活动");
@@ -201,8 +205,8 @@ public class ActivityService {
     if ("PAUSED".equals(next)) {
       // Resume requires staff to explicitly reopen a question with a fresh timer.
       activity.updateControl("LOBBY", null, 0, Instant.now());
-      synchronizeControlledScreens(activityId, controlState(activityId));
-      for (Activity child : activities.findByParentActivityId(activityId)) {
+      if (!"EVENT".equals(activity.getActivityType())) synchronizeControlledScreens(activityId, controlState(activityId));
+      for (Activity child : descendants(activityId)) {
         if (!"LIVE".equals(child.getStatus())) continue;
         child.changeStatus("PAUSED");
         child.updateControl("LOBBY", null, 0, Instant.now());
@@ -230,6 +234,7 @@ public class ActivityService {
   private void closeSubActivities(UUID activityId, String status) {
     for (Activity child : activities.findByParentActivityId(activityId)) {
       if ("CANCELLED".equals(child.getStatus()) || "FINISHED".equals(child.getStatus())) continue;
+      closeSubActivities(child.getId(), status);
       child.changeStatus(status);
       broadcast(child.getId(), "activity.status_changed");
     }
@@ -244,7 +249,8 @@ public class ActivityService {
 
   @Transactional
   public VenueResponse createVenue(UUID activityId, VenueRequest request) {
-    requireActivity(activityId);
+    Activity owner = requireActivity(activityId);
+    if ("EVENT".equals(owner.getActivityType())) throw conflict("请到活动管理创建独立会场");
     UUID scopeId = participantScopeActivity(activityId);
     String code = normalizeVenue(request.code());
     if (venues.findByActivityIdAndCode(scopeId, code).isPresent()) {
@@ -320,9 +326,11 @@ public class ActivityService {
   @Transactional
   public ParticipantResponse register(UUID activityId, String venueCode, RegisterParticipantRequest request) {
     Activity activity = requireActivity(activityId);
+    if ("EVENT".equals(activity.getActivityType())) throw conflict("母活动不接受报名，请选择会场");
     if ("TURTLE_SOUP".equals(activity.getActivityType())) throw conflict("海龟汤仅用于大屏展示，无需报名");
     UUID scopeId = participantScopeActivity(activityId);
     ensureRegistrationAllowed(activities.findForUpdate(scopeId).orElseThrow(() -> notFound("Activity not found")));
+    ensureAncestorsOpen(activity);
     String venue = normalizeVenue(venueCode);
     Venue venueEntity = venues.findForRegistration(scopeId, venue)
         .orElseThrow(() -> badRequest("Venue is not configured in this activity"));
@@ -431,7 +439,7 @@ public class ActivityService {
     if (questionSets.existsByActivityIdAndName(activityId, name)) {
       throw conflict("A question set with this name already exists");
     }
-    List<UUID> questionIds = validateQuestionSetItems(activityId, request.questionIds());
+    List<UUID> questionIds = randomizeQuestionIds(validateQuestionSetItems(activityId, request.questionIds()), request.randomOrder());
     boolean active = Boolean.TRUE.equals(request.active());
     if (active && questionIds.isEmpty()) throw badRequest("An active question set must contain at least one question");
     QuestionSet set = questionSets.save(new QuestionSet(activityId, name, cleanOptional(request.description()), active));
@@ -452,6 +460,7 @@ public class ActivityService {
     List<UUID> questionIds = request.questionIds() == null
         ? questionSetItems.findByQuestionSetIdOrderByDisplayOrderAsc(questionSetId).stream().map(QuestionSetItem::getQuestionId).toList()
         : validateQuestionSetItems(activityId, request.questionIds());
+    questionIds = randomizeQuestionIds(questionIds, request.randomOrder());
     if (Boolean.TRUE.equals(request.active()) && questionIds.isEmpty()) {
       throw badRequest("An active question set must contain at least one question");
     }
@@ -764,6 +773,7 @@ public class ActivityService {
 
   private void synchronizeControlledScreens(UUID activityId, ControlState state) {
     Activity controlled = requireActivity(activityId);
+    if ("EVENT".equals(controlled.getActivityType())) return;
     if ("TURTLE_SOUP".equals(controlled.getActivityType())) {
       if (controlled.getTurtleSoup() != null) {
         try {
@@ -1057,8 +1067,8 @@ public class ActivityService {
     Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication == null || !(authentication.getPrincipal() instanceof AuthenticatedPrincipal principal)
         || principal.userId() == null) return;
-    memberships.findByUserIdAndActivityId(principal.userId(), activityId)
-        .orElseGet(() -> memberships.save(new ActivityMembership(activityId, principal.userId(), UserRole.ACTIVITY_ADMIN)));
+    memberships.findByUserIdAndActivityId(principal.userId(), com.matrixlive.security.ActivityScopes.membershipActivity(activities,activityId))
+        .orElseGet(() -> memberships.save(new ActivityMembership(com.matrixlive.security.ActivityScopes.membershipActivity(activities,activityId), principal.userId(), UserRole.ACTIVITY_ADMIN)));
   }
 
   private Venue requireVenue(UUID activityId, UUID venueId) {
@@ -1230,12 +1240,14 @@ public class ActivityService {
   }
 
   private void ensureAnsweringAllowed(Activity activity) {
-    if (Set.of("LOTTERY", "TURTLE_SOUP").contains(activity.getActivityType())) throw conflict("此子活动不接受答题");
+    if (Set.of("EVENT", "VENUE", "LOTTERY", "TURTLE_SOUP").contains(activity.getActivityType())) throw conflict("此子活动不接受答题");
     ensureLiveOperation(activity);
   }
 
   private void ensureLiveOperation(Activity activity) {
+    if ("EVENT".equals(activity.getActivityType())) throw conflict("母活动仅管理资料，请选择会场子活动");
     if (!"LIVE".equals(activity.getStatus())) throw conflict("请先开始活动，再进行答题或摇奖");
+    ensureAncestorsOpen(activity);
     if (activity.getParentActivityId() != null) {
       Activity parent = requireActivity(activity.getParentActivityId());
       if (!Set.of("LIVE", "REGISTRATION_OPEN").contains(parent.getStatus())) throw conflict("母活动尚未启用、已暂停或已结束");
@@ -1480,43 +1492,78 @@ public class ActivityService {
     String type = normalizeEnum(activityType == null ? "EVENT" : activityType, ACTIVITY_TYPES, "activity type");
     if (activity.getId() != null && (!type.equals(activity.getActivityType())
         || !java.util.Objects.equals(parentActivityId, activity.getParentActivityId()))) {
-      if (activity.getTurtleSoup() != null || participants.countByActivityId(activity.getId()) > 0 || questions.countByActivityId(activity.getId()) > 0
-          || !prizePools.findByActivityIdOrderByCreatedAtAsc(activity.getId()).isEmpty()
-          || !scoreLedgers.findByActivityIdOrderByCreatedAtDesc(activity.getId()).isEmpty()
-          || !awards.findByActivityIdOrderByAwardedAtDesc(activity.getId()).isEmpty()) {
-        throw conflict("已有人员、题目、积分或奖池，不能修改活动类型或所属母活动");
-      }
+      throw conflict("活动创建后不能更换类型或所属会场，请新建活动");
     }
-    if (parentActivityId != null && parentActivityId.equals(activity.getId())) {
-      throw badRequest("An activity cannot be its own parent");
-    }
-    if ("EVENT".equals(type) && parentActivityId != null) {
-      throw badRequest("A parent activity is only valid for a sub-activity");
-    }
-    if (!"EVENT".equals(type) && parentActivityId == null) {
-      throw badRequest("Sub-activities require a parent activity");
-    }
-    if (parentActivityId != null) {
+    if ("EVENT".equals(type)) {
+      if (parentActivityId != null) throw badRequest("母活动不能设置上级");
+    } else {
+      if (parentActivityId == null) throw badRequest("请选择所属母活动或会场");
       Activity parent = requireActivity(parentActivityId);
-      if (Set.of("FINISHED", "CANCELLED").contains(parent.getStatus())
-          && (activity.getId() == null || !java.util.Objects.equals(parentActivityId, activity.getParentActivityId())
-              || !type.equals(activity.getActivityType()))) throw conflict("已结束或终止的母活动不能新增或接收子活动");
-      if (parent.getParentActivityId() != null || !"EVENT".equals(parent.getActivityType())) {
-        throw badRequest("Only a top-level activity can own sub-activities");
-      }
+      String expected = "VENUE".equals(type) ? "EVENT" : "VENUE";
+      if (!expected.equals(parent.getActivityType())) throw badRequest("VENUE".equals(type) ? "会场必须属于母活动" : "子活动必须属于独立会场");
+      if (activity.getId() == null && Set.of("FINISHED", "CANCELLED").contains(parent.getStatus())) throw conflict("上级活动已结束，不能新增子项");
       Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
       if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedPrincipal principal
           && !principal.isSystemAdmin() && (principal.userId() == null
           || memberships.findByUserIdAndActivityId(principal.userId(), parentActivityId)
               .filter(member -> member.getRole() == UserRole.ACTIVITY_ADMIN).isEmpty())) {
-        throw new DomainException(HttpStatus.FORBIDDEN, "Only a main activity administrator can configure its sub-activities");
+        throw new DomainException(HttpStatus.FORBIDDEN, "请由对应母活动或会场管理员创建");
       }
     }
-    if (activity.getId() != null && !activities.findByParentActivityId(activity.getId()).isEmpty()
-        && !"EVENT".equals(type)) {
-      throw conflict("An activity with sub-activities must remain a main activity");
-    }
     activity.configureHierarchy(parentActivityId, type);
+  }
+
+  private void ensureAncestorsOpen(Activity activity) {
+    while (activity.getParentActivityId() != null) {
+      activity = requireActivity(activity.getParentActivityId());
+      if (!Set.of("LIVE", "REGISTRATION_OPEN").contains(activity.getStatus())) throw conflict("所属会场或母活动尚未启用、已暂停或已结束");
+    }
+  }
+
+  private List<UUID> randomizeQuestionIds(List<UUID> ids, Boolean random) {
+    List<UUID> result = new ArrayList<>(ids);
+    if (Boolean.TRUE.equals(random)) java.util.Collections.shuffle(result, new java.security.SecureRandom());
+    return result;
+  }
+
+  private UUID masterQuestionActivity(UUID id) {
+    Activity activity = requireActivity(id);
+    if ("EVENT".equals(activity.getActivityType())) throw badRequest("母活动请直接编辑总题库");
+    while (activity.getParentActivityId() != null) activity = requireActivity(activity.getParentActivityId());
+    return activity.getId();
+  }
+
+  @Transactional(readOnly = true)
+  public List<QuestionAdminResponse> sourceQuestions(UUID activityId) {
+    return questions.findByActivityIdOrderByDisplayOrderAsc(masterQuestionActivity(activityId)).stream().map(this::toQuestionAdmin).toList();
+  }
+
+  @Transactional
+  public List<QuestionAdminResponse> syncQuestions(UUID activityId, SyncQuestionsRequest request) {
+    Activity target = activities.findForUpdate(activityId).orElseThrow(() -> notFound("活动不存在"));
+    if (!Set.of("VENUE", "QUIZ").contains(target.getActivityType())) throw badRequest("请选择会场或答题子活动同步题库");
+    if (!"DRAFT".equals(target.getStatus()) || !"LOBBY".equals(target.getControlStage())) throw conflict("仅可在草稿阶段同步题库，避免更改已开始的比赛");
+    UUID master = masterQuestionActivity(activityId);
+    List<Question> existing = questions.findByActivityIdOrderByDisplayOrderAsc(activityId);
+    List<QuestionAdminResponse> result = new ArrayList<>();
+    for (UUID sourceId : new java.util.LinkedHashSet<>(request.questionIds())) {
+      Question source = requireQuestion(master, sourceId);
+      Question copy = existing.stream().filter(q -> sourceId.equals(q.getSourceQuestionId())).findFirst().orElse(null);
+      if (copy != null && (submissions.existsByActivityIdAndQuestionId(activityId, copy.getId())
+          || buzzEntries.countByActivityIdAndQuestionId(activityId, copy.getId()) > 0)) throw conflict("题目已有作答记录，不能覆盖");
+      boolean enabled = copy == null ? source.isEnabled() : copy.isEnabled();
+      if (copy == null) {
+        copy = new Question(activityId, source.getType(), source.getTitle(), source.getOptions(), source.getAnswers(), source.getFullScore());
+        copy.setSourceQuestionId(sourceId);
+      }
+      copy.update(source.getType(), source.getTitle(), source.getOptions(), source.getAnswers(), source.getFullScore(),
+          copy.getId() == null ? existing.size() + result.size() : copy.getDisplayOrder(), null,
+          source.getPartialCreditPercent(), source.getTextAcceptedAnswers(), source.getTextMatchMode(), enabled);
+      copy.setMediaUrls(source.getMediaUrls()); copy.setAnswerMediaUrls(source.getAnswerMediaUrls());
+      result.add(toQuestionAdmin(questions.save(copy)));
+    }
+    broadcast(activityId, "questions.synced");
+    return result;
   }
 
   private String normalizeEnum(String value, Set<String> allowed, String label) {
@@ -1596,7 +1643,7 @@ public class ActivityService {
         Map.of("type", type, "sentAt", Instant.now().toString()));
     Activity source = activities.findById(activityId).orElse(null);
     if (source != null && (type.startsWith("answer.") || type.startsWith("score.") || type.equals("participant.registered"))) {
-      UUID root = source.isSharedParticipants() ? source.getParentActivityId() : "EVENT".equals(source.getActivityType()) ? activityId : null;
+      UUID root = source.isSharedParticipants() ? source.getParentActivityId() : "VENUE".equals(source.getActivityType()) ? activityId : null;
       if (root != null) {
         Map<String, String> update = Map.of("type", "score.updated", "sentAt", Instant.now().toString());
         if (!root.equals(activityId)) realtime.send("/topic/activities/" + root, update);
@@ -1607,15 +1654,22 @@ public class ActivityService {
     }
   }
 
+  private List<Activity> descendants(UUID id) {
+    List<Activity> result = new ArrayList<>();
+    for (Activity child : activities.findByParentActivityId(id)) {
+      result.add(child); result.addAll(descendants(child.getId()));
+    }
+    return result;
+  }
+
   private boolean canViewActivity(Activity activity) {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication == null) return true; // Internal service callers.
     if (authentication.getPrincipal() instanceof AuthenticatedPrincipal principal) {
       if (principal.isSystemAdmin()) return true;
-      if (principal.userId() != null && (memberships.findByUserIdAndActivityId(principal.userId(), activity.getId()).isPresent()
-          || activity.getParentActivityId() != null && memberships.findByUserIdAndActivityId(principal.userId(), activity.getParentActivityId()).isPresent())) return true;
+      if (principal.userId() != null && memberships.findByUserIdAndActivityId(principal.userId(), com.matrixlive.security.ActivityScopes.membershipActivity(activities,activity.getId())).isPresent()) return true;
     }
-    return !"TURTLE_SOUP".equals(activity.getActivityType()) && !Set.of("DRAFT", "CANCELLED").contains(activity.getStatus());
+    return !Set.of("EVENT", "TURTLE_SOUP").contains(activity.getActivityType()) && !Set.of("DRAFT", "CANCELLED").contains(activity.getStatus());
   }
 
   private ActivityResponse toActivity(Activity activity) {
@@ -1624,13 +1678,7 @@ public class ActivityService {
     if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedPrincipal principal) {
       if (principal.isSystemAdmin()) viewerRole = "SYSTEM_ADMIN";
       else if (principal.userId() != null) {
-        var membership = memberships.findByUserIdAndActivityId(principal.userId(), activity.getId());
-        if (activity.getParentActivityId() != null) {
-          var inherited = memberships.findByUserIdAndActivityId(principal.userId(), activity.getParentActivityId());
-          if (inherited.isPresent() && (membership.isEmpty() || inherited.get().getRole() == UserRole.ACTIVITY_ADMIN)) {
-            membership = inherited;
-          }
-        }
+        var membership = memberships.findByUserIdAndActivityId(principal.userId(), com.matrixlive.security.ActivityScopes.membershipActivity(activities,activity.getId()));
         viewerRole = membership.map(item -> item.getRole().name()).orElse(null);
       }
     }
@@ -1641,8 +1689,7 @@ public class ActivityService {
         activity.getCreatedAt(), activity.getUpdatedAt(), activity.getParentActivityId(), activity.getActivityType(),
         activity.getActiveQuestionSetId(), viewerRole, activity.getScoringMode(), activity.getCorrectScorePercent(),
         activity.getIncorrectScorePercent(), rules.getOrDefault("correct", List.of()), rules.getOrDefault("incorrect", List.of()), activity.getAnswerMode(),
-        participantScopeActivity(activity.getId()), "EVENT".equals(activity.getActivityType())
-            && (questions.countByActivityId(activity.getId()) > 0 || !prizePools.findByActivityIdOrderByCreatedAtAsc(activity.getId()).isEmpty()));
+        participantScopeActivity(activity.getId()), false);
   }
 
   private void configureAnswerMode(Activity activity, String mode) {

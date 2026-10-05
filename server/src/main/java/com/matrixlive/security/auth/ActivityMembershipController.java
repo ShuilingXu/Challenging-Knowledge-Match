@@ -24,35 +24,35 @@ public class ActivityMembershipController {
   public ActivityMembershipController(IdentityAdminService identity) { this.identity = identity; }
 
   @GetMapping
-  public List<MembershipResponse> list(@PathVariable UUID activityId) { return identity.listMemberships(activityId); }
+  public List<MembershipResponse> list(@PathVariable UUID activityId) { return identity.listMemberships(identity.membershipScope(activityId)); }
 
   @GetMapping("/users")
   public List<UserResponse> listUsers(@PathVariable UUID activityId) {
-    return identity.listActivityUsers(activityId);
+    return identity.listActivityUsers(identity.membershipScope(activityId));
   }
 
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)
   public MembershipResponse upsert(@PathVariable UUID activityId, @Valid @RequestBody MembershipRequest request) {
-    return identity.upsertMembership(activityId, request);
+    return identity.upsertMembership(identity.membershipScope(activityId), request);
   }
 
   @PostMapping("/users")
   @ResponseStatus(HttpStatus.CREATED)
   public MembershipResponse createUser(@PathVariable UUID activityId,
       @Valid @RequestBody CreateActivityMemberRequest request) {
-    return identity.createActivityMember(activityId, request);
+    return identity.createActivityMember(identity.membershipScope(activityId), request);
   }
 
   @PatchMapping("/users/{userId}")
   public UserResponse updateUser(@PathVariable UUID activityId, @PathVariable UUID userId,
       @Valid @RequestBody UpdateUserRequest request) {
-    return identity.updateActivityUser(activityId, userId, request);
+    return identity.updateActivityUser(identity.membershipScope(activityId), userId, request);
   }
 
   @DeleteMapping("/{userId}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void remove(@PathVariable UUID activityId, @PathVariable UUID userId) {
-    identity.removeMembership(activityId, userId);
+    identity.removeMembership(identity.membershipScope(activityId), userId);
   }
 }

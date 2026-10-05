@@ -82,7 +82,7 @@ class ReviewSecurityRegressionTest {
 
   @Test
   void humanChallengeIsRequiredOneUseAndOffersNoRegistrationStatusOracle() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     mvc.perform(
             post("/api/auth/participant-token")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -122,7 +122,7 @@ class ReviewSecurityRegressionTest {
   @Test
   void expiredClientAccessCanRenewWithoutReenteringContactAndLogoutRevokesTheWholeClientSession()
       throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     var issued =
         mvc.perform(
                 post("/api/auth/participant-token")
@@ -217,7 +217,7 @@ class ReviewSecurityRegressionTest {
 
   @Test
   void screenCredentialsRenewAndDeletedDevicesCannotRenew() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     var device =
         screens.registerDevice(
             activityId,
@@ -270,7 +270,7 @@ class ReviewSecurityRegressionTest {
   @Test
   void sharedMainIdentityCanJoinQuizButCannotReadHostOnlyData() throws Exception {
     var parent =
-        service.createActivity(new CreateActivityRequest("Root scope", "City", Instant.now()));
+        com.matrixlive.service.QuizTestSupport.venue(service, new CreateActivityRequest("Root scope", "City", Instant.now()));
     service.createVenue(parent.id(), new VenueRequest("a", "A", 20, true));
     var person =
         com.matrixlive.service.QuizTestSupport.register(service,

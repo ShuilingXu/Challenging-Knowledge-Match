@@ -34,7 +34,7 @@ class ActivityServiceIntegrationTest {
 
   @Test
   void buzzerRequiresOpenWindowAndPersistsOneArrivalPerQuestion() {
-    var activity = service.createActivity(new CreateActivityRequest("Buzzer workflow", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Buzzer workflow", "Shanghai", Instant.now()));
     service.updateActivity(activity.id(), answerMode("BUZZER"));
     assertEquals("BUZZER", service.activity(activity.id()).answerMode());
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
@@ -74,7 +74,7 @@ class ActivityServiceIntegrationTest {
   @Test
   @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
   void concurrentBuzzesHaveDistinctRanksAndDuplicateRequestsReuseTheirRank() throws Exception {
-    var activity = service.createActivity(new CreateActivityRequest("Concurrent buzzes", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Concurrent buzzes", "Shanghai", Instant.now()));
     service.updateActivity(activity.id(), answerMode("BUZZER"));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
     var people = new java.util.ArrayList<com.matrixlive.api.ApiModels.ParticipantResponse>();
@@ -110,7 +110,7 @@ class ActivityServiceIntegrationTest {
   @Test
   @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
   void concurrentAnswersReceiveDistinctPersistentRanks() throws Exception {
-    var activity = service.createActivity(new CreateActivityRequest("Concurrent answers", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Concurrent answers", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
     var people = new java.util.ArrayList<com.matrixlive.api.ApiModels.ParticipantResponse>();
     for (int i = 0; i < 8; i++) {
@@ -140,7 +140,7 @@ class ActivityServiceIntegrationTest {
 
   @Test
   void persistsControlAndMeasuresAnswerTimeFromOpeningInsteadOfReveal() {
-    var activity = service.createActivity(new CreateActivityRequest("Timing regression", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Timing regression", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
     var person = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Player", "timing@example.test", null));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
@@ -168,7 +168,7 @@ class ActivityServiceIntegrationTest {
 
   @Test
   void winnerConfirmationIssuesRankingAwardsBeforePublishingAndDoesNotIssueTwice() {
-    var activity = service.createActivity(new CreateActivityRequest("Winner regression", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Winner regression", "Shanghai", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("hall", "Hall", 20, true));
     var person = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "hall", new RegisterParticipantRequest("Winner", "winner@example.test", null));
     service.createPrizePool(activity.id(), new com.matrixlive.api.ApiModels.PrizePoolRequest("first", "First prize", "RANKING",
@@ -185,7 +185,7 @@ class ActivityServiceIntegrationTest {
 
   @Test
   void rejectsInvalidControlInputAndClosedAnswerWindows() {
-    var activity = service.createActivity(new CreateActivityRequest("Control validation", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Control validation", "Shanghai", Instant.now()));
     assertThrows(DomainException.class, () -> service.control(activity.id(), new ControlRequest("TYPO", null, 30)));
     assertThrows(DomainException.class, () -> service.control(activity.id(), new ControlRequest("QUESTION_OPEN", null, 30)));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Pick A",
@@ -200,7 +200,7 @@ class ActivityServiceIntegrationTest {
 
   @Test
   void isolatesRegistrationAndReplaysIdempotentAnswers() {
-    var activity = service.createActivity(new CreateActivityRequest("API 测试活动", "上海", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("API 测试活动", "上海", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("south", "South Hall", 20, true));
     var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "south", new RegisterParticipantRequest("测试用户", "138 0000 2048", "QA"));
     assertThrows(DomainException.class, () -> com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "south",
@@ -231,7 +231,7 @@ class ActivityServiceIntegrationTest {
 
   @Test
   void controlStatePublishesDeviceScopedQuestionAndScoreboardViews() {
-    var activity = service.createActivity(new CreateActivityRequest("Screen control", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Screen control", "Shanghai", Instant.now()));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Which signal is live?",
         java.util.List.of("Alpha", "Beta"), Set.of("Alpha"), 100, 0, null, 40, true));
     var device = screens.registerDevice(activity.id(), new com.matrixlive.screen.ScreenModels.RegisterScreenDeviceRequest(
@@ -252,7 +252,7 @@ class ActivityServiceIntegrationTest {
 
   @Test
   void answerRevealPublishesDedicatedAnswerMediaInsteadOfQuestionMedia() {
-    var activity = service.createActivity(new CreateActivityRequest("Answer media", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Answer media", "Shanghai", Instant.now()));
     var question = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Which image is the answer?",
         java.util.List.of("Alpha", "Beta"), Set.of("Alpha"), 100, 0,
         "https://cdn.example.test/question.png", 40, java.util.List.of(), "MANUAL", true,
@@ -275,7 +275,7 @@ class ActivityServiceIntegrationTest {
 
   @Test
   void editsQuestionsAndActivatesAnOrderedQuestionSetForRuntime() {
-    var activity = service.createActivity(new CreateActivityRequest("Question set", "Shanghai", Instant.now()));
+    var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Question set", "Shanghai", Instant.now()));
     var first = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "First", java.util.List.of("A", "B"),
         Set.of("A"), 100, 0, null, 40, true));
     var second = service.createQuestion(activity.id(), new QuestionWriteRequest("SINGLE", "Second", java.util.List.of("A", "B"),

@@ -35,7 +35,7 @@ public class BootstrapIdentityData {
     UserAccount systemAdmin = ensureUser("sysadmin", "System Administrator", UserRole.SYSTEM_ADMIN);
     UserAccount activityAdmin = ensureUser("activity-admin", "Activity Administrator", null);
     UserAccount staff = ensureUser("event-staff", "Event Staff", null);
-    activities.findAll().stream().min(Comparator.comparing(activity -> activity.getStartsAt() == null
+    activities.findAll().stream().filter(activity -> "VENUE".equals(activity.getActivityType())).min(Comparator.comparing(activity -> activity.getStartsAt() == null
         ? java.time.Instant.EPOCH : activity.getStartsAt())).ifPresent(activity -> {
           ensureMembership(activity.getId(), activityAdmin.getId(), UserRole.ACTIVITY_ADMIN);
           ensureMembership(activity.getId(), staff.getId(), UserRole.STAFF);

@@ -289,7 +289,13 @@ public final class ApiModels {
       @NotBlank @Size(max = 180) String name,
       @Size(max = 1000) String description,
       List<@NotNull UUID> questionIds,
-      Boolean active) { }
+      Boolean active, Boolean randomOrder) {
+    public QuestionSetRequest(String name, String description, List<UUID> questionIds, Boolean active) {
+      this(name, description, questionIds, active, false);
+    }
+  }
+
+  public record SyncQuestionsRequest(@NotEmpty @Size(max = 1000) List<@NotNull UUID> questionIds) { }
 
   public record QuestionSetItemResponse(UUID questionId, String title, String type, int displayOrder) { }
 

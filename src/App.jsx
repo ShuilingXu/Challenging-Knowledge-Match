@@ -461,7 +461,7 @@ function StaffApp() {
           <Route
             path="overview"
             element={
-              soupActivity ? <TurtleSoupPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : currentActivity?.activityType === "EVENT" ? <MainActivityPage activity={currentActivity} activities={activities} setActivityId={setActivityId} canManage={canManage} reload={reloadActivities} /> : <OverviewPage activityId={activityId} activities={activities} />
+              soupActivity ? <TurtleSoupPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : ["EVENT", "VENUE"].includes(currentActivity?.activityType) ? <MainActivityPage key={activityId} activity={currentActivity} activities={activities} setActivityId={setActivityId} canManage={canManage} reload={reloadActivities} /> : <OverviewPage activityId={activityId} activities={activities} />
             }
           />
           <Route
@@ -477,15 +477,15 @@ function StaffApp() {
           />
           <Route
             path="control"
-            element={soupActivity ? <TurtleSoupPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : lotteryActivity ? <HostLotteryPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : currentActivity?.activityType === "EVENT" && !currentActivity.legacyOperations ? <Navigate to="/admin/overview" replace /> : <ControlPage key={activityId} activityId={activityId} activity={currentActivity} reloadActivities={reloadActivities} canManage={canManage} />}
+            element={soupActivity ? <TurtleSoupPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : lotteryActivity ? <HostLotteryPage key={activityId} activity={currentActivity} reload={reloadActivities} canManage={canManage} /> : ["EVENT", "VENUE"].includes(currentActivity?.activityType) ? <Navigate to="/admin/overview" replace /> : <ControlPage key={activityId} activityId={activityId} activity={currentActivity} reloadActivities={reloadActivities} canManage={canManage} />}
           />
           <Route
             path="questions"
-            element={soupActivity || lotteryActivity || currentActivity?.activityType === "EVENT" && !currentActivity.legacyOperations ? <Navigate to="/admin/overview" replace /> : <QuestionsPage key={activityId} activityId={activityId} canManage={canManage} />}
+            element={soupActivity || lotteryActivity ? <Navigate to="/admin/overview" replace /> : <QuestionsPage key={activityId} activityId={activityId} activity={currentActivity} canManage={canManage} />}
           />
           <Route
             path="participants"
-            element={soupActivity ? <Navigate to="/admin/control" replace /> : <ParticipantsPage activityId={activityId} />}
+            element={soupActivity ? <Navigate to="/admin/control" replace /> : <ParticipantsPage key={activityId} activityId={activityId} />}
           />
           <Route
             path="rewards"
@@ -493,12 +493,12 @@ function StaffApp() {
           />
           <Route
             path="screens"
-            element={canManage ? <ScreensPage activityId={activityId} /> : <Navigate to="overview" replace />}
+            element={canManage && currentActivity?.activityType !== "EVENT" ? <ScreensPage key={activityId} activityId={activityId} /> : <Navigate to="overview" replace />}
           />
           <Route
             path="settings"
             element={
-              canManage ? <SettingsPage
+              canManage ? <SettingsPage key={activityId}
                 user={user}
                 activityId={activityId}
                 activity={activities.find((item) => item.id === activityId)}
@@ -549,7 +549,8 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage, activity }) {
         {navItems.filter((item) => (canManage || !["activities", "screens", "settings"].includes(item.id))
           && (item.id !== "questions" || navigation.showQuiz)
           && (item.id !== "control" || navigation.showControl)
-          && (item.id !== "participants" || activity?.activityType !== "TURTLE_SOUP")
+          && (item.id !== "participants" || !["EVENT", "TURTLE_SOUP"].includes(activity?.activityType))
+          && (item.id !== "screens" || activity?.activityType !== "EVENT")
           && (item.id !== "rewards" || navigation.showRewards)).map((item) => {
           const Icon = item.icon;
           return (
@@ -567,9 +568,9 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage, activity }) {
         })}
       </nav>
       <div className="sidebar-footer">
-        <button type="button" onClick={() => go("/admin/settings")}>
+        <button type="button" onClick={() => window.open("/knowledge-match-user-manual.pdf", "_blank", "noopener,noreferrer")}>
           <CircleHelp size={18} />
-          帮助与支持
+          用户操作手册
         </button>
         <div className="staff-profile">
           <Avatar name={user?.displayName || user?.name || "管"} />
@@ -590,8 +591,9 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
   const location = useLocation();
   const current = activities.find((item) => item.id === activityId);
   const navigation = activityNavigation(current);
-  const orderedActivities = activities.filter((item) => !item.parentActivityId).flatMap((parent) => [parent, ...activities.filter((child) => child.parentActivityId === parent.id)])
-    .concat(activities.filter((item) => item.parentActivityId && !activities.some((parent) => parent.id === item.parentActivityId)));
+  const orderedActivities = orderActivityTree(activities);
+  const currentVenue = current?.activityType === "VENUE" ? current : activities.find((item) => item.id === current?.parentActivityId && item.activityType === "VENUE");
+  const selectableVenues = activities.filter((item) => item.activityType === "VENUE" && (!current || current.activityType !== "EVENT" || item.parentActivityId === current.id));
   const currentPage = navItems.find(
     (item) => item.id === location.pathname.split("/").pop(),
   );
@@ -615,9 +617,11 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
         <span>{current?.name || "未选择活动"}</span>
       </div>
       <div className="topbar-actions">
+        <div className="activity-select"><MapPin size={15} /><select aria-label="选择会场" value={currentVenue?.id || ""} onChange={(event) => { if (event.target.value) setActivityId(event.target.value); }}><option value="">选择会场</option>{selectableVenues.map((venue) => <option key={venue.id} value={venue.id}>{venue.name}</option>)}</select></div>
         <div className="activity-select">
           <MapPin size={15} />
           <select
+            aria-label="选择活动"
             value={activityId}
             onChange={(event) => setActivityId(event.target.value)}
           >
@@ -653,21 +657,47 @@ function PageHeader({ eyebrow, title, description, action }) {
   );
 }
 
+function orderActivityTree(activities) {
+  const walk = (item) => [item, ...activities.filter((child) => child.parentActivityId === item.id).flatMap(walk)];
+  return activities.filter((item) => !activities.some((parent) => parent.id === item.parentActivityId)).flatMap(walk);
+}
+
 function MainActivityPage({ activity, activities, setActivityId, canManage, reload }) {
   const children = activities.filter((item) => item.parentActivityId === activity.id);
+  const main = activity.activityType === "EVENT";
   return <div className="page-content">
-    <PageHeader eyebrow="母活动管理" title={activity.name} description="统一管理报名、人员和总积分；在答题、摇奖和海龟汤子活动中组织现场环节。" />
+    <PageHeader eyebrow={main ? "母活动管理" : "独立会场"} title={activity.name} description={main ? "管理总题库与总汤库。请选择独立会场进行报名、展示和现场操作。" : "本会场独立管理配置、报名名单、积分和子活动。"} />
     <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />
-    <div className="activity-hub-links"><Link className="secondary-button" to="/admin/participants">统一参与者名单</Link><a className="secondary-button" href={`/join/${activity.id}`} target="_blank" rel="noreferrer">报名与环节入口</a>{canManage && <Link className="primary-button" to="/admin/activities">添加子活动</Link>}</div>
+    <div className="activity-hub-links"><Link className="secondary-button" to="/admin/questions">{main ? "编辑总题库" : "本会场题库"}</Link>{!main && <><Link className="secondary-button" to="/admin/participants">本会场参与者</Link><a className="secondary-button" href={`/join/${activity.id}`} target="_blank" rel="noreferrer">本会场报名入口</a><a className="secondary-button" href={`/screen/${activity.id}`} target="_blank" rel="noreferrer">本会场大屏</a></>}{canManage && <Link className="primary-button" to="/admin/activities">{main ? "新建独立会场" : "添加子活动"}</Link>}</div>
     <div className="prize-grid">{children.map((child) => <article className="prize-pool-card" key={child.id}>
       <span className="type-chip">{activityTypeLabel(child.activityType)} · {activityStatusLabels[child.status]}</span><h2>{child.name}</h2>
-      <p>{child.activityType === "TURTLE_SOUP" ? "主持人展示汤面、自由选择线索和揭晓汤底，仅在大屏参与。" : child.activityType === "LOTTERY" ? "使用统一名单与总积分筛选，主持人摇奖并公布结果。" : child.participantActivityId === activity.id ? "共用母活动名单，本环节独立计分，得分汇入总积分。" : "旧版独立报名与积分，保留原有数据。"}</p>
-      <Link className="primary-button" to={["LOTTERY", "TURTLE_SOUP"].includes(child.activityType) ? "/admin/control" : "/admin/overview"} onClick={() => setActivityId(child.id)}>进入环节<ArrowRight size={16} /></Link>
+      <p>{main ? "独立题库、配置、人员和活动数据。" : child.activityType === "TURTLE_SOUP" ? "展示汤面、选择线索和揭晓汤底，无需报名。" : "共用本会场名单与总积分，现场环节独立控制。"}</p>
+      <Link className="primary-button" to={["LOTTERY", "TURTLE_SOUP"].includes(child.activityType) ? "/admin/control" : "/admin/overview"} onClick={() => setActivityId(child.id)}>{main ? "进入会场" : "进入环节"}<ArrowRight size={16} /></Link>
     </article>)}</div>
-    {!children.length && <EmptyState icon={CalendarDays} title="尚未添加活动环节" description="到活动管理添加子活动。参与者只需在母活动登记一次。" />}
-    {activity.legacyOperations && <div className="buzzer-answer-key"><strong>原有母活动业务保留</strong><p>此母活动已有题目或奖池，可通过侧栏继续处理。新增环节请放到子活动。</p></div>}
-    <OverviewPage activityId={activity.id} activities={activities} summaryOnly />
+    {!children.length && <EmptyState icon={CalendarDays} title={main ? "尚未创建会场" : "尚未添加子活动"} description="请到活动管理新建，选择正确的所属母活动或会场。" />}
+    {main && canManage && <SoupLibrary activityId={activity.id} />}
+    {!main && <OverviewPage key={activity.id} activityId={activity.id} activities={activities} summaryOnly />}
   </div>;
+}
+
+function SoupLibrary({ activityId }) {
+  const empty = { title: "", surface: "", clues: [], solution: "" };
+  const [entries, setEntries] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState(empty);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => { try { setEntries(await api.soupTemplates(activityId)); } catch (e) { setError(e.message); } }, [activityId]);
+  useEffect(() => { setEditing(null); load(); }, [load]);
+  return <section className="data-panel"><div className="data-panel__toolbar"><h2>总汤库</h2><button className="primary-button" onClick={() => { setDraft(empty); setEditing("new"); }}>新增海龟汤</button></div><InlineError text={error} />
+    {entries.map((entry) => <article className="question-set-row" key={entry.id}><strong>{entry.content.title}</strong><button className="secondary-button" onClick={() => { setDraft(entry.content); setEditing(entry.id); }}>修改汤稿</button></article>)}
+    {!entries.length && <p>点击“新增海龟汤”准备汤稿；会场的海龟汤子活动可选择复制。</p>}
+    {editing && <Dialog title="编辑总汤库" onClose={() => setEditing(null)}><form className="dialog-form" onSubmit={async (e) => { e.preventDefault(); setBusy(true); setError(""); try { await api.saveSoupTemplate(activityId, editing === "new" ? null : editing, draft); setEditing(null); await load(); } catch (cause) { setError(cause.message); } finally { setBusy(false); } }}><InlineError text={error} />
+      {[["title", "故事标题", 160], ["surface", "汤面", 8000], ["solution", "汤底", 8000]].map(([key, label, max]) => <label key={key}>{label}<textarea required maxLength={max} rows={key === "title" ? 1 : 5} value={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} /></label>)}
+      {draft.clues.map((clue, index) => <label key={index}>线索 {index + 1}<textarea required maxLength={2000} value={clue} onChange={(e) => setDraft({ ...draft, clues: draft.clues.map((value, i) => i === index ? e.target.value : value) })} /><button type="button" className="text-button" onClick={() => setDraft({ ...draft, clues: draft.clues.filter((_, i) => i !== index) })}>删除线索</button></label>)}
+      <button type="button" className="secondary-button" disabled={draft.clues.length >= 50} onClick={() => setDraft({ ...draft, clues: [...draft.clues, ""] })}>添加线索</button><button className="primary-button" disabled={busy}>{busy ? "正在保存" : "保存汤稿"}</button>
+    </form></Dialog>}
+  </section>;
 }
 
 function TurtleSoupPage({ activity, reload, canManage }) {
@@ -717,7 +747,7 @@ function HostLotteryPage({ activity, reload, canManage }) {
     finally { setConfirming(false); }
   };
   return <div className="page-content">
-    <PageHeader eyebrow="主持人摇奖" title="摇奖控场" description="按母活动总积分筛选参与者，主持人摇奖在同一奖池不重复选中已获奖者；停止后随机选出中奖人并发奖上屏。" />
+    <PageHeader eyebrow="主持人摇奖" title="摇奖控场" description="按本会场总积分筛选参与者，主持人摇奖在同一奖池不重复选中已获奖者；停止后随机选出中奖人并发奖上屏。" />
     <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />
     <InlineError text={error} onRetry={attempt.current ? stop : load} />
     <label className="host-lottery-picker">摇奖奖池<select value={poolId} disabled={rolling || confirming || !!attempt.current} onChange={(e) => { setPoolId(e.target.value); setResult(null); setDisplayName(""); }}><option value="">请选择奖池</option>{pools.map((p) => <option key={p.id} value={p.id}>{p.name} · 剩余 {p.remainingQuantity} 件 · 最低 {p.minScore} 分</option>)}</select></label>
@@ -785,7 +815,7 @@ function OverviewPage({ activityId, activities, summaryOnly = false }) {
         />
         <Metric
           icon={Activity}
-          label={summaryOnly ? "母活动状态" : "当前阶段"}
+          label={summaryOnly ? "会场状态" : "当前阶段"}
           value={summaryOnly ? activityStatusLabels[activity?.status] : overviewStage === "QUESTION_OPEN" && remaining === 0 ? "答题已截止" : stageLabel(overviewStage)}
           sub={
             overviewStage === "QUESTION_OPEN" ? `剩余 ${remaining} 秒` : overviewStage === "ENDED" ? "本场流程已完成" : "等待工作人员开场"
@@ -861,7 +891,7 @@ function OverviewPage({ activityId, activities, summaryOnly = false }) {
           <div className="panel-top">
             <div>
               <p className="eyebrow">积分榜</p>
-              <h2>{summaryOnly ? "母活动总积分榜" : "本环节积分榜"}</h2>
+              <h2>{summaryOnly ? "会场总积分榜" : "本环节积分榜"}</h2>
             </div>
             <Link to="/admin/participants">
               全部
@@ -1027,7 +1057,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
       />
       <InlineError text={error} onRetry={reload} />
       <section className="activity-list">
-        {activities.filter((item) => !item.parentActivityId).flatMap((parent) => [parent, ...activities.filter((child) => child.parentActivityId === parent.id)]).concat(activities.filter((item) => item.parentActivityId && !activities.some((parent) => parent.id === item.parentActivityId))).map((activity) => (
+        {orderActivityTree(activities).map((activity) => (
           <article
             key={activity.id}
             className={`activity-list-row activity-list-row--detailed ${activity.parentActivityId ? "activity-list-row--child" : ""}`}
@@ -1056,7 +1086,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
               {activityStatusLabels[activity.status] || activity.status}
             </span>
             <div className="activity-row-actions">
-              {!activity.parentActivityId && <>
+              {activity.activityType === "VENUE" && <>
                 <button className="toolbar-icon" type="button" title="添加答题子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "QUIZ" }); setError(""); setDialog("create"); }}><CircleHelp size={16} /></button>
                 <button className="toolbar-icon" type="button" title="添加摇奖子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "LOTTERY" }); setError(""); setDialog("create"); }}><Gift size={16} /></button>
                 <button className="toolbar-icon" type="button" title="添加海龟汤子活动" onClick={() => { setForm({ ...emptyActivity(), city: activity.city, parentActivityId: activity.id, activityType: "TURTLE_SOUP" }); setError(""); setDialog("create"); }}><CircleHelp size={16} /></button>
@@ -1140,7 +1170,8 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                     })
                   }
                 >
-                  <option value="EVENT">母活动（统一报名与管理）</option>
+                  <option value="EVENT">母活动（总题库与总汤库）</option>
+                  <option value="VENUE">独立会场（报名、展示与数据）</option>
                   <option value="QUIZ">答题子活动（普通答题 / 抢答）</option>
                   <option value="LOTTERY">摇奖子活动（主持人摇奖 / 自助抽奖）</option>
                   <option value="TURTLE_SOUP">海龟汤子活动（仅大屏展示）</option>
@@ -1149,7 +1180,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
               </label>
               {form.activityType && form.activityType !== "EVENT" && (
                 <label>
-                  所属母活动
+                  {form.activityType === "VENUE" ? "所属母活动" : "所属会场"}
                   <select
                     required
                     value={form.parentActivityId || ""}
@@ -1157,9 +1188,9 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
                       setForm({ ...form, parentActivityId: event.target.value })
                     }
                   >
-                    <option value="">选择母活动</option>
+                    <option value="">{form.activityType === "VENUE" ? "选择母活动" : "选择独立会场"}</option>
                     {activities
-                      .filter((item) => !item.parentActivityId)
+                      .filter((item) => item.activityType === (form.activityType === "VENUE" ? "EVENT" : "VENUE"))
                       .map((item) => (
                         <option key={item.id} value={item.id}>
                           {item.city} · {item.name}
@@ -1711,7 +1742,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   );
 }
 
-function QuestionsPage({ activityId, canManage }) {
+function QuestionsPage({ activityId, activity, canManage }) {
   const mediaUrlsFor = (question) => Array.isArray(question.mediaUrls)
     ? question.mediaUrls
     : question.mediaUrl ? [question.mediaUrl] : [];
@@ -1737,7 +1768,10 @@ function QuestionsPage({ activityId, canManage }) {
   const [submissions, setSubmissions] = useState([]);
   const [dialog, setDialog] = useState(null);
   const [questionSetDialog, setQuestionSetDialog] = useState(null);
-  const [questionSetForm, setQuestionSetForm] = useState({ name: "", description: "", questionIds: [], active: false });
+  const [questionSetForm, setQuestionSetForm] = useState({ name: "", description: "", questionIds: [], active: false, randomOrder: false });
+  const [syncDialog, setSyncDialog] = useState(null);
+  const [syncIds, setSyncIds] = useState([]);
+  const [syncNotice, setSyncNotice] = useState("");
   const [form, setForm] = useState(emptyQuestion());
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -1817,7 +1851,7 @@ function QuestionsPage({ activityId, canManage }) {
   };
   const openSetCreate = () => {
     setError("");
-    setQuestionSetForm({ name: "", description: "", questionIds: [], active: false });
+    setQuestionSetForm({ name: "", description: "", questionIds: [], active: false, randomOrder: false });
     setQuestionSetDialog("create");
   };
   const openSetEdit = (set) => {
@@ -1827,6 +1861,7 @@ function QuestionsPage({ activityId, canManage }) {
       description: set.description || "",
       questionIds: (set.items || []).map((item) => item.questionId),
       active: Boolean(set.active),
+      randomOrder: false,
     });
     setQuestionSetDialog(set);
   };
@@ -1861,6 +1896,7 @@ function QuestionsPage({ activityId, canManage }) {
         description: questionSetForm.description,
         questionIds: questionSetForm.questionIds,
         active: Boolean(questionSetForm.active),
+        randomOrder: Boolean(questionSetForm.randomOrder),
       };
       if (questionSetDialog === "create") await api.createQuestionSet(activityId, payload);
       else await api.updateQuestionSet(activityId, questionSetDialog.id, payload);
@@ -2074,6 +2110,9 @@ function QuestionsPage({ activityId, canManage }) {
   );
   return (
     <div className="page-content">
+      {canManage && activity?.activityType !== "EVENT" && <section className="data-panel"><div className="data-panel__toolbar"><div><h2>同步总题库</h2><p>在草稿阶段选择题目复制。后续可独立修改或停用；再次同步保留本地启用状态。</p></div><button className="secondary-button" disabled={busy !== "" || activity?.status !== "DRAFT"} onClick={async () => { setError(""); setBusy("sync-load"); try { setSyncDialog(await api.sourceQuestions(activityId)); setSyncIds([]); } catch (e) { setError(e.message); } finally { setBusy(""); } }}>选择总题库题目</button></div></section>}
+      {syncNotice && <p role="status">{syncNotice}</p>}
+      {syncDialog && <Dialog title="选择要同步的题目" onClose={() => setSyncDialog(null)}><div className="dialog-form"><InlineError text={error} /><p>未勾选的题目不会复制。已同步过的题目会更新内容，保留本会场的启用或停用设置。</p><button className="secondary-button" onClick={() => setSyncIds(syncDialog.map((q) => q.id))}>全选</button><button className="secondary-button" onClick={() => setSyncIds([])}>清空选择</button>{syncDialog.map((q) => <label className="toggle-control" key={q.id}><input type="checkbox" checked={syncIds.includes(q.id)} onChange={() => setSyncIds((current) => current.includes(q.id) ? current.filter((id) => id !== q.id) : [...current, q.id])} />{q.title}</label>)}{!syncDialog.length && <p>总题库还没有题目，请联系母活动管理员添加。</p>}<button className="primary-button" disabled={busy !== "" || !syncIds.length} onClick={async () => { setBusy("sync"); setError(""); try { const synced = await api.syncQuestions(activityId, syncIds); setSyncNotice(`已同步 ${synced.length} 道题目。`); setSyncDialog(null); await load(); } catch (e) { setError(e.message); } finally { setBusy(""); } }}>同步所选题目（{syncIds.length}）</button></div></Dialog>}
       <PageHeader
         eyebrow="题库仓库"
         title="题库与组卷"
@@ -2616,6 +2655,7 @@ function QuestionsPage({ activityId, canManage }) {
                 ))}
               </div>
             </fieldset>
+            <label className="toggle-control"><input type="checkbox" checked={Boolean(questionSetForm.randomOrder)} onChange={(event) => setQuestionSetForm({ ...questionSetForm, randomOrder: event.target.checked })} />随机排序出题（保存时打乱；所有参与者使用同一顺序）</label>
             <label className="toggle-control">
               <input
                 type="checkbox"
@@ -4965,8 +5005,8 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
                 {isSystemAdmin && <button className="secondary-button" onClick={() => openCreateAccount("SYSTEM_ADMIN")}>
                   <Plus size={17} /> 新增系统管理员
                 </button>}
-                <button className="primary-button" disabled={!activityId} onClick={() => openCreateAccount("ACTIVITY_ADMIN")}>
-                  <Plus size={17} /> 新增活动管理员
+                <button className="primary-button" disabled={!activityId} onClick={() => openCreateAccount(activity?.activityType === "EVENT" ? "ACTIVITY_ADMIN" : "STAFF")}>
+                  <Plus size={17} /> {activity?.activityType === "EVENT" ? "新增母活动资料管理员" : "新增会场成员"}
                 </button>
               </div>
           ) : null
@@ -5205,17 +5245,18 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
           </button>
         </form>
       </section>
+      {activity?.activityType !== "EVENT" && <>
       <div className="settings-grid">
         <article className="settings-panel">
           <div className="settings-panel__icon">
             <MapPin size={21} />
           </div>
-          <h2>会场登记</h2>
+          <h2>报名入口</h2>
           <p>
-            参与者必须选择启用会场。联系方式在每个活动、每个会场内独立且唯一。
+            本页的入口均属于当前会场，联系方式在本会场内唯一。新建独立会场请到“活动管理”。
           </p>
           <span className="settings-caption">
-            {venues.filter((venue) => venue.enabled).length} 个启用会场 ·{" "}
+            {venues.filter((venue) => venue.enabled).length} 个启用入口 ·{" "}
             {venues.length} 个已配置
           </span>
         </article>
@@ -5247,14 +5288,14 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
         <article className="access-workspace">
           <div className="workspace-heading">
             <div>
-              <p className="eyebrow">报名会场</p>
-              <h2>会场管理</h2>
+              <p className="eyebrow">本会场报名</p>
+              <h2>报名入口配置</h2>
             </div>
             <button
               className="toolbar-icon"
               type="button"
-              aria-label="新增会场"
-              title="新增会场"
+              aria-label="新增报名入口"
+              title="新增报名入口"
               onClick={() => openVenue(null)}
             >
               <Plus size={18} />
@@ -5284,7 +5325,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
                 <button
                   className="toolbar-icon"
                   type="button"
-                  title="编辑会场"
+                  title="编辑报名入口"
                   onClick={() => openVenue(venue)}
                 >
                   <Pencil size={16} />
@@ -5302,8 +5343,8 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
             {!venues.length && (
               <EmptyState
                 icon={MapPin}
-                title="尚未配置会场"
-                description="新增会场后，参与者才能在登记入口选择其所在会场。"
+                title="尚未配置报名入口"
+                description="新增报名入口后，参与者才能在登记入口选择其所在会场。"
               />
             )}
           </div>
@@ -5376,10 +5417,11 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
           </div>
         </article>
       </section>
+      </>}
       <section className="access-workspace">
         <div>
-          <p className="eyebrow">活动成员</p>
-          <h2>当前活动成员</h2>
+          <p className="eyebrow">按会场分配用户</p>
+          <h2>{activity?.activityType === "EVENT" ? "母活动资料管理员" : "当前会场成员"}</h2>
         </div>
         <form className="access-grant" onSubmit={grant}>
           <select
@@ -5604,7 +5646,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
       )}
       {configDialog?.type === "venue" && (
         <Dialog
-          title={configDialog.value ? "编辑会场" : "新增会场"}
+          title={configDialog.value ? "编辑报名入口" : "新增报名入口"}
           onClose={() => setConfigDialog(null)}
         >
           <form className="dialog-form" onSubmit={saveVenue}>
@@ -5994,7 +6036,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
           ) : (
             <>
               {tab === "play" && !lotteryMode && (
-                activity?.activityType === "EVENT" && !activity.legacyOperations ? <article className="answer-card"><h2>选择活动环节</h2><p>报名已完成，答题和摇奖共用当前身份。</p>{activities.filter((item) => item.parentActivityId === activityId).map((child) => <Link className="secondary-button" key={child.id} to={activityEntry(child)}>{child.name} · {activityTypeLabel(child.activityType)}<ArrowRight size={16} /></Link>)}{!activities.some((item) => item.parentActivityId === activityId) && <p>等待工作人员启用活动环节。</p>}</article> : activity?.answerMode === "BUZZER" ? <BuzzCard
+                activity?.activityType === "VENUE" ? <article className="answer-card"><h2>选择活动环节</h2><p>报名已完成，答题和摇奖共用当前身份。</p>{activities.filter((item) => item.parentActivityId === activityId).map((child) => <Link className="secondary-button" key={child.id} to={activityEntry(child)}>{child.name} · {activityTypeLabel(child.activityType)}<ArrowRight size={16} /></Link>)}{!activities.some((item) => item.parentActivityId === activityId) && <p>等待工作人员启用活动环节。</p>}</article> : activity?.answerMode === "BUZZER" ? <BuzzCard
                   key={`${activityId}-${question?.id || "waiting"}`}
                   activityId={activityId}
                   participant={participant}
@@ -6044,7 +6086,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
               onClick={() => setTab("play")}
             >
               <CircleHelp size={18} />
-              {activity?.activityType === "EVENT" && !activity.legacyOperations ? "活动环节" : "答题"}
+              {activity?.activityType === "VENUE" ? "活动环节" : "答题"}
             </button>}
             <button
               className={tab === "rank" ? "is-active" : ""}
@@ -7520,6 +7562,7 @@ function activityTypeLabel(type) {
   return (
     {
       EVENT: "母活动",
+      VENUE: "独立会场",
       QUIZ: "答题子活动",
       LOTTERY: "摇奖子活动",
       TURTLE_SOUP: "海龟汤子活动",

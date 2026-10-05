@@ -72,7 +72,7 @@ class IdentityCreationIntegrationTest {
 
   @Test
   void invalidActivityRoleDoesNotLeaveAnOrphanAccount() throws Exception {
-    UUID activityId = activities.findAll().getFirst().getId();
+    UUID activityId = activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     String username = "invalid-" + UUID.randomUUID();
     mvc.perform(post("/api/activities/" + activityId + "/memberships/users")
             .header("Authorization", "Bearer " + login("sysadmin", "ChangeMe!2026"))

@@ -20,12 +20,18 @@ import org.springframework.transaction.annotation.Transactional;
 @SpringBootTest(properties = {"APP_BOOTSTRAP_PASSWORD=ChangeMe!2026", "app.security.jwt.secret=VGVzdC1vbmx5LXNlY3JldC1uZXZlci11c2UtaW4tcHJvZHVjdGlvbiE="})
 @Transactional
 class ScreenServiceIntegrationTest {
+  private Activity screenActivity(String name, String city, String status, Instant time) {
+    Activity activity = new Activity(name, city, status, time);
+    activity.configureHierarchy(null, "VENUE");
+    return activity;
+  }
+
   @Autowired private ScreenService screens;
   @Autowired private ActivityRepository activities;
 
   @Test
   void managesTemplatesAndSynchronizesDeviceDisplayState() {
-    Activity activity = activities.save(new Activity("Screen Test", "Shanghai", "LIVE", Instant.now()));
+    Activity activity = activities.save(screenActivity("Screen Test", "Shanghai", "LIVE", Instant.now()));
 
     List<ScreenTemplateResponse> presets = screens.listTemplates(activity.getId());
     assertEquals(4, presets.size());
@@ -70,7 +76,7 @@ class ScreenServiceIntegrationTest {
 
   @Test
   void rejectsTemplatesWithInvalidInteractiveComponents() {
-    Activity activity = activities.save(new Activity("Component Test", "Guangzhou", "DRAFT", Instant.now()));
+    Activity activity = activities.save(screenActivity("Component Test", "Guangzhou", "DRAFT", Instant.now()));
     UpsertScreenTemplateRequest invalid = new UpsertScreenTemplateRequest("Broken image", null,
         List.of(new ScreenComponent("broken", ScreenComponentType.IMAGE, Map.of())));
 

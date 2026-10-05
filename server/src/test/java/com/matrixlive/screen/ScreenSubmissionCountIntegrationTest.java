@@ -17,12 +17,18 @@ import org.springframework.transaction.annotation.Transactional;
 @SpringBootTest(properties = {"APP_BOOTSTRAP_PASSWORD=ChangeMe!2026", "app.security.jwt.secret=VGVzdC1vbmx5LXNlY3JldC1uZXZlci11c2UtaW4tcHJvZHVjdGlvbiE="})
 @Transactional
 class ScreenSubmissionCountIntegrationTest {
+  private Activity screenActivity(String name, String city, String status, Instant time) {
+    Activity activity = new Activity(name, city, status, time);
+    activity.configureHierarchy(null, "VENUE");
+    return activity;
+  }
+
   @Autowired private ScreenService screens;
   @Autowired private ActivityRepository activities;
 
   @Test
   void refreshesOnlyScreensShowingTheSubmittedQuestionAndPreservesDisplaySettings() {
-    UUID activityId = activities.save(new Activity("Submission screens", "Shanghai", "LIVE", Instant.now())).getId();
+    UUID activityId = activities.save(screenActivity("Submission screens", "Shanghai", "LIVE", Instant.now())).getId();
     UUID questionId = UUID.randomUUID();
     UUID templateId = screens.listTemplates(activityId).getFirst().id();
     UUID questionDevice = register(activityId, "Question");

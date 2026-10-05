@@ -30,7 +30,7 @@ class WebSocketLogoutIntegrationTest {
 
   @Test void actualBrokerDeliversAuthorizedMessagesAndStopsAfterLogout() throws Exception {
     var login = auth.login(new AuthModels.LoginRequest("sysadmin", "ChangeMe!2026"), null);
-    String topic = "/topic/activities/" + activities.findAll().getFirst().getId();
+    String topic = "/topic/activities/" + activities.findAll().stream().filter(item -> "2024 知识挑战赛".equals(item.getName())).findFirst().orElseThrow().getId();
     var frames = new Frames();
     var client = HttpClient.newHttpClient();
     var socket = client.newWebSocketBuilder().subprotocols("v12.stomp")

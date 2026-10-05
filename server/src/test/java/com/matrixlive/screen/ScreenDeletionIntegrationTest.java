@@ -25,6 +25,12 @@ import org.springframework.transaction.annotation.Transactional;
 @AutoConfigureMockMvc
 @Transactional
 class ScreenDeletionIntegrationTest {
+  private Activity screenActivity(String name, String city, String status, Instant time) {
+    Activity activity = new Activity(name, city, status, time);
+    activity.configureHierarchy(null, "VENUE");
+    return activity;
+  }
+
   @Autowired private MockMvc mvc;
   @Autowired private ObjectMapper json;
   @Autowired private ActivityRepository activities;
@@ -32,7 +38,7 @@ class ScreenDeletionIntegrationTest {
 
   @Test
   void deletingADeviceInvalidatesItsSessionAndUnusedPairingLink() throws Exception {
-    UUID activityId = activities.save(new Activity("Delete screen", "Shanghai", "DRAFT", Instant.now())).getId();
+    UUID activityId = activities.save(screenActivity("Delete screen", "Shanghai", "DRAFT", Instant.now())).getId();
     String adminToken = login("sysadmin");
     String base = "/api/activities/" + activityId + "/screens/devices";
     JsonNode registration = json.readTree(mvc.perform(post(base + "/register")
@@ -64,8 +70,8 @@ class ScreenDeletionIntegrationTest {
 
   @Test
   void deletionIsScopedToTheActivityAndRequiresAdministratorAccess() throws Exception {
-    UUID activityId = activities.save(new Activity("Screen scope", "Shanghai", "DRAFT", Instant.now())).getId();
-    UUID otherId = activities.save(new Activity("Other screen scope", "Shanghai", "DRAFT", Instant.now())).getId();
+    UUID activityId = activities.save(screenActivity("Screen scope", "Shanghai", "DRAFT", Instant.now())).getId();
+    UUID otherId = activities.save(screenActivity("Other screen scope", "Shanghai", "DRAFT", Instant.now())).getId();
     String adminToken = login("sysadmin");
     JsonNode registration = json.readTree(mvc.perform(post("/api/activities/" + activityId + "/screens/devices/register")
             .header("Authorization", "Bearer " + adminToken).contentType(MediaType.APPLICATION_JSON)

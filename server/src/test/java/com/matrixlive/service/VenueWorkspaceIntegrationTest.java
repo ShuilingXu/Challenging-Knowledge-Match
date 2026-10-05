@@ -72,6 +72,67 @@ class VenueWorkspaceIntegrationTest {
     assertEquals(1,service.listQuestionAdministration(qa.id()).size());
   }
 
+  @Test void questionSetsSyncInOrderReuseSharedQuestionsAndResyncWithoutDuplicates() {
+    var main=create("EVENT",null); var venue=create("VENUE",main.id()); var other=create("VENUE",main.id());
+    var quiz=create("QUIZ",venue.id()); var otherQuiz=create("QUIZ",other.id());
+    var first=question(main.id(),"First"); var second=question(main.id(),"Second");
+    var source=service.createQuestionSet(main.id(),new QuestionSetRequest("Set one","Description",List.of(second.id(),first.id()),true,false));
+    var shared=service.createQuestionSet(main.id(),new QuestionSetRequest("Set two",null,List.of(first.id()),false,false));
+    assertEquals(2,service.sourceQuestionSets(quiz.id()).size());
+    var copies=service.syncQuestionSets(quiz.id(),new SyncQuestionSetsRequest(List.of(source.id(),shared.id(),source.id())));
+    assertEquals(2,copies.size()); assertFalse(copies.getFirst().active());
+    assertEquals(List.of("Second","First"),copies.getFirst().items().stream().map(QuestionSetItemResponse::title).toList());
+    assertEquals(2,service.listQuestionAdministration(quiz.id()).size());
+    UUID localFirst=copies.getFirst().items().get(1).questionId();
+    assertNotEquals(first.id(),localFirst); assertEquals(localFirst,copies.get(1).items().getFirst().questionId());
+    service.updateQuestion(quiz.id(),localFirst,new QuestionWriteRequest(null,"Local",null,null,null,null,null,null,false));
+    service.activateQuestionSet(quiz.id(),copies.getFirst().id());
+    service.updateQuestion(main.id(),first.id(),new QuestionWriteRequest(null,"Updated",null,null,null,null,null,null,null));
+    service.updateQuestionSet(main.id(),source.id(),new QuestionSetRequest("Renamed","",List.of(first.id(),second.id()),null,false));
+    var again=service.syncQuestionSets(quiz.id(),new SyncQuestionSetsRequest(List.of(source.id()))).getFirst();
+    assertEquals(copies.getFirst().id(),again.id()); assertTrue(again.active()); assertNull(again.description());
+    assertEquals("Renamed",again.name()); assertEquals(localFirst,again.items().getFirst().questionId());
+    assertEquals(List.of("Updated","Second"),again.items().stream().map(QuestionSetItemResponse::title).toList());
+    assertEquals(2,service.listQuestionSets(quiz.id()).size());
+    assertFalse(service.listQuestionAdministration(quiz.id()).stream().filter(q->q.id().equals(localFirst)).findFirst().orElseThrow().enabled());
+    assertTrue(service.listQuestionSets(otherQuiz.id()).isEmpty());
+    var otherCopy=service.syncQuestionSets(otherQuiz.id(),new SyncQuestionSetsRequest(List.of(source.id()))).getFirst();
+    assertNotEquals(localFirst,otherCopy.items().getFirst().questionId());
+  }
+
+  @Test void invalidOrConflictingQuestionSetSyncDoesNotPartiallyCopy() {
+    var main=create("EVENT",null);var venue=create("VENUE",main.id());var quiz=create("QUIZ",venue.id());
+    var source=service.createQuestionSet(main.id(),new QuestionSetRequest("Source",null,List.of(question(main.id(),"Question").id()),false,false));
+    var foreign=create("EVENT",null);
+    var foreignSet=service.createQuestionSet(foreign.id(),new QuestionSetRequest("Foreign",null,List.of(question(foreign.id(),"Foreign question").id()),false,false));
+    assertThrows(DomainException.class,()->service.syncQuestionSets(quiz.id(),new SyncQuestionSetsRequest(List.of(source.id(),foreignSet.id()))));
+    assertTrue(service.listQuestionAdministration(quiz.id()).isEmpty()); assertTrue(service.listQuestionSets(quiz.id()).isEmpty());
+    service.createQuestionSet(quiz.id(),new QuestionSetRequest("Source",null,List.of(question(quiz.id(),"Local").id()),false,false));
+    assertThrows(DomainException.class,()->service.syncQuestionSets(quiz.id(),new SyncQuestionSetsRequest(List.of(source.id()))));
+    assertEquals(1,service.listQuestionAdministration(quiz.id()).size());
+    service.changeActivityStatus(main.id(),new ChangeActivityStatusRequest("LIVE"));
+    service.changeActivityStatus(venue.id(),new ChangeActivityStatusRequest("REGISTRATION_OPEN"));
+    service.changeActivityStatus(quiz.id(),new ChangeActivityStatusRequest("REGISTRATION_OPEN"));
+    assertThrows(DomainException.class,()->service.syncQuestionSets(quiz.id(),new SyncQuestionSetsRequest(List.of(source.id()))));
+  }
+
+  @Test void questionSetSyncRequiresAdministrationOfTheTargetVenue() throws Exception {
+    var main=create("EVENT",null);var a=create("VENUE",main.id());var b=create("VENUE",main.id());
+    var qa=create("QUIZ",a.id());var qb=create("QUIZ",b.id());
+    var source=service.createQuestionSet(main.id(),new QuestionSetRequest("Source",null,List.of(question(main.id(),"Question").id()),false,false));
+    var user=users.save(new UserAccount("set-admin-"+UUID.randomUUID(),"Admin","unused",null));
+    memberships.save(new ActivityMembership(a.id(),user.getId(),UserRole.ACTIVITY_ADMIN));
+    String token=tokens.issueAccountToken(user).value();String payload="{\"questionSetIds\":[\""+source.id()+"\"]}";
+    mvc.perform(get("/api/activities/"+qa.id()+"/question-sets/source").header("Authorization","Bearer "+token)).andExpect(status().isOk());
+    mvc.perform(post("/api/activities/"+qa.id()+"/question-sets/sync").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isOk());
+    mvc.perform(post("/api/activities/"+qb.id()+"/question-sets/sync").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isForbidden());
+    mvc.perform(post("/api/activities/"+qa.id()+"/question-sets/sync").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content("{\"questionSetIds\":[]}")).andExpect(status().isBadRequest());
+    memberships.findByUserIdAndActivityId(user.getId(),a.id()).ifPresent(memberships::delete);
+    memberships.save(new ActivityMembership(a.id(),user.getId(),UserRole.STAFF));
+    mvc.perform(get("/api/activities/"+qa.id()+"/question-sets/source").header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+    mvc.perform(post("/api/activities/"+qa.id()+"/question-sets/sync").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isForbidden());
+  }
+
   @Test void randomOrderIsSavedAndIdenticalAcrossRepeatedReads() {
     var main=create("EVENT",null); var venue=create("VENUE",main.id()); var quiz=create("QUIZ",venue.id());
     List<UUID> ids=new ArrayList<>(); for(int i=0;i<12;i++) ids.add(question(quiz.id(),"Question "+i).id());

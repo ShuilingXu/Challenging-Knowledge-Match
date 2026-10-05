@@ -1,3 +1,6 @@
+import { PageHeader, StatusNotice } from "./StaffUi";
+import { QuestionBrowser, Pagination } from "./QuestionBrowser";
+import { filterQuestionSets, questionPage } from "./question-bank";
 import { TurtleSoupConsole, TurtleSoupScreen } from "./TurtleSoup";
 import { Client } from "@stomp/stompjs";
 import {
@@ -662,21 +665,6 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
   );
 }
 
-function PageHeader({ eyebrow, title, description, action }) {
-  return (
-    <div className="page-header">
-      <div>
-        <p className="eyebrow">{eyebrow}</p>
-        <h1>{title}</h1>
-        {description && (
-          <p className="page-header__description">{description}</p>
-        )}
-      </div>
-      {action}
-    </div>
-  );
-}
-
 function orderActivityTree(activities) {
   const walk = (item) => [item, ...activities.filter((child) => child.parentActivityId === item.id).flatMap(walk)];
   return activities.filter((item) => !activities.some((parent) => parent.id === item.parentActivityId)).flatMap(walk);
@@ -707,7 +695,7 @@ function SoupLibrary({ activityId }) {
   useEffect(() => { setEditing(null); load(); }, [load]);
   return <section className="data-panel"><div className="data-panel__toolbar"><h2>总汤库</h2><button className="primary-button" onClick={() => { setDraft(empty); setEditing("new"); }}>新增海龟汤</button></div><InlineError text={error} />
     {entries.map((entry) => <article className="question-set-row" key={entry.id}><strong>{entry.content.title}</strong><button className="secondary-button" onClick={() => { setDraft(entry.content); setEditing(entry.id); }}>修改汤稿</button></article>)}
-    {!entries.length && <p>点击“新增海龟汤”准备汤稿；同一母活动下的会场可选择多份使用。</p>}
+    {!entries.length && <EmptyState icon={CircleHelp} title="尚未准备汤稿" description="点击“新增海龟汤”添加故事，再到会场的海龟汤控场页选择使用。" />}
     {editing && <Dialog title="编辑总汤库" onClose={() => setEditing(null)}><form className="dialog-form" onSubmit={async (e) => { e.preventDefault(); setBusy(true); setError(""); try { await api.saveSoupTemplate(activityId, editing === "new" ? null : editing, draft); setEditing(null); await load(); } catch (cause) { setError(cause.message); } finally { setBusy(false); } }}><InlineError text={error} />
       {[["title", "故事标题", 160], ["surface", "汤面", 8000], ["solution", "汤底", 8000]].map(([key, label, max]) => <label key={key}>{label}<textarea required maxLength={max} rows={key === "title" ? 1 : 5} value={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} /></label>)}
       {draft.clues.map((clue, index) => <label key={index}>线索 {index + 1}<textarea required maxLength={2000} value={clue} onChange={(e) => setDraft({ ...draft, clues: draft.clues.map((value, i) => i === index ? e.target.value : value) })} /><button type="button" className="text-button" onClick={() => setDraft({ ...draft, clues: draft.clues.filter((_, i) => i !== index) })}>删除线索</button></label>)}
@@ -763,13 +751,14 @@ function HostLotteryPage({ activity, reload, canManage }) {
     finally { setConfirming(false); }
   };
   return <div className="page-content">
-    <PageHeader eyebrow="主持人摇奖" title="摇奖控场" description="按本会场总积分筛选参与者，主持人摇奖在同一奖池不重复选中已获奖者；停止后随机选出中奖人并发奖上屏。" />
+    <PageHeader eyebrow="会场抽奖" title="抽奖控场" description="按本会场总积分筛选参与者，主持人摇奖在同一奖池不重复选中已获奖者；停止后随机选出中奖人并发奖上屏。" />
     <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />
     <InlineError text={error} onRetry={attempt.current ? stop : load} />
-    <label className="host-lottery-picker">摇奖奖池<select value={poolId} disabled={rolling || confirming || !!attempt.current} onChange={(e) => { setPoolId(e.target.value); setResult(null); setDisplayName(""); }}><option value="">请选择奖池</option>{pools.map((p) => <option key={p.id} value={p.id}>{p.name} · 剩余 {p.remainingQuantity} 件 · 最低 {p.minScore} 分</option>)}</select></label>
-    <article className="answer-card host-lottery-stage"><span className="type-chip">符合条件 {eligible.length} 人</span><h2 aria-live="polite">{displayName || "等待开始摇奖"}</h2>
+    <label className="host-lottery-picker staff-form">摇奖奖池<select value={poolId} disabled={rolling || confirming || !!attempt.current} onChange={(e) => { setPoolId(e.target.value); setResult(null); setDisplayName(""); }}><option value="">请选择奖池</option>{pools.map((p) => <option key={p.id} value={p.id}>{p.name} · 剩余 {p.remainingQuantity} 件 · 最低 {p.minScore} 分</option>)}</select></label>
+    {!pools.length && <EmptyState icon={Gift} title="尚未配置奖池" description="请先进入奖品管理，添加并启用主持人抽奖奖池。" />}
+    <article className="data-panel staff-panel host-lottery-stage"><span className="type-chip">符合条件 {eligible.length} 人</span><h2 aria-live="polite">{displayName || "等待开始摇奖"}</h2>
       {confirming ? <p>正在确认中奖结果…</p> : !rolling ? <button className="primary-button" disabled={activity.status !== "LIVE" || !pool?.enabled || !pool.remainingQuantity || !eligible.length || !!attempt.current} onClick={() => { setResult(null); setRolling(true); }}>开始摇奖</button> : <button className="primary-button" onClick={stop}>停止并公布中奖人</button>}
-      {result && <p role="status">{result.participantName} · {result.prizeName} · 已生成领奖记录并同步到大屏</p>}
+      <StatusNotice text={result ? `${result.participantName} · ${result.prizeName} · 已生成领奖记录并同步到大屏` : ""} />
     </article>
     <Link className="secondary-button" to="/admin/rewards">配置奖池、核销或自助抽奖</Link>
     <div className="control-response-feed"><span>中奖记录</span>{awards.filter((a) => a.status !== "VOID").map((a) => <div key={a.id}><strong>{a.participantName} · {a.prizeName}</strong><small>{formatDate(a.awardedAt)}</small></div>)}</div>
@@ -1785,7 +1774,11 @@ function QuestionsPage({ activityId, activity, canManage }) {
   const [syncIds, setSyncIds] = useState([]);
   const [syncNotice, setSyncNotice] = useState("");
   const [form, setForm] = useState(emptyQuestion());
-  const [query, setQuery] = useState("");
+  const [bankFilters, setBankFilters] = useState({ query: "", scope: "all" });
+  const [setPage, setSetPage] = useState(1);
+  const [syncQuery, setSyncQuery] = useState("");
+  const [syncPage, setSyncPage] = useState(1);
+  const [selectedPage, setSelectedPage] = useState(1);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const importInputRef = useRef(null);
@@ -1863,11 +1856,13 @@ function QuestionsPage({ activityId, activity, canManage }) {
   };
   const openSetCreate = () => {
     setError("");
+    setSelectedPage(1);
     setQuestionSetForm({ name: "", description: "", questionIds: [], active: false, randomOrder: false });
     setQuestionSetDialog("create");
   };
   const openSetEdit = (set) => {
     setError("");
+    setSelectedPage(1);
     setQuestionSetForm({
       name: set.name,
       description: set.description || "",
@@ -2106,11 +2101,25 @@ function QuestionsPage({ activityId, activity, canManage }) {
       setBusy("");
     }
   };
-  const filtered = questions.filter((question) =>
-    `${question.title} ${question.type}`
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
-  );
+  const setPageInfo = questionPage(filterQuestionSets(questionSets, questions, bankFilters.query, bankFilters.scope), setPage);
+  const syncSetPage = questionPage(syncDialog?.kind === "sets" ? filterQuestionSets(syncDialog.sets, syncDialog.questions, syncQuery) : [], syncPage);
+  const selectedPageInfo = questionPage(questionSetForm.questionIds, selectedPage);
+  const openSync = async (kind) => {
+    setError(""); setBusy("sync-load");
+    try {
+      const [source, sets] = await Promise.all([api.sourceQuestions(activityId), kind === "sets" ? api.sourceQuestionSets(activityId) : Promise.resolve([])]);
+      setSyncDialog({ kind, questions: source, sets }); setSyncIds([]); setSyncQuery(""); setSyncPage(1);
+    } catch (cause) { setError(cause.message); } finally { setBusy(""); }
+  };
+  const toggleSync = (id) => setSyncIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const syncSelected = async () => {
+    setBusy("sync"); setError("");
+    try {
+      const synced = await (syncDialog.kind === "sets" ? api.syncQuestionSets(activityId, syncIds) : api.syncQuestions(activityId, syncIds));
+      setSyncNotice(`已同步 ${synced.length} ${syncDialog.kind === "sets" ? "个题组及其题目，请检查后下发" : "道题目"}。`);
+      setSyncDialog(null); await load();
+    } catch (cause) { setError(cause.message); } finally { setBusy(""); }
+  };
   const pendingText = submissions.filter(
     (submission) =>
       questions.find((question) => question.id === submission.questionId)
@@ -2122,9 +2131,6 @@ function QuestionsPage({ activityId, activity, canManage }) {
   );
   return (
     <div className="page-content">
-      {canManage && activity?.activityType !== "EVENT" && <section className="data-panel"><div className="data-panel__toolbar"><div><h2>同步总题库</h2><p>在草稿阶段选择题目复制。后续可独立修改或停用；再次同步保留本地启用状态。</p></div><button className="secondary-button" disabled={busy !== "" || activity?.status !== "DRAFT"} onClick={async () => { setError(""); setBusy("sync-load"); try { setSyncDialog(await api.sourceQuestions(activityId)); setSyncIds([]); } catch (e) { setError(e.message); } finally { setBusy(""); } }}>选择总题库题目</button></div></section>}
-      {syncNotice && <p role="status">{syncNotice}</p>}
-      {syncDialog && <Dialog title="选择要同步的题目" onClose={() => setSyncDialog(null)}><div className="dialog-form"><InlineError text={error} /><p>未勾选的题目不会复制。已同步过的题目会更新内容，保留本会场的启用或停用设置。</p><button className="secondary-button" onClick={() => setSyncIds(syncDialog.map((q) => q.id))}>全选</button><button className="secondary-button" onClick={() => setSyncIds([])}>清空选择</button>{syncDialog.map((q) => <label className="toggle-control" key={q.id}><input type="checkbox" checked={syncIds.includes(q.id)} onChange={() => setSyncIds((current) => current.includes(q.id) ? current.filter((id) => id !== q.id) : [...current, q.id])} />{q.title}</label>)}{!syncDialog.length && <p>总题库还没有题目，请联系母活动管理员添加。</p>}<button className="primary-button" disabled={busy !== "" || !syncIds.length} onClick={async () => { setBusy("sync"); setError(""); try { const synced = await api.syncQuestions(activityId, syncIds); setSyncNotice(`已同步 ${synced.length} 道题目。`); setSyncDialog(null); await load(); } catch (e) { setError(e.message); } finally { setBusy(""); } }}>同步所选题目（{syncIds.length}）</button></div></Dialog>}
       <PageHeader
         eyebrow="题库仓库"
         title="题库与组卷"
@@ -2146,20 +2152,19 @@ function QuestionsPage({ activityId, activity, canManage }) {
         </div>}
       />
       <InlineError text={error} onRetry={load} />
-      <section className="data-panel">
-        <div className="data-panel__toolbar">
-          <div className="search-input">
-            <Search size={17} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索题目或题型"
-            />
-          </div>
-          <span>{questions.length} 道题目</span>
-        </div>
-        <div className="question-rows">
-          {filtered.map((question, index) => (
+      {canManage && activity?.activityType !== "EVENT" && <section className="data-panel"><div className="data-panel__toolbar"><div><h2>同步总题库与题组</h2><p>草稿阶段可复制母活动题目或整个题组。再次同步更新内容及顺序，保留本会场题目启用状态和题组下发状态。</p></div><div className="page-header-actions"><button type="button" className="secondary-button" disabled={busy !== "" || activity?.status !== "DRAFT"} onClick={() => openSync("questions")}>选择总题库题目</button><button type="button" className="secondary-button" disabled={busy !== "" || activity?.status !== "DRAFT"} onClick={() => openSync("sets")}>选择总题组</button></div></div></section>}
+      <StatusNotice text={syncNotice} />
+      {syncDialog && <Dialog title={syncDialog.kind === "sets" ? "选择要同步的题组" : "选择要同步的题目"} onClose={() => setSyncDialog(null)}><div className="dialog-form"><InlineError text={error} /><p>仅复制勾选项，翻页或搜索不会清除选择。题组内题目会一起同步，保留母活动题目顺序，新题组需检查后手动下发。</p>
+        {syncDialog.kind === "questions" ? <QuestionBrowser label="总题库" questions={syncDialog.questions} selectedIds={syncIds} onSelection={setSyncIds} renderQuestion={(q) => <label className="collection-choice" key={q.id}><input type="checkbox" checked={syncIds.includes(q.id)} onChange={() => toggleSync(q.id)} /><span><strong>{q.title}</strong><small>{typeLabel(q.type)} · {q.enabled ? "已启用" : "已停用"}</small></span></label>} /> : <>
+          <div className="search-input"><Search size={17} /><input aria-label="总题组搜索" value={syncQuery} onChange={(e) => { setSyncQuery(e.target.value); setSyncPage(1); }} placeholder="搜索题组名称、题目或答案" /></div>
+          <div className="collection-selection-actions"><span>已选 {syncIds.length} 个题组（跨页保留）</span><button type="button" className="secondary-button" onClick={() => setSyncIds([...new Set([...syncIds, ...filterQuestionSets(syncDialog.sets, syncDialog.questions, syncQuery).map((set) => set.id)])])}>选择全部筛选结果</button><button type="button" className="text-button" onClick={() => setSyncIds([])}>清空全部选择</button></div>
+          {syncSetPage.items.map((set) => <label className="collection-choice" key={set.id}><input type="checkbox" checked={syncIds.includes(set.id)} onChange={() => toggleSync(set.id)} /><span><strong>{set.name}</strong><small>{set.items.length} 道题目{set.description ? ` · ${set.description}` : ""}</small></span></label>)}
+          {!syncSetPage.total && <p className="collection-empty">没有匹配的题组，请修改搜索条件，或联系母活动管理员添加题组。</p>}
+          <Pagination noun="题组" pageInfo={syncSetPage} onPage={setSyncPage} />
+        </>}
+        <button type="button" className="primary-button" disabled={busy !== "" || !syncIds.length} onClick={syncSelected}>{busy === "sync" ? "正在同步…" : `同步所选${syncDialog.kind === "sets" ? "题组" : "题目"}（${syncIds.length}）`}</button>
+      </div></Dialog>}
+      <section className="data-panel"><QuestionBrowser questions={questions} onSearch={(filters) => { setBankFilters(filters); setSetPage(1); }} renderQuestion={(question, index) => (
             <article className="question-row" key={question.id}>
               <span className="question-sequence">
                 {String(index + 1).padStart(2, "0")}
@@ -2199,16 +2204,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
                 </button>
               </div>
             </article>
-          ))}
-          {!filtered.length && (
-            <EmptyState
-              icon={CircleHelp}
-              title={questions.length ? "没有匹配的题目" : "尚未创建题目"}
-              description="新建题目后即可在实时控场中发布。"
-            />
-          )}
-        </div>
-      </section>
+        )} empty={<EmptyState icon={CircleHelp} title={questions.length ? "没有匹配的题目" : "尚未创建题目"} description="可搜索标题、题目内容或答案，也可筛选题型和启用状态。" />} /></section>
       {canManage && <section className="data-panel question-set-panel">
         <div className="data-panel__toolbar">
           <div>
@@ -2221,7 +2217,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
           </button>
         </div>
         <div className="question-set-rows">
-          {questionSets.map((set) => (
+          {setPageInfo.items.map((set) => (
             <article className="question-set-row" key={set.id}>
               <div className="question-set-row__mark">
                 <ClipboardList size={17} />
@@ -2260,14 +2256,15 @@ function QuestionsPage({ activityId, activity, canManage }) {
               </button>
             </article>
           ))}
-          {!questionSets.length && (
+          {!setPageInfo.total && (
             <EmptyState
               icon={ClipboardList}
-              title="尚未创建题组"
+              title={questionSets.length ? "没有匹配的题组" : "尚未创建题组"}
               description="选择题库中的题目组成答题活动，并通过下发按钮让参与端使用该题组。"
             />
           )}
         </div>
+        <Pagination noun="题组" pageInfo={setPageInfo} onPage={setSetPage} />
       </section>
       }
       <section className="data-panel review-panel">
@@ -2625,7 +2622,8 @@ function QuestionsPage({ activityId, activity, canManage }) {
             <fieldset className="question-set-picker">
               <legend>题目顺序</legend>
               <div className="question-set-picker__selected">
-                {questionSetForm.questionIds.map((questionId, index) => {
+                {selectedPageInfo.items.map((questionId, offset) => {
+                  const index = selectedPageInfo.start + offset;
                   const question = questions.find((item) => item.id === questionId);
                   return (
                     <div key={questionId}>
@@ -2654,18 +2652,10 @@ function QuestionsPage({ activityId, activity, canManage }) {
                 })}
                 {!questionSetForm.questionIds.length && <small>请从下方选择题目</small>}
               </div>
-              <div className="question-set-picker__options">
-                {questions.map((question) => (
-                  <label key={question.id}>
-                    <input
-                      type="checkbox"
-                      checked={questionSetForm.questionIds.includes(question.id)}
-                      onChange={() => toggleSetQuestion(question.id)}
-                    />
-                    <span>{question.title}</span>
-                  </label>
-                ))}
-              </div>
+              <Pagination pageInfo={selectedPageInfo} onPage={setSelectedPage} />
+              <QuestionBrowser label="组卷选题" questions={questions} selectedIds={questionSetForm.questionIds} onSelection={(ids) => setQuestionSetForm((current) => ({ ...current, questionIds: ids }))} renderQuestion={(question) => (
+                <label className="collection-choice" key={question.id}><input type="checkbox" checked={questionSetForm.questionIds.includes(question.id)} onChange={() => toggleSetQuestion(question.id)} /><span>{question.title}</span></label>
+              )} />
             </fieldset>
             <label className="toggle-control"><input type="checkbox" checked={Boolean(questionSetForm.randomOrder)} onChange={(event) => setQuestionSetForm({ ...questionSetForm, randomOrder: event.target.checked })} />随机排序出题（保存时打乱；所有参与者使用同一顺序）</label>
             <label className="toggle-control">
@@ -3272,12 +3262,7 @@ function RewardsPage({ activityId, activity, canManage }) {
         }
       />
       <InlineError text={error} onRetry={load} />
-      {notice && (
-        <div className="inline-notice" role="status">
-          <BadgeCheck size={17} />
-          <span>{notice}</span>
-        </div>
-      )}
+      <StatusNotice text={notice} />
       <section className="prize-grid">
         {pools.map((pool) => (
           <article className="prize-pool-card" key={pool.id}>
@@ -7517,20 +7502,7 @@ function EmptyState({ icon: Icon, title, description }) {
     </div>
   );
 }
-function InlineError({ text, onRetry }) {
-  return text ? (
-    <div className="inline-error">
-      <CircleAlert size={17} />
-      <span>{text}</span>
-      {onRetry && (
-        <button type="button" onClick={onRetry}>
-          <RefreshCw size={15} />
-          重试
-        </button>
-      )}
-    </div>
-  ) : null;
-}
+function InlineError({ text, onRetry }) { return <StatusNotice text={text} tone="error" onRetry={onRetry} />; }
 function BackendProblem({ message, onRetry }) {
   return (
     <main className="backend-problem">

@@ -19,6 +19,8 @@ public class QuestionSet {
   @Column(nullable = false)
   private UUID activityId;
 
+  private UUID sourceQuestionSetId;
+
   @Column(nullable = false, length = 180)
   private String name;
 
@@ -50,6 +52,9 @@ public class QuestionSet {
 
   public UUID getId() { return id; }
   public UUID getActivityId() { return activityId; }
+  public UUID getSourceQuestionSetId() { return sourceQuestionSetId; }
+  public void setSourceQuestionSetId(UUID value) { sourceQuestionSetId = value; }
+  public void setDescription(String value) { description = value; }
   public String getName() { return name; }
   public String getDescription() { return description; }
   public boolean isActive() { return active; }

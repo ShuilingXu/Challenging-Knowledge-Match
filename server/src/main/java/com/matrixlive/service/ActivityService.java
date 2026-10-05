@@ -506,6 +506,7 @@ public class ActivityService {
     }
     boolean wasActive = set.isActive();
     set.update(name, request.description() == null ? set.getDescription() : cleanOptional(request.description()), request.active());
+    if (request.description() != null) set.setDescription(cleanOptional(request.description()));
     replaceQuestionSetItems(set, questionIds);
     if (Boolean.TRUE.equals(request.active())) activateQuestionSet(set);
     else if (Boolean.FALSE.equals(request.active()) && wasActive) {
@@ -1579,6 +1580,62 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public List<QuestionAdminResponse> sourceQuestions(UUID activityId) {
     return questions.findByActivityIdOrderByDisplayOrderAsc(masterQuestionActivity(activityId)).stream().map(this::toQuestionAdmin).toList();
+  }
+
+  @Transactional(readOnly = true)
+  public List<QuestionSetResponse> sourceQuestionSets(UUID activityId) {
+    Activity target = requireActivity(activityId);
+    if (!Set.of("VENUE", "QUIZ").contains(target.getActivityType())) throw badRequest("请选择会场答题功能同步题组");
+    return questionSets.findByActivityIdOrderByUpdatedAtDesc(masterQuestionActivity(activityId)).stream()
+        .map(this::toQuestionSet).toList();
+  }
+
+  /** Copy source items to local question IDs while preserving the saved (including random) order. */
+  @Transactional
+  public List<QuestionSetResponse> syncQuestionSets(UUID activityId, SyncQuestionSetsRequest request) {
+    Activity target = activities.findForUpdate(activityId).orElseThrow(() -> notFound("活动不存在"));
+    if (!target.isFeatureEnabled()) throw conflict("此会场功能已关闭");
+    if (!Set.of("VENUE", "QUIZ").contains(target.getActivityType())) throw badRequest("请选择会场答题功能同步题组");
+    if (!"DRAFT".equals(target.getStatus()) || !"LOBBY".equals(target.getControlStage())) throw conflict("仅可在草稿阶段同步题组，避免更改已开始的比赛");
+    UUID master = masterQuestionActivity(activityId);
+    List<QuestionSet> sources = request.questionSetIds().stream().distinct()
+        .map(id -> requireQuestionSet(master, id)).toList();
+    List<QuestionSet> localSets = questionSets.findByActivityIdOrderByUpdatedAtDesc(activityId);
+    Map<UUID, List<UUID>> sourceItems = new java.util.LinkedHashMap<>();
+    Set<UUID> sourceQuestionIds = new java.util.LinkedHashSet<>();
+    for (QuestionSet source : sources) {
+      QuestionSet local = localSets.stream().filter(s -> source.getId().equals(s.getSourceQuestionSetId())).findFirst().orElse(null);
+      if (localSets.stream().anyMatch(s -> s.getName().equals(source.getName()) && s != local))
+        throw conflict("本会场已有同名题组“" + source.getName() + "”，请先修改本地题组名称再同步");
+      List<UUID> ids = questionSetItems.findByQuestionSetIdOrderByDisplayOrderAsc(source.getId()).stream()
+          .map(QuestionSetItem::getQuestionId).toList();
+      if (ids.isEmpty()) throw conflict("总题组“" + source.getName() + "”没有题目，请先完善后再同步");
+      sourceItems.put(source.getId(), ids);
+      sourceQuestionIds.addAll(ids);
+    }
+    if (sourceQuestionIds.size() > 1000) throw badRequest("一次同步最多包含 1000 道题目，请分批同步题组");
+    // Shares the same transaction: any invalid item or conflict rolls back questions and sets together.
+    syncQuestions(activityId, new SyncQuestionsRequest(new ArrayList<>(sourceQuestionIds)));
+    Map<UUID, UUID> localIds = questions.findByActivityIdOrderByDisplayOrderAsc(activityId).stream()
+        .filter(q -> q.getSourceQuestionId() != null)
+        .collect(java.util.stream.Collectors.toMap(Question::getSourceQuestionId, Question::getId));
+    List<QuestionSetResponse> result = new ArrayList<>();
+    for (QuestionSet source : sources) {
+      QuestionSet copy = localSets.stream().filter(s -> source.getId().equals(s.getSourceQuestionSetId())).findFirst().orElse(null);
+      if (copy == null) {
+        copy = new QuestionSet(activityId, source.getName(), source.getDescription(), false);
+        copy.setSourceQuestionSetId(source.getId());
+        questionSets.save(copy);
+      } else {
+        copy.update(source.getName(), source.getDescription(), null);
+        // Empty descriptions must also propagate when the master clears its description.
+        copy.setDescription(source.getDescription());
+      }
+      replaceQuestionSetItems(copy, sourceItems.get(source.getId()).stream().map(localIds::get).toList());
+      result.add(toQuestionSet(copy));
+    }
+    broadcast(activityId, "question_sets.synced");
+    return result;
   }
 
   @Transactional

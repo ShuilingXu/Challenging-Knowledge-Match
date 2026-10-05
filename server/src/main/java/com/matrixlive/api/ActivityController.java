@@ -180,6 +180,17 @@ public class ActivityController {
     return service.listQuestionSets(activityId);
   }
 
+  @GetMapping("/{activityId}/question-sets/source")
+  public List<QuestionSetResponse> sourceQuestionSets(@PathVariable UUID activityId) {
+    return service.sourceQuestionSets(activityId);
+  }
+
+  @PostMapping("/{activityId}/question-sets/sync")
+  public List<QuestionSetResponse> syncQuestionSets(@PathVariable UUID activityId,
+      @Valid @RequestBody SyncQuestionSetsRequest request) {
+    return service.syncQuestionSets(activityId, request);
+  }
+
   @PostMapping("/{activityId}/question-sets")
   @ResponseStatus(HttpStatus.CREATED)
   public QuestionSetResponse createQuestionSet(@PathVariable UUID activityId,

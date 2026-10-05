@@ -307,6 +307,8 @@ public final class ApiModels {
 
   public record SyncQuestionsRequest(@NotEmpty @Size(max = 1000) List<@NotNull UUID> questionIds) { }
 
+  public record SyncQuestionSetsRequest(@NotEmpty @Size(max = 100) List<@NotNull UUID> questionSetIds) { }
+
   public record QuestionSetItemResponse(UUID questionId, String title, String type, int displayOrder) { }
 
   public record QuestionSetResponse(UUID id, UUID activityId, String name, String description, boolean active,

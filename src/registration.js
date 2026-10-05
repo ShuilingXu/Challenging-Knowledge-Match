@@ -7,6 +7,7 @@ export function registrationFieldKey(field) {
 export function activeVenueCode(venues, requestedCode) {
   const activeVenues = (venues || []).filter((venue) => venue?.enabled)
   if (activeVenues.some((venue) => venue.code === requestedCode)) return requestedCode
+  if (!requestedCode && activeVenues.length === 1) return activeVenues[0].code
   return ''
 }
 

@@ -37,6 +37,44 @@ export function activityEntry(activity) {
   return `${activity.activityType === 'LOTTERY' ? '/lottery' : '/join'}/${activity.id}`
 }
 
+// Public lists intentionally omit the mother event; its venues are still entry roots.
+export function activityEntryGroups(activities) {
+  const ids = new Set(activities.map((item) => item.id))
+  return activities.filter((item) => !item.parentActivityId || !ids.has(item.parentActivityId))
+    .map((activity) => ({ activity, features: activities.filter((item) => item.parentActivityId === activity.id) }))
+}
+
+export function participantFeatureLabel(activity) {
+  const label = { QUIZ: '答题', LOTTERY: '抽奖', TURTLE_SOUP: '海龟汤' }[activity?.activityType]
+  return !label ? activity?.name || '本会场' : !activity.name || activity.name === label ? label : `${label} · ${activity.name}`
+}
+
+export function participationLabel(activity, activities) {
+  if (activity.activityType === 'VENUE') return `会场 · ${activity.name}`
+  const parent = activities.find((item) => item.id === activity.parentActivityId)
+  return `${parent?.name || '本会场'} / ${participantFeatureLabel(activity)}`
+}
+
+export function controlStatusHint(status) {
+  return {
+    DRAFT: '请先点击“开始活动”，再开题并计时。',
+    REGISTRATION_OPEN: '报名已开放，请点击“开始活动”进入答题。',
+    PAUSED: '活动已暂停，请先恢复活动再开题。',
+    FINISHED: '活动已结束，不能再开启答题。',
+    CANCELLED: '活动已终止，不能再开启答题。',
+  }[status] || ''
+}
+
+export function screenAnswerHint(result, remaining, stage) {
+  if (result) return '答案已公布，请等待主持人开启下一题'
+  if (stage === 'QUESTION_OPEN') return remaining > 0 ? '请在倒计时结束前，用手机提交答案' : '本题答题已结束，请等待主持人公布答案'
+  return '请等待主持人开启答题'
+}
+
+export function venueDisplayName(code, venues = []) {
+  return venues.find((venue) => venue.code === code)?.name || (code === 'main' ? '本会场' : code || '本会场')
+}
+
 export function participantMatches(person, query) {
   const values = [person.name, person.contact, person.id, person.organization, person.venue,
     ...Object.values(person.customFields || {})]

@@ -1,3 +1,4 @@
+import { activityEntryGroups, participantFeatureLabel, participationLabel, controlStatusHint, screenAnswerHint, venueDisplayName } from "./activity-flow";
 import { PageHeader, StatusNotice } from "./StaffUi";
 import { QuestionBrowser, Pagination } from "./QuestionBrowser";
 import { filterQuestionSets, questionPage } from "./question-bank";
@@ -240,12 +241,13 @@ function ParticipantEntryRedirect() {
   }
   if (!activities) return <LoadingPage label="正在查找进行中的活动" />;
   return <main className="activity-entry-page">
-    <h1>选择活动</h1>
-    {activities.filter((item) => !item.parentActivityId).map((activity) => <section className="activity-entry-group" key={activity.id}>
+    <div className="activity-entry-toolbar"><h1>选择会场</h1><button className="secondary-button" type="button" onClick={() => window.location.reload()}><RefreshCw size={16} />刷新列表</button></div>
+    <p className="activity-entry-help">请选择你所在的会场，登记后即可参加已开放的答题或抽奖。</p>
+    {activityEntryGroups(activities).map(({ activity, features }) => <section className="activity-entry-group" key={activity.id}>
       <Link to={activityEntry(activity)}><CalendarDays size={22} /><div><strong>{activity.name}</strong><span>{activity.city} · {activityStatusLabels[activity.status]}</span></div><ChevronRight size={20} /></Link>
-      {activities.filter((item) => item.parentActivityId === activity.id).map((child) => <Link className="activity-entry-child" to={activityEntry(child)} key={child.id}><Gift size={19} /><div><strong>{child.name}</strong><span>{activityTypeLabel(child.activityType)} · {activityStatusLabels[child.status]}</span></div><ChevronRight size={20} /></Link>)}
+      {features.map((child) => <Link className="activity-entry-child" to={activityEntry(child)} key={child.id}><Gift size={19} /><div><strong>{participantFeatureLabel(child)}</strong><span>{activityStatusLabels[child.status]}</span></div><ChevronRight size={20} /></Link>)}
     </section>)}
-    {!activities.length && <EmptyState icon={CalendarDays} title="暂无开放活动" description="活动开放报名后会显示在这里，请稍后刷新或联系现场工作人员。" />}
+    {!activities.length && <EmptyState icon={CalendarDays} title="暂无开放会场" description="活动开放报名后会显示在这里，请稍后刷新或联系现场工作人员。" />}
   </main>;
 }
 
@@ -733,8 +735,9 @@ function HostLotteryPage({ activity, reload, canManage }) {
   useEffect(() => { load(); }, [load]);
   useActivityStream(activity.id, load, undefined, setError);
   const pool = pools.find((p) => p.id === poolId);
-  const eligible = people.filter((p) => p.status === "ACTIVE" && p.score >= (pool?.minScore || 0)
-    && !awards.some((a) => a.participantId === p.id && a.prizePoolId === poolId));
+  const eligible = pool ? people.filter((p) => p.status === "ACTIVE" && p.score >= (pool?.minScore || 0)
+    && !awards.some((a) => a.participantId === p.id && a.prizePoolId === poolId)) : [];
+  const drawHint = !pool ? "请先配置并选择奖池，再开始摇奖。" : activity.status === "PAUSED" ? "活动已暂停，请点击上方的“恢复”后再摇奖。" : ["FINISHED", "CANCELLED"].includes(activity.status) ? "活动已结束，不能再开始摇奖。" : activity.status !== "LIVE" ? "请先点击上方的“开始活动”，再开始摇奖。" : !pool.enabled ? "当前奖池未启用，请在奖品管理中启用。" : !pool.remainingQuantity ? "当前奖池已发完，请选择其他奖池。" : !eligible.length ? "暂无符合积分条件且未在本奖池中奖的参与者。" : "准备好后点击“开始摇奖”，再点击“停止并公布中奖人”。";
   useEffect(() => {
     if (!rolling || !eligible.length) return;
     let index = 0;
@@ -758,6 +761,7 @@ function HostLotteryPage({ activity, reload, canManage }) {
     {!pools.length && <EmptyState icon={Gift} title="尚未配置奖池" description="请先进入奖品管理，添加并启用主持人抽奖奖池。" />}
     <article className="data-panel staff-panel host-lottery-stage"><span className="type-chip">符合条件 {eligible.length} 人</span><h2 aria-live="polite">{displayName || "等待开始摇奖"}</h2>
       {confirming ? <p>正在确认中奖结果…</p> : !rolling ? <button className="primary-button" disabled={activity.status !== "LIVE" || !pool?.enabled || !pool.remainingQuantity || !eligible.length || !!attempt.current} onClick={() => { setResult(null); setRolling(true); }}>开始摇奖</button> : <button className="primary-button" onClick={stop}>停止并公布中奖人</button>}
+      {!rolling && !confirming && !result && <p className="host-lottery-hint">{drawHint}</p>}
       <StatusNotice text={result ? `${result.participantName} · ${result.prizeName} · 已生成领奖记录并同步到大屏` : ""} />
     </article>
     <Link className="secondary-button" to="/admin/rewards">配置奖池、核销或自助抽奖</Link>
@@ -1488,10 +1492,10 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
           <div className="control-connection">
             <span>
               <i />
-              LIVE
+              现场状态
             </span>
             <b>{controlsClosed ? activityStatusLabels[activity.status] : state?.stage === "QUESTION_OPEN" && remaining === 0 ? "答题时间已结束" : stageLabel(state?.stage || "LOBBY")}</b>
-            <span>活动事件已隔离广播</span>
+            <span>开题和公布结果会同步到玩家手机与本会场大屏</span>
           </div>
           <article className="control-question">
             <div className="question-top">
@@ -1511,7 +1515,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
               </select>
               {current && (
                 <p className="question-selection-status" aria-live="polite">
-                  {controlsClosed ? "活动已暂停或结束，无法开启答题" : selectionIsOpen ? "当前答题题目" : "已选题目，可跳题并开始"}
+                  {controlsClosed ? controlStatusHint(activity.status) : selectionIsOpen ? "当前答题题目" : "已选题目，可跳题并开始"}
                 </p>
               )}
               <Link className="text-button" to="/admin/questions">
@@ -5976,7 +5980,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
       : undefined,
   };
   return (
-    <main className="participant-page" style={pageStyle}>
+    <main className={`participant-page${participant && participantToken ? " participant-page--registered" : ""}`} style={pageStyle}>
       <ParticipantHeader
         state={state}
         activity={activity}
@@ -5986,7 +5990,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
         <div className="participant-workspace__content">
           <label className="participant-activity-picker">当前活动
             <select aria-label="选择参与活动" value={activityId} onChange={(event) => navigate(activityEntry(activities.find((item) => item.id === event.target.value)))}>
-              {activities.map((item) => <option key={item.id} value={item.id}>{item.parentActivityId ? `${activities.find((parent) => parent.id === item.parentActivityId)?.name || "主活动"} / ` : ""}{item.name}</option>)}
+              {activities.map((item) => <option key={item.id} value={item.id}>{participationLabel(item, activities)}</option>)}
             </select>
           </label>
           {activity?.clientHeroImageUrl && (
@@ -6033,7 +6037,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
           ) : (
             <>
               {tab === "play" && !lotteryMode && (
-                activity?.activityType === "VENUE" ? <article className="answer-card"><h2>选择会场功能</h2><p>报名已完成，答题和摇奖共用当前身份。</p>{activities.filter((item) => item.parentActivityId === activityId && item.featureEnabled !== false && item.activityType !== "TURTLE_SOUP").map((child) => <Link className="secondary-button" key={child.id} to={activityEntry(child)}>{child.name} · {activityTypeLabel(child.activityType)}<ArrowRight size={16} /></Link>)}{!activities.some((item) => item.parentActivityId === activityId) && <p>等待工作人员开启会场功能。</p>}</article> : activity?.answerMode === "BUZZER" ? <BuzzCard
+                activity?.activityType === "VENUE" ? <article className="answer-card"><h2>选择会场功能</h2><p>报名已完成，答题和摇奖共用当前身份。</p>{activities.filter((item) => item.parentActivityId === activityId && item.featureEnabled !== false && item.activityType !== "TURTLE_SOUP").map((child) => <Link className="secondary-button" key={child.id} to={activityEntry(child)}>{participantFeatureLabel(child)}<ArrowRight size={16} /></Link>)}{!activities.some((item) => item.parentActivityId === activityId) && <p>等待工作人员开启会场功能。</p>}</article> : activity?.answerMode === "BUZZER" ? <BuzzCard
                   key={`${activityId}-${question?.id || "waiting"}`}
                   activityId={activityId}
                   participant={participant}
@@ -6072,7 +6076,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
                   entryVenue={requestedVenue}
                 />
               )}
-              {tab === "profile" && <ParticipantProfile activityId={identityActivityId} participant={participant} participantToken={participantToken} />}
+              {tab === "profile" && <ParticipantProfile activityId={identityActivityId} participant={participant} participantToken={participantToken} venueName={venues.find((entry) => entry.code === participant.venue)?.name || activities.find((entry) => entry.id === identityActivityId)?.name} />}
             </>
           )}
         </div>
@@ -6167,7 +6171,7 @@ function ParticipantHeader({ state, activity, siteSettings }) {
   );
 }
 
-function ParticipantProfile({ activityId, participant, participantToken }) {
+function ParticipantProfile({ activityId, participant, participantToken, venueName }) {
   const [detail, setDetail] = useState(participant);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
@@ -6177,7 +6181,7 @@ function ParticipantProfile({ activityId, participant, participantToken }) {
   useEffect(() => { load(); }, [load]);
   return <article className="participant-profile"><div className="workspace-heading"><h2>我的参与信息</h2><button className="toolbar-icon" title="刷新参与信息" onClick={load}><RefreshCw size={18} /></button></div>
     <InlineError text={error} onRetry={load} />
-    <dl>{[["姓名", detail.name], ["联系方式", detail.contact], ["组织", detail.organization], ["会场", detail.venue], ["参与人 ID", detail.id], ["积分", detail.score], ...Object.entries(detail.customFields || {})].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? ""}</dd></div>)}</dl>
+    <dl>{[["姓名", detail.name], ["联系方式", detail.contact], ["组织", detail.organization], ["会场", venueName || venueDisplayName(detail.venue)], ["参与编号", detail.id], ["积分", detail.score], ...Object.entries(detail.customFields || {})].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? ""}</dd></div>)}</dl>
   </article>;
 }
 
@@ -6248,7 +6252,7 @@ function RegistrationCard({
       <p className="eyebrow">欢迎来到次元现场</p>
       <h2>{returning ? "查询我的参与信息" : "先确认你的现场身份"}</h2>
       <p>联系方式会在当前活动内唯一识别你。</p>
-      <label>
+      {activeVenues.length === 1 && venue === activeVenues[0].code ? <div className="registration-venue-summary"><MapPin size={18} /><div><strong>{activeVenues[0].name}</strong><small>已为你选好报名会场</small></div></div> : <label>
         会场
         <select
           required
@@ -6267,7 +6271,7 @@ function RegistrationCard({
             <option value="">暂无可用会场</option>
           )}
         </select>
-      </label>
+      </label>}
       {!returning && <label>
         姓名
         <input
@@ -6321,7 +6325,7 @@ function RegistrationCard({
       )}
       <label>人机验证
         {challenge && <img src={challenge.image} alt="人机验证码" width="210" height="70" />}
-        <input required autoComplete="off" maxLength={5} value={challengeAnswer} onChange={(event) => setChallengeAnswer(event.target.value)} placeholder="输入图片中的字符" />
+        <input aria-label="图片验证码" required autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={5} value={challengeAnswer} onChange={(event) => setChallengeAnswer(event.target.value)} placeholder="输入图片中的字符" />
       </label>
       <button type="button" className="text-button" onClick={renewChallenge} disabled={busy}>换一张验证码</button>
       <button className="primary-button" disabled={busy || !venue || !challenge}>
@@ -6631,6 +6635,7 @@ function AnswerCard({
           <Send size={17} />
         </button>
       )}
+      {!canAnswer && !result && <p className="answer-wait-hint" role="status">{state?.stage === "QUESTION_OPEN" ? "本题答题时间已结束。无需刷新，答案公布后会自动更新。" : revealed ? "本题答案已公布，请等待主持人开启下一题。" : "请等待主持人开题，页面会自动更新。"}</p>}
       {revealed && (
         <div className="answer-feedback is-revealed">
           <BadgeCheck size={20} />
@@ -6721,6 +6726,7 @@ function RewardsCard({
     <article className="mobile-rewards">
       <p className="eyebrow">我的奖励仓库</p>
       <h2>我的奖励</h2>
+      {!awards.length && <p className="rewards-empty-hint">还没有奖励记录。获奖后的奖品和领取信息会显示在这里。</p>}
       {awards.map((award) => (
         <div className="mobile-award" key={award.id}>
           <Gift size={19} />
@@ -6760,6 +6766,7 @@ function RewardsCard({
               ? "开始抽奖"
               : "暂无抽奖机会"}
         </button>
+        {!(chance?.remainingDraws > 0) && <small>暂未获得额外抽奖机会，请等待工作人员安排。</small>}
       </div>
       {result && (
         <div className="answer-feedback is-correct">
@@ -7145,8 +7152,8 @@ function ScreenQuestion({ question, state, result, responses = [], submittedCoun
         </div>
       )}
       <footer>
-        <span>请用手机提交答案</span>
-        <span>冒险数据正在实时同步</span>
+        <span>{screenAnswerHint(result, remaining, state?.stage)}</span>
+        <span>提交人数与积分实时更新</span>
       </footer>
     </div>
   );
@@ -7241,7 +7248,7 @@ function ScreenScoreboard({ board, display }) {
             <Avatar name={item.name} />
             <div>
               <strong>{item.name || "未命名参与者"}</strong>
-              <small>{item.venue || "活动现场"}</small>
+              <small>{venueDisplayName(item.venue)}</small>
             </div>
             <em>{item.score ?? 0} 分</em>
           </article>
@@ -7268,7 +7275,7 @@ function ScreenWinners({ winners, display }) {
             <Avatar name={winner.name} />
             <div>
               <strong>{winner.name}</strong>
-              <small>{winner.venue || "活动现场"} · {winner.prizeName}</small>
+              <small>{venueDisplayName(winner.venue)} · {winner.prizeName}</small>
             </div>
             <em>
               {winner.deliveryType === "PHYSICAL" ? "实物" : "兑换"}
@@ -7447,7 +7454,7 @@ function ScoreList({ items }) {
           <Avatar name={item.name} />
           <div>
             <strong>{item.name}</strong>
-            <small>{item.venue || "主会场"}</small>
+            <small>{venueDisplayName(item.venue)}</small>
           </div>
           <b>
             {item.score || 0}

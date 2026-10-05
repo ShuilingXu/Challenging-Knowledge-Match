@@ -744,7 +744,7 @@ a:focus-visible {
     var(--soyo-bg);
 }
 .activity-entry-page::before {
-  content: "星辉色彩 · 选择活动";
+  content: "星辉色彩 · 选择会场";
   display: block;
   margin-bottom: 10px;
   color: var(--soyo-hair);
@@ -1589,6 +1589,29 @@ a:focus-visible {
   .screen-scoreboard-list strong { font-size: 14px; }
   .screen-scoreboard-list small, .screen-scoreboard-list article > b, .screen-scoreboard-list em i { font-size: 11px; }
   .screen-scoreboard-list em { font-size: 18px; }
+}
+
+/* Verified against the host, paired display and registered player flows. */
+.activity-entry-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.activity-entry-help { margin: 0 0 24px; color: var(--soyo-muted); font-size: 14px; line-height: 1.7; }
+.registration-venue-summary { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--soyo-line); border-radius: 12px; background: var(--soyo-cream); color: var(--soyo-cocoa); }
+.registration-venue-summary > div { display: grid; gap: 4px; min-width: 0; }
+.registration-venue-summary strong { font-size: 13px; overflow-wrap: anywhere; }
+.registration-venue-summary small { color: var(--soyo-muted); font-size: 12px; }
+.answer-wait-hint, .rewards-empty-hint { padding: 12px 14px; border-radius: 12px; color: var(--soyo-text); background: var(--soyo-sky-soft); font-size: 13px; line-height: 1.7; }
+.draw-card > small { display: block; margin-top: 12px; font-size: 12px; line-height: 1.6; }
+.control-guide ol { list-style: none; }
+.host-lottery-hint { color: var(--soyo-muted); line-height: 1.7; font-size: 13px; }
+@media (max-width: 900px) {
+  .participant-page { padding-bottom: 112px; }
+  .participant-page--registered { gap: 12px; }
+  .participant-page--registered .participant-sidecopy { width: 100%; text-align: left; }
+  .participant-page--registered .participant-sidecopy > p { display: none; }
+  .participant-page--registered .participant-sidecopy h1 { font-size: 20px; margin: 0; }
+  .participant-page--registered .participant-score { padding: 14px 16px; }
+  .participant-page--registered .participant-score strong { font-size: 28px; }
+  .participant-nav { position: fixed; bottom: max(12px, env(safe-area-inset-bottom)); left: 16px; right: 16px; width: auto; z-index: 25; margin: 0; }
+  .participant-nav button { min-height: 54px; font-size: 12px; }
 }
 
 @media (max-width: 510px) {

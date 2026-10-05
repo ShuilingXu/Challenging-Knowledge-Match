@@ -33,4 +33,10 @@ describe('registration request mapping', () => {
   it('converts staff-entered options to a clean API list', () => {
     expect(splitRegistrationOptions('Engineering\n\n Operations \n')).toEqual(['Engineering', 'Operations'])
   })
+  it('preselects a single available venue without changing an invalid explicit venue', () => {
+    const venues = [{ code: 'closed', enabled: false }, { code: 'main', enabled: true }]
+    expect(activeVenueCode(venues, '')).toBe('main')
+    expect(activeVenueCode(venues, 'closed')).toBe('')
+    expect(activeVenueCode(venues, 'main')).toBe('main')
+  })
 })

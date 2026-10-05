@@ -147,4 +147,73 @@ class VenueWorkspaceIntegrationTest {
     assertTrue(memberships.findByUserIdAndActivityId(staff.getId(),venue.id()).isPresent());
     assertTrue(memberships.findByUserIdAndActivityId(staff.getId(),quiz.id()).isEmpty());
   }
+
+  @Autowired com.matrixlive.repository.ActivityRepository activityRepository;
+  @Autowired com.fasterxml.jackson.databind.ObjectMapper mapper;
+
+  private ActivityResponse venueWithFeatures(UUID main, List<String> features) throws Exception {
+    return service.createActivity(mapper.readValue(mapper.writeValueAsString(Map.of("name","Venue "+UUID.randomUUID(),
+        "city","Shanghai","activityType","VENUE","parentActivityId",main,"features",features)),CreateActivityRequest.class));
+  }
+  private void changeFeatures(UUID venue, List<String> features) throws Exception {
+    service.updateActivity(venue,mapper.readValue(mapper.writeValueAsString(Map.of("features",features)),UpdateActivityRequest.class));
+  }
+  private UUID featureId(UUID venue, String type) {
+    return activityRepository.findByParentActivityId(venue).stream().filter(a -> type.equals(a.getActivityType())).findFirst().orElseThrow().getId();
+  }
+  @Test void creationCreatesOnlySelectedVenueFeaturesAndReenablePreservesData() throws Exception {
+    var main=create("EVENT",null);var venue=venueWithFeatures(main.id(),List.of("QUIZ","TURTLE_SOUP"));
+    assertEquals(2,activityRepository.findByParentActivityId(venue.id()).size());
+    UUID quiz=featureId(venue.id(),"QUIZ"); var original=question(quiz,"Retained question");
+    changeFeatures(venue.id(),List.of("TURTLE_SOUP","LOTTERY"));
+    assertFalse(activityRepository.findById(quiz).orElseThrow().isFeatureEnabled());
+    assertTrue(service.listActivities().stream().anyMatch(a -> a.id().equals(venue.id())));
+    assertThrows(DomainException.class,()->service.listQuestions(quiz));
+    assertThrows(DomainException.class,()->screens.listDevices(quiz));
+    changeFeatures(venue.id(),List.of("QUIZ"));
+    assertEquals(quiz,featureId(venue.id(),"QUIZ"));
+    assertEquals(original.id(),service.listQuestionAdministration(quiz).getFirst().id());
+    assertEquals(3,activityRepository.findByParentActivityId(venue.id()).size());
+    assertThrows(DomainException.class,()->changeFeatures(venue.id(),List.of("BOGUS")));
+  }
+  @Test void disabledFeatureIsDeniedEvenToItsAdministratorOverHttpAndRealtime() throws Exception {
+    var main=create("EVENT",null);var venue=venueWithFeatures(main.id(),List.of("QUIZ"));UUID quiz=featureId(venue.id(),"QUIZ");
+    var user=users.save(new UserAccount("switch-"+UUID.randomUUID(),"Venue admin","unused",null));
+    memberships.save(new ActivityMembership(venue.id(),user.getId(),UserRole.ACTIVITY_ADMIN));
+    String token=tokens.issueAccountToken(user).value();
+    changeFeatures(venue.id(),List.of());
+    mvc.perform(get("/api/activities/"+quiz+"/control").header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+    mvc.perform(post("/api/activities/"+quiz+"/status").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"LIVE\"}")).andExpect(status().isForbidden());
+    mvc.perform(get("/api/activities/"+venue.id()+"/participants").header("Authorization","Bearer "+token)).andExpect(status().isOk());
+    String session=UUID.randomUUID().toString();
+    var connect=org.springframework.messaging.simp.stomp.StompHeaderAccessor.create(org.springframework.messaging.simp.stomp.StompCommand.CONNECT);
+    connect.setSessionId(session);connect.setNativeHeader("Authorization","Bearer "+token);connect.setLeaveMutable(true);
+    socket.preSend(org.springframework.messaging.support.MessageBuilder.createMessage(new byte[0],connect.getMessageHeaders()),null);
+    var subscribe=org.springframework.messaging.simp.stomp.StompHeaderAccessor.create(org.springframework.messaging.simp.stomp.StompCommand.SUBSCRIBE);
+    subscribe.setSessionId(session);subscribe.setDestination("/topic/activities/"+quiz);subscribe.setLeaveMutable(true);
+    assertThrows(org.springframework.security.access.AccessDeniedException.class,()->socket.preSend(org.springframework.messaging.support.MessageBuilder.createMessage(new byte[0],subscribe.getMessageHeaders()),null));
+  }
+  @Test void multipleSoupScriptsSwitchSafelyAndKeepLocalCopiesIndependent() throws Exception {
+    var main=create("EVENT",null);var venue=venueWithFeatures(main.id(),List.of("TURTLE_SOUP"));
+    var other=venueWithFeatures(main.id(),List.of("TURTLE_SOUP"));UUID soup=featureId(venue.id(),"TURTLE_SOUP"),second=featureId(other.id(),"TURTLE_SOUP");
+    var a=soups.saveTemplate(main.id(),null,new TurtleSoupService.Content("One","Surface one",List.of("Clue"),"Secret one"));
+    var b=soups.saveTemplate(main.id(),null,new TurtleSoupService.Content("Two","Surface two",List.of(),"Secret two"));
+    soups.configurePlaylist(soup,List.of(a.id(),b.id()));soups.configurePlaylist(second,List.of(a.id()));
+    soups.save(soup,new TurtleSoupService.Content("Local one","Edited",List.of("Edited clue"),"Local secret"));
+    assertEquals("One",soups.state(second).content().title());assertEquals("One",soups.templates(main.id()).getFirst().content().title());
+    service.changeActivityStatus(main.id(),new ChangeActivityStatusRequest("LIVE"));
+    service.changeActivityStatus(venue.id(),new ChangeActivityStatusRequest("LIVE"));
+    service.changeActivityStatus(soup,new ChangeActivityStatusRequest("LIVE"));
+    var shown=soups.control(soup,new TurtleSoupService.Command("SHOW_SURFACE",soups.state(soup).revision()));
+    assertThrows(DomainException.class,()->soups.switchTemplate(soup,new TurtleSoupService.SwitchRequest(b.id(),shown.revision())));
+    var reset=soups.control(soup,new TurtleSoupService.Command("RESET",shown.revision()));
+    var next=soups.switchTemplate(soup,new TurtleSoupService.SwitchRequest(b.id(),reset.revision()));
+    assertEquals("Two",next.content().title());assertEquals("LOBBY",next.stage());assertTrue(next.revealedClueIndexes().isEmpty());
+    assertFalse(TurtleSoupService.display(next).containsKey("solution"));assertFalse(TurtleSoupService.display(next).containsKey("surface"));
+    assertThrows(DomainException.class,()->soups.switchTemplate(soup,new TurtleSoupService.SwitchRequest(a.id(),reset.revision())));
+    var back=soups.switchTemplate(soup,new TurtleSoupService.SwitchRequest(a.id(),next.revision()));assertEquals("Local one",back.content().title());
+    var foreign=create("EVENT",null);var foreignTemplate=soups.saveTemplate(foreign.id(),null,a.content());
+    assertThrows(DomainException.class,()->soups.configurePlaylist(soup,List.of(foreignTemplate.id())));
+    assertEquals(2,soups.playlist(soup).entries().size());
+  }
 }

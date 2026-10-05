@@ -164,6 +164,7 @@ public class ActivityService {
     if ("VENUE".equals(activity.getActivityType())) {
       venues.save(new Venue(activity.getId(), "main", activity.getName(), null));
     }
+    configureVenueFeatures(activity, request.features());
     return toActivity(activity);
   }
 
@@ -186,8 +187,47 @@ public class ActivityService {
         request.activityType() == null ? activity.getActivityType() : request.activityType());
     configureScoring(activity, request.scoringMode(), request.correctScorePercent(), request.incorrectScorePercent(),
         request.correctRankRules(), request.incorrectRankRules());
+    configureVenueFeatures(activity, request.features());
     broadcast(activityId, "activity.updated");
     return toActivity(activity);
+  }
+
+  private void configureVenueFeatures(Activity venue, List<String> selected) {
+    if (selected == null) return; // Existing API clients retain their existing configuration.
+    if (!"VENUE".equals(venue.getActivityType())) {
+      if (!selected.isEmpty()) throw badRequest("功能开关仅适用于会场");
+      return;
+    }
+    Set<String> types = Set.of("QUIZ", "LOTTERY", "TURTLE_SOUP");
+    if (selected.stream().anyMatch(type -> !types.contains(type))) throw badRequest("未知会场功能");
+    if (Set.of("FINISHED", "CANCELLED").contains(venue.getStatus())) throw conflict("已结束的会场不能调整功能");
+    List<Activity> children = activities.findByParentActivityId(venue.getId());
+    for (String type : types) {
+      List<Activity> existing = children.stream().filter(a -> type.equals(a.getActivityType())).toList();
+      if (existing.isEmpty() && selected.contains(type)) {
+        String label = switch (type) { case "QUIZ" -> "答题"; case "LOTTERY" -> "抽奖"; default -> "海龟汤"; };
+        Activity feature = new Activity(label, venue.getCity(), "DRAFT", venue.getStartsAt(), venue.getEndsAt(), null);
+        feature.configureHierarchy(venue.getId(), type);
+        if (!"TURTLE_SOUP".equals(type)) feature.shareParticipants();
+        feature.updateAnswerMode(venue.getAnswerMode());
+        feature.updateScoring(venue.getScoringMode(), venue.getCorrectScorePercent(), venue.getIncorrectScorePercent(), venue.getScoringRules());
+        activities.save(feature);
+      }
+      for (Activity feature : existing) {
+        boolean enabled = selected.contains(type);
+        if (!enabled && feature.isFeatureEnabled()) {
+          feature.updateControl("LOBBY", null, 0, Instant.now());
+          if ("LIVE".equals(feature.getStatus())) feature.changeStatus("PAUSED");
+          screens.publishActivityDisplay(venue.getId(), com.matrixlive.screen.ScreenDisplayMode.LOBBY, Map.of());
+        }
+        feature.setFeatureEnabled(enabled);
+        if ("QUIZ".equals(type)) {
+          configureAnswerMode(feature, venue.getAnswerMode());
+          feature.updateScoring(venue.getScoringMode(), venue.getCorrectScorePercent(), venue.getIncorrectScorePercent(), venue.getScoringRules());
+        }
+        broadcast(feature.getId(), "activity.updated");
+      }
+    }
   }
 
   @Transactional
@@ -199,7 +239,7 @@ public class ActivityService {
     if (Set.of("LIVE", "REGISTRATION_OPEN").contains(next)) ensureAncestorsOpen(activity);
     if ("LIVE".equals(next) && activity.getParentActivityId() != null
         && !Set.of("LIVE", "REGISTRATION_OPEN").contains(requireActivity(activity.getParentActivityId()).getStatus())) {
-      throw conflict("请先启用或恢复母活动，再开始子活动");
+      throw conflict("请先启用或恢复母活动，再开始功能");
     }
     activity.changeStatus(next);
     if ("PAUSED".equals(next)) {
@@ -877,7 +917,7 @@ public class ActivityService {
   public PrizePoolResponse createPrizePool(UUID activityId, PrizePoolRequest request) {
     Activity owner = requireActivity(activityId);
     if ("LOTTERY".equals(owner.getActivityType()) && "RANKING".equalsIgnoreCase(request.purpose())) throw conflict("摇奖环节请配置摇奖奖池，排名奖励应放在答题环节");
-    if ("QUIZ".equals(owner.getActivityType()) && owner.isSharedParticipants() && "LOTTERY".equalsIgnoreCase(request.purpose())) throw conflict("自助抽奖和摇奖请放在摇奖子活动");
+    if ("QUIZ".equals(owner.getActivityType()) && owner.isSharedParticipants() && "LOTTERY".equalsIgnoreCase(request.purpose())) throw conflict("自助抽奖和摇奖请放在摇奖功能");
     String code = normalizeCode(request.code(), "prize pool code");
     if (prizePools.findByActivityIdAndCode(activityId, code).isPresent()) throw conflict("Prize pool code already exists");
     PrizeValues values = prizeValues(request.purpose(), request.deliveryType(), request.totalQuantity(), request.minScore(),
@@ -1060,7 +1100,9 @@ public class ActivityService {
   }
 
   private Activity requireActivity(UUID activityId) {
-    return activities.findById(activityId).orElseThrow(() -> notFound("Activity does not exist"));
+    Activity activity = activities.findById(activityId).orElseThrow(() -> notFound("Activity does not exist"));
+    if (!activity.isFeatureEnabled()) throw conflict("此会场功能已关闭");
+    return activity;
   }
 
   private void createInitiatorMembership(UUID activityId) {
@@ -1235,17 +1277,18 @@ public class ActivityService {
 
   private void ensureRegistrationAllowed(Activity activity) {
     if (!Set.of("REGISTRATION_OPEN", "LIVE").contains(activity.getStatus())) {
-      throw conflict("请先启用母活动报名；活动暂停或结束后不再接受登记");
+      throw conflict("请先启用会场报名；活动暂停或结束后不再接受登记");
     }
   }
 
   private void ensureAnsweringAllowed(Activity activity) {
-    if (Set.of("EVENT", "VENUE", "LOTTERY", "TURTLE_SOUP").contains(activity.getActivityType())) throw conflict("此子活动不接受答题");
+    if (Set.of("EVENT", "VENUE", "LOTTERY", "TURTLE_SOUP").contains(activity.getActivityType())) throw conflict("此功能不接受答题");
     ensureLiveOperation(activity);
   }
 
   private void ensureLiveOperation(Activity activity) {
-    if ("EVENT".equals(activity.getActivityType())) throw conflict("母活动仅管理资料，请选择会场子活动");
+    if (!activity.isFeatureEnabled()) throw conflict("此会场功能已关闭");
+    if ("EVENT".equals(activity.getActivityType())) throw conflict("母活动仅管理资料，请选择会场功能");
     if (!"LIVE".equals(activity.getStatus())) throw conflict("请先开始活动，再进行答题或摇奖");
     ensureAncestorsOpen(activity);
     if (activity.getParentActivityId() != null) {
@@ -1500,7 +1543,7 @@ public class ActivityService {
       if (parentActivityId == null) throw badRequest("请选择所属母活动或会场");
       Activity parent = requireActivity(parentActivityId);
       String expected = "VENUE".equals(type) ? "EVENT" : "VENUE";
-      if (!expected.equals(parent.getActivityType())) throw badRequest("VENUE".equals(type) ? "会场必须属于母活动" : "子活动必须属于独立会场");
+      if (!expected.equals(parent.getActivityType())) throw badRequest("VENUE".equals(type) ? "会场必须属于母活动" : "功能必须属于独立会场");
       if (activity.getId() == null && Set.of("FINISHED", "CANCELLED").contains(parent.getStatus())) throw conflict("上级活动已结束，不能新增子项");
       Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
       if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedPrincipal principal
@@ -1541,7 +1584,7 @@ public class ActivityService {
   @Transactional
   public List<QuestionAdminResponse> syncQuestions(UUID activityId, SyncQuestionsRequest request) {
     Activity target = activities.findForUpdate(activityId).orElseThrow(() -> notFound("活动不存在"));
-    if (!Set.of("VENUE", "QUIZ").contains(target.getActivityType())) throw badRequest("请选择会场或答题子活动同步题库");
+    if (!Set.of("VENUE", "QUIZ").contains(target.getActivityType())) throw badRequest("请选择会场或答题功能同步题库");
     if (!"DRAFT".equals(target.getStatus()) || !"LOBBY".equals(target.getControlStage())) throw conflict("仅可在草稿阶段同步题库，避免更改已开始的比赛");
     UUID master = masterQuestionActivity(activityId);
     List<Question> existing = questions.findByActivityIdOrderByDisplayOrderAsc(activityId);
@@ -1669,7 +1712,7 @@ public class ActivityService {
       if (principal.isSystemAdmin()) return true;
       if (principal.userId() != null && memberships.findByUserIdAndActivityId(principal.userId(), com.matrixlive.security.ActivityScopes.membershipActivity(activities,activity.getId())).isPresent()) return true;
     }
-    return !Set.of("EVENT", "TURTLE_SOUP").contains(activity.getActivityType()) && !Set.of("DRAFT", "CANCELLED").contains(activity.getStatus());
+    return activity.isFeatureEnabled() && !Set.of("EVENT", "TURTLE_SOUP").contains(activity.getActivityType()) && !Set.of("DRAFT", "CANCELLED").contains(activity.getStatus());
   }
 
   private ActivityResponse toActivity(Activity activity) {
@@ -1689,7 +1732,7 @@ public class ActivityService {
         activity.getCreatedAt(), activity.getUpdatedAt(), activity.getParentActivityId(), activity.getActivityType(),
         activity.getActiveQuestionSetId(), viewerRole, activity.getScoringMode(), activity.getCorrectScorePercent(),
         activity.getIncorrectScorePercent(), rules.getOrDefault("correct", List.of()), rules.getOrDefault("incorrect", List.of()), activity.getAnswerMode(),
-        participantScopeActivity(activity.getId()), false);
+        activity.isSharedParticipants() && activity.getParentActivityId() != null ? activity.getParentActivityId() : activity.getId(), false, activity.isFeatureEnabled());
   }
 
   private void configureAnswerMode(Activity activity, String mode) {
@@ -1773,7 +1816,7 @@ public class ActivityService {
       return toAwardDetail(requireAward(activityId, previous.getPrizeAwardId()));
     }
     ensureLotteryAllowed(activity);
-    if (!"LOTTERY".equals(activity.getActivityType()) && !"EVENT".equals(activity.getActivityType())) throw conflict("请在摇奖子活动中进行主持人摇奖");
+    if (!"LOTTERY".equals(activity.getActivityType()) && !"EVENT".equals(activity.getActivityType())) throw conflict("请在摇奖功能中进行主持人摇奖");
     PrizePool configured = requirePrizePool(activityId, request.prizePoolId());
     if (!"LOTTERY".equals(configured.getPurpose())) throw conflict("请选择摇奖奖池");
     List<Participant> eligible = participants.findByActivityId(participantScopeActivity(activityId)).stream()

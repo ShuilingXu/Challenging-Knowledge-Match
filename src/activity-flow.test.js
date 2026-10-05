@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { availableActivities, participantActivityId, activityEntry, participantMatches, activityNavigation } from './activity-flow'
 
 describe('participant activity routing', () => {
+  it('uses venue feature switches for all operational navigation', () => {
+    expect(activityNavigation({activityType: 'VENUE', features: []})).toMatchObject({showQuiz: false,showControl: false,showRewards: false})
+    expect(activityNavigation({activityType: 'VENUE', features: ['QUIZ']})).toMatchObject({showQuiz: true,showControl: true,showRewards: true})
+    expect(activityNavigation({activityType: 'VENUE', features: ['LOTTERY','TURTLE_SOUP']})).toMatchObject({showQuiz: false,showControl: false,showRewards: true})
+  })
+  it('does not expose disabled features through old public links', () => {
+    expect(availableActivities([{id:'quiz',activityType:'QUIZ',status:'LIVE',featureEnabled:false}])).toEqual([])
+  })
   it('hides mother entries and supports venue portals when public APIs omit mothers', () => {
     const main = { id: 'main', activityType: 'EVENT', status: 'LIVE' }
     const venue = { id: 'venue', parentActivityId: 'main', activityType: 'VENUE', status: 'LIVE' }

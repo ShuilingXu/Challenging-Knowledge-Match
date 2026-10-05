@@ -16,6 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class TurtleSoupService {
   public record Template(UUID id, Content content) { }
+  public record Playlist(List<Template> entries, UUID activeTemplateId) { }
+  public record PlaylistRequest(@NotNull @Size(max=100) List<@NotNull UUID> templateIds) { }
+  public record SwitchRequest(@NotNull UUID templateId, @Min(0) long revision) { }
   public record SyncTemplate(@NotNull UUID templateId) { }
   public record Content(@NotBlank @Size(max=160) String title,
       @NotBlank @Size(max=8000) String surface,
@@ -57,6 +60,9 @@ public class TurtleSoupService {
     State next=new State(new Content(content.title().trim(), content.surface().trim(),
         content.clues().stream().map(String::trim).toList(), content.solution().trim()), "LOBBY", 0, previous.revision()+1);
     store(activity, next);
+    Playlist playlist=readPlaylist(activity);
+    if (playlist.activeTemplateId()!=null) storePlaylist(activity, new Playlist(playlist.entries().stream()
+        .map(t -> t.id().equals(playlist.activeTemplateId()) ? new Template(t.id(), next.content()) : t).toList(), playlist.activeTemplateId()));
     return next;
   }
   @Transactional
@@ -118,6 +124,9 @@ public class TurtleSoupService {
     }
     State next=new State(content, stage, selected.size(), current.revision()+1, selected);
     store(activity, next);
+    Playlist playlist=readPlaylist(activity);
+    if(playlist.activeTemplateId()!=null) storePlaylist(activity,new Playlist(playlist.entries().stream()
+        .map(t -> t.id().equals(playlist.activeTemplateId()) ? new Template(t.id(),next.content()) : t).toList(),playlist.activeTemplateId()));
     Map<String,Object> payload=display(next);
     screens.publishActivityDisplay(id, ScreenDisplayMode.TURTLE_SOUP, payload);
     screens.publishActivityDisplay(activity.getParentActivityId(), ScreenDisplayMode.TURTLE_SOUP, payload);
@@ -138,7 +147,8 @@ public class TurtleSoupService {
   private Activity require(UUID id, boolean lock) {
     Activity activity=(lock ? activities.findForUpdate(id) : activities.findById(id))
         .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "活动不存在"));
-    if (!"TURTLE_SOUP".equals(activity.getActivityType())) throw conflict("请选择海龟汤子活动");
+    if (!activity.isFeatureEnabled()) throw conflict("此会场的海龟汤功能已关闭");
+    if (!"TURTLE_SOUP".equals(activity.getActivityType())) throw conflict("请选择会场海龟汤功能");
     return activity;
   }
 
@@ -179,6 +189,59 @@ public class TurtleSoupService {
     Content content=templates(id).stream().filter(t -> t.id().equals(templateId)).findFirst()
         .orElseThrow(() -> conflict("汤稿不存在")).content();
     return save(id, content);
+  }
+  private Playlist readPlaylist(Activity activity) {
+    if (activity.getSoupPlaylist()==null) return new Playlist(List.of(), null);
+    try { return mapper.readValue(activity.getSoupPlaylist(), Playlist.class); }
+    catch (Exception e) { throw new IllegalStateException("Invalid soup playlist", e); }
+  }
+  private void storePlaylist(Activity activity, Playlist playlist) {
+    try { activity.updateSoupPlaylist(mapper.writeValueAsString(playlist)); }
+    catch (Exception e) { throw new IllegalStateException(e); }
+  }
+  @Transactional(readOnly=true)
+  public Playlist playlist(UUID id) { return readPlaylist(require(id, false)); }
+
+  @Transactional
+  public Playlist configurePlaylist(UUID id, List<UUID> ids) {
+    Activity activity=require(id, true);
+    State current=read(activity);
+    if (!"LOBBY".equals(current.stage())) throw conflict("请先回到候场，再调整本会场汤稿");
+    if (Set.of("FINISHED", "CANCELLED").contains(activity.getStatus())) throw conflict("会场功能已结束");
+    Playlist previous=readPlaylist(activity);
+    Map<UUID,Template> source=new HashMap<>();
+    templates(id).forEach(t -> source.put(t.id(),t));
+    // Retain local edits for already selected scripts.
+    previous.entries().forEach(t -> source.put(t.id(),t));
+    List<Template> entries=ids.stream().distinct().map(key -> {
+      Template t=source.get(key); if(t==null) throw conflict("所选汤稿不存在"); return t;
+    }).toList();
+    UUID active=entries.stream().anyMatch(t -> t.id().equals(previous.activeTemplateId()))
+        ? previous.activeTemplateId() : entries.isEmpty() ? null : entries.getFirst().id();
+    storePlaylist(activity,new Playlist(entries,active));
+    Content content=active==null ? null : entries.stream().filter(t -> t.id().equals(active)).findFirst().orElseThrow().content();
+    State next=new State(content,"LOBBY",0,current.revision()+1);
+    store(activity,next);
+    screens.publishActivityDisplay(activity.getParentActivityId(),ScreenDisplayMode.TURTLE_SOUP,display(next));
+    return new Playlist(entries,active);
+  }
+
+  @Transactional
+  public State switchTemplate(UUID id, SwitchRequest request) {
+    Activity activity=require(id,true);
+    State current=read(activity);
+    if(request.revision()!=current.revision()) throw conflict("其他主持人已更新，请刷新后重试");
+    if(!"LOBBY".equals(current.stage())) throw conflict("请先回到候场，再切换汤稿");
+    if(Set.of("FINISHED","CANCELLED").contains(activity.getStatus())) throw conflict("会场功能已结束");
+    Playlist playlist=readPlaylist(activity);
+    Template selected=playlist.entries().stream().filter(t -> t.id().equals(request.templateId())).findFirst()
+        .orElseThrow(() -> conflict("请先将汤稿选入本会场"));
+    storePlaylist(activity,new Playlist(playlist.entries(),selected.id()));
+    State next=new State(selected.content(),"LOBBY",0,current.revision()+1);
+    store(activity,next);
+    screens.publishActivityDisplay(id,ScreenDisplayMode.TURTLE_SOUP,display(next));
+    screens.publishActivityDisplay(activity.getParentActivityId(),ScreenDisplayMode.TURTLE_SOUP,display(next));
+    return next;
   }
   private State read(Activity activity) {
     if (activity.getTurtleSoup()==null) return new State(null, "LOBBY", 0, 0);

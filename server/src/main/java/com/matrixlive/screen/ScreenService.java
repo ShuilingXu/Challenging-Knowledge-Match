@@ -414,6 +414,7 @@ public class ScreenService {
 
   private Activity requireActivity(UUID activityId) {
     Activity activity = activities.findById(activityId).orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "活动不存在"));
+    if (!activity.isFeatureEnabled()) throw new DomainException(HttpStatus.CONFLICT, "此会场功能已关闭");
     if ("EVENT".equals(activity.getActivityType())) throw new DomainException(HttpStatus.CONFLICT, "母活动不允许展示，请选择会场");
     return activity;
   }

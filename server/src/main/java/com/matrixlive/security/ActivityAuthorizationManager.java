@@ -37,6 +37,7 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
     } catch (IllegalArgumentException exception) {
       return new AuthorizationDecision(false);
     }
+    if (activities.findById(activityId).filter(a -> !a.isFeatureEnabled()).isPresent()) return new AuthorizationDecision(false);
     String remainder = matcher.group(2) == null ? "" : matcher.group(2);
     Authentication current = authentication.get();
     if (current == null || !current.isAuthenticated() || !(current.getPrincipal() instanceof AuthenticatedPrincipal principal)) {
@@ -103,6 +104,7 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
           && !remainder.startsWith("question-sets");
     }
     if ("control".equals(remainder)) return "POST".equals(method);
+    if ("turtle-soup/switch".equals(remainder)) return "POST".equals(method);
     if ("turtle-soup/control".equals(remainder)) return "POST".equals(method);
     if ("host-draws".equals(remainder)) return "POST".equals(method);
     if (remainder.matches("questions/[0-9a-fA-F-]{36}/buzzes/[0-9a-fA-F-]{36}/grade")) return "POST".equals(method);

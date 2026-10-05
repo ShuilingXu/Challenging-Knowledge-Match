@@ -83,6 +83,16 @@ public class Activity {
   public String getTurtleSoup() { return turtleSoup; }
   public void updateTurtleSoup(String value) { turtleSoup = value; }
 
+  @Column(name = "feature_enabled", nullable = false)
+  private boolean featureEnabled = true;
+  public boolean isFeatureEnabled() { return featureEnabled; }
+  public void setFeatureEnabled(boolean value) { featureEnabled = value; }
+
+  @Column(name = "soup_playlist", columnDefinition = "text")
+  private String soupPlaylist;
+  public String getSoupPlaylist() { return soupPlaylist; }
+  public void updateSoupPlaylist(String value) { soupPlaylist = value; }
+
   @Version
   private long version;
 

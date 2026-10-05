@@ -28,12 +28,16 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   const [confirmReveal, setConfirmReveal] = useState(false)
   const [manualClue, setManualClue] = useState('')
   const [templates, setTemplates] = useState([])
-  const [templateId, setTemplateId] = useState('')
+  const [playlist, setPlaylist] = useState({entries: [], activeTemplateId: null})
+  const [selectedIds, setSelectedIds] = useState([])
+  const [playlistEditing, setPlaylistEditing] = useState(false)
+  useEffect(() => { api.soupPlaylist(activity.id).then((next) => { setPlaylist(next); setSelectedIds(next.entries.map((entry) => entry.id)) }).catch((e) => setError(e.message)) }, [activity.id])
   useEffect(() => { if (canManage) api.soupTemplates(activity.id).then(setTemplates).catch((e) => setError(e.message)) }, [activity.id, canManage])
   const load = useCallback(async () => {
     try {
       const next = await api.turtleSoup(activity.id)
       setState(next)
+      setPlaylist(await api.soupPlaylist(activity.id))
       if (!dirtyRef.current) setDraft(next.content || empty)
     } catch (cause) { setError(cause.message) }
   }, [activity.id])
@@ -50,7 +54,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   }
   const control = async (action, extra = {}) => {
     setBusy(true); setError(''); setConfirmReveal(false); setNotice('')
-    try { setState(await api.controlTurtleSoup(activity.id, { action, revision: state.revision, ...extra })); if (action === 'ADD_CLUE') setManualClue(''); setNotice(action === 'ADD_CLUE' && !extra.publishNow ? '临时线索已保存，尚未公开。' : '已同步到本环节和所属会场的大屏。') }
+    try { setState(await api.controlTurtleSoup(activity.id, { action, revision: state.revision, ...extra })); if (action === 'ADD_CLUE') setManualClue(''); setNotice(action === 'ADD_CLUE' && !extra.publishNow ? '临时线索已保存，尚未公开。' : '已同步到本会场大屏。') }
     catch (cause) { setError(cause.message); await load() }
     finally { setBusy(false) }
   }
@@ -65,7 +69,15 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   return <div className="page-content">
     <div className="page-header"><div><p className="eyebrow">仅大屏展示 · 现场推理</p><h1>海龟汤控场</h1><p className="page-header__description">准备汤稿 → 展示汤面 → 自由选择线索 → 揭晓汤底。观众在现场提问，无需手机报名或作答。</p></div></div>
     {lifecycle}
-    {canManage && activity.status === 'DRAFT' && <section className="answer-card"><h2>从总汤库选择汤稿</h2><p>复制后可以在本会场独立修改，不影响其他会场。</p><label>总汤库<select value={templateId} onChange={(e) => setTemplateId(e.target.value)}><option value="">请选择汤稿</option>{templates.map((entry) => <option key={entry.id} value={entry.id}>{entry.content.title}</option>)}</select></label><button className="secondary-button" disabled={busy || !templateId} onClick={async () => { if ((dirty || state?.content) && !window.confirm('复制会替换当前汤稿，是否继续？')) return; setBusy(true); setError(''); try { const next = await api.syncSoupTemplate(activity.id, templateId); dirtyRef.current = false; setDirty(false); setState(next); setDraft(next.content); setNotice('汤稿已复制，可独立修改。'); } catch (e) { setError(e.message); } finally { setBusy(false); } }}>复制所选汤稿</button></section>}
+    <section className="answer-card"><h2>本会场使用的汤稿</h2><p>汤稿来自所属母活动，可选多份依次使用。切换前请先回到候场；切换后线索和揭晓状态会清零，汤底不会自动上屏。</p>
+      <label>当前汤稿<select aria-label="当前汤稿" value={playlist.activeTemplateId || ''} disabled={busy || !waiting || ended || dirty} onChange={async (e) => {
+        if (!e.target.value) return; setBusy(true); setError('');
+        try { const next=await api.switchSoup(activity.id,e.target.value,state.revision); setState(next); setDraft(next.content || empty); setPlaylist(await api.soupPlaylist(activity.id)); setNotice('已切换汤稿，请点击“展示汤面”开始新故事。') } catch(cause) {setError(cause.message); await load()} finally {setBusy(false)}
+      }}><option value="">请选择已选入会场的汤稿</option>{playlist.entries.map((entry) => <option key={entry.id} value={entry.id}>{entry.content.title}</option>)}</select></label>
+      {!playlist.entries.length && <p>尚未选入汤稿，请管理员点击“选择本会场汤稿”。</p>}
+      {canManage && <button className="secondary-button" disabled={busy || !waiting || ended || dirty} onClick={() => {setSelectedIds(playlist.entries.map((entry) => entry.id));setPlaylistEditing(!playlistEditing)}}>选择本会场汤稿</button>}
+      {playlistEditing && <div><h3>从母活动汤稿库勾选</h3><p>可勾选多份；已有汤稿的本地修改会保留。取消勾选会移出会场列表，不会删除母活动原稿。</p>{[...templates, ...playlist.entries.filter((entry) => !templates.some((item) => item.id === entry.id))].map((entry) => <label className="venue-feature-choice" key={entry.id}><input type="checkbox" checked={selectedIds.includes(entry.id)} onChange={(e) => setSelectedIds(e.target.checked ? [...selectedIds,entry.id] : selectedIds.filter((id) => id !== entry.id))} />{entry.content.title}</label>)}{!templates.length && <p>母活动尚未准备汤稿，请联系母活动资料管理员。</p>}<button className="primary-button" disabled={busy || dirty || !waiting} onClick={async () => {setBusy(true);setError('');try {const next=await api.saveSoupPlaylist(activity.id,selectedIds);setPlaylist(next);setPlaylistEditing(false);await load();setNotice(`已选入 ${next.entries.length} 份汤稿。`)}catch(cause){setError(cause.message)}finally{setBusy(false)}}}>保存会场汤稿选择</button></div>}
+    </section>
     {error && <div className="soup-message soup-message--error" role="alert">{error}<button type="button" onClick={load}>刷新状态</button></div>}
     {notice && <p className="soup-message" role="status">{notice}</p>}
     {!state ? <p>正在读取汤稿…</p> : <div className="soup-console-grid">
@@ -78,7 +90,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
           </div>
           {confirmReveal && <div className="soup-reveal-confirm" role="alert"><p>确认将完整汤底展示给所有观众？</p><button className="primary-button" disabled={busy} onClick={() => control('REVEAL_SOLUTION')}>确认揭晓</button><button className="secondary-button" onClick={() => setConfirmReveal(false)}>继续推理</button></div>}
           {dirty && <p>有未保存的修改，请先保存汤稿。</p>}
-          {activity.status !== 'LIVE' && <p>请先开始环节；暂停期间可回到候场。</p>}
+          {activity.status !== 'LIVE' && <p>请先开始海龟汤；暂停期间可回到候场。</p>}
         </section>
         <section className="answer-card soup-private"><h2>交互线索板</h2><p>根据现场推断自由选择任意线索。公开顺序与推理过程一致，可单独撤回；未公开内容仅主持人可见。</p>
           {!content ? <p>请先准备并保存汤稿。</p> : <><h3>{content.title}</h3><p className="soup-text">{content.surface}</p>
@@ -103,7 +115,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
             <button type="button" className="primary-button" disabled={disabled || !running || !manualClue.trim() || content.clues.length >= 50} onClick={() => control('ADD_CLUE', { clue: manualClue, publishNow: true })}>添加并立即公开</button>
           </div>
         </section>
-        {canManage && <form className="answer-card soup-editor" onSubmit={save}><h2>准备汤稿</h2><p>修改前请回到候场。线索可自由选择展示顺序，也可在推理时临时添加。</p>
+        {canManage && <form className="answer-card soup-editor" onSubmit={save}><h2>编辑当前汤稿（仅本会场）</h2><p>修改前请回到候场。线索可自由选择展示顺序，也可在推理时临时添加。</p>
           <fieldset disabled={busy || !waiting || ended}>
             <label>故事标题<input required maxLength={160} value={draft.title} onChange={(e) => edit({ title: e.target.value })} placeholder="例如：最后一班电梯" /></label>
             <label>汤面<textarea required maxLength={8000} rows={5} value={draft.surface} onChange={(e) => edit({ surface: e.target.value })} placeholder="描述令人疑惑的故事，保留关键真相。" /></label>

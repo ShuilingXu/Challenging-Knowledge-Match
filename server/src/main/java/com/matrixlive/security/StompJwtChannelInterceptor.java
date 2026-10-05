@@ -149,6 +149,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     Matcher activity = ACTIVITY_TOPIC.matcher(destination);
     if (!activity.matches()) return false;
     UUID activityId = UUID.fromString(activity.group(1));
+    if (activities.findById(activityId).filter(a -> !a.isFeatureEnabled()).isPresent()) return false;
     if (principal.isSystemAdmin()) return true;
     if (principal.isParticipant()) {
       boolean permittedActivity = activityId.equals(principal.activityId()) || activities.findById(activityId)

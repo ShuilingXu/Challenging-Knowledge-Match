@@ -32,7 +32,12 @@ public final class ApiModels {
       @Min(0) @Max(100) Integer incorrectScorePercent,
       List<ScoreRule> correctRankRules,
       List<ScoreRule> incorrectRankRules,
-      @Size(max = 16) String answerMode) {
+      @Size(max = 16) String answerMode,
+      @Size(max = 3) List<@NotBlank String> features) {
+    public CreateActivityRequest(String name, String city, Instant startsAt, Instant endsAt, String description, String clientDisplayName, String clientThemeColor, String clientHeroImageUrl, String clientBackgroundImageUrl, UUID parentActivityId, String activityType, String scoringMode, Integer correctScorePercent, Integer incorrectScorePercent, List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules, String answerMode) {
+      this(name, city, startsAt, endsAt, description, clientDisplayName, clientThemeColor, clientHeroImageUrl, clientBackgroundImageUrl, parentActivityId, activityType, scoringMode, correctScorePercent, incorrectScorePercent, correctRankRules, incorrectRankRules, answerMode, null);
+    }
+
     public CreateActivityRequest(
       String name,
       String city,
@@ -82,7 +87,12 @@ public final class ApiModels {
       List<ScoreRule> correctRankRules,
       List<ScoreRule> incorrectRankRules,
       Boolean clearEndsAt,
-      @Size(max = 16) String answerMode) {
+      @Size(max = 16) String answerMode,
+      @Size(max = 3) List<@NotBlank String> features) {
+    public UpdateActivityRequest(String name, String city, Instant startsAt, Instant endsAt, String description, String clientDisplayName, String clientThemeColor, String clientHeroImageUrl, String clientBackgroundImageUrl, UUID parentActivityId, String activityType, String scoringMode, Integer correctScorePercent, Integer incorrectScorePercent, List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules, Boolean clearEndsAt, String answerMode) {
+      this(name, city, startsAt, endsAt, description, clientDisplayName, clientThemeColor, clientHeroImageUrl, clientBackgroundImageUrl, parentActivityId, activityType, scoringMode, correctScorePercent, incorrectScorePercent, correctRankRules, incorrectRankRules, clearEndsAt, answerMode, null);
+    }
+
     public UpdateActivityRequest(
       String name,
       String city,
@@ -121,14 +131,14 @@ public final class ApiModels {
       UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole,
       String scoringMode, int correctScorePercent, int incorrectScorePercent,
       List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules,
-      String answerMode, UUID participantActivityId, boolean legacyOperations) {
+      String answerMode, UUID participantActivityId, boolean legacyOperations, boolean featureEnabled) {
     public ActivityResponse(UUID id, String name, String city, String status, Instant startsAt,
       Instant endsAt, String description, String clientDisplayName, String clientThemeColor,
       String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt,
       UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole,
       String scoringMode, int correctScorePercent, int incorrectScorePercent,
       List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules) {
-      this(id, name, city, status, startsAt, endsAt, description, clientDisplayName, clientThemeColor, clientHeroImageUrl, clientBackgroundImageUrl, createdAt, updatedAt, parentActivityId, activityType, activeQuestionSetId, viewerRole, scoringMode, correctScorePercent, incorrectScorePercent, correctRankRules, incorrectRankRules, null, null, false);
+      this(id, name, city, status, startsAt, endsAt, description, clientDisplayName, clientThemeColor, clientHeroImageUrl, clientBackgroundImageUrl, createdAt, updatedAt, parentActivityId, activityType, activeQuestionSetId, viewerRole, scoringMode, correctScorePercent, incorrectScorePercent, correctRankRules, incorrectRankRules, null, null, false, true);
     }
 
     public ActivityResponse(UUID id, String name, String city, String status, Instant startsAt, Instant endsAt,

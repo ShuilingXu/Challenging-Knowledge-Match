@@ -5,7 +5,7 @@ export const activityStatusLabels = {
 
 export function activityActions(status, type) {
   if (type === 'EVENT' && status === 'DRAFT') return [['LIVE', '启用母活动']]
-  if (type === 'TURTLE_SOUP' && status === 'DRAFT') return [['LIVE', '开始活动']]
+  if (['QUIZ', 'LOTTERY', 'TURTLE_SOUP'].includes(type) && status === 'DRAFT') return [['LIVE', '开始活动']]
   return {
     DRAFT: [['REGISTRATION_OPEN', '启用报名'], ['LIVE', '开始活动']],
     REGISTRATION_OPEN: [['LIVE', '开始活动']],
@@ -30,7 +30,7 @@ export function availableActivities(activities) {
     // Public API hides mother activities; venue status remains the public gate.
     return parent ? open(parent) && ancestorsOpen(parent, seen) : item.activityType === 'VENUE'
   }
-  return activities.filter((item) => !['EVENT', 'TURTLE_SOUP'].includes(item.activityType) && open(item) && ancestorsOpen(item))
+  return activities.filter((item) => item.featureEnabled !== false && !['EVENT', 'TURTLE_SOUP'].includes(item.activityType) && open(item) && ancestorsOpen(item))
 }
 
 export function activityEntry(activity) {
@@ -48,6 +48,11 @@ export function activityNavigation(activity) {
   const main = type === 'EVENT'
   const lottery = type === 'LOTTERY'
   const soup = type === 'TURTLE_SOUP'
+  if (type === 'VENUE' && Array.isArray(activity.features)) return {
+    showQuiz: activity.features.includes('QUIZ'), showControl: activity.features.includes('QUIZ'),
+    showRewards: activity.features.includes('QUIZ') || activity.features.includes('LOTTERY'),
+    controlLabel: '答题控场', rewardsLabel: '奖品与核销',
+  }
   return {
     showQuiz: Boolean(!soup && !lottery),
     showRewards: Boolean(!soup && !main && type !== 'VENUE'),

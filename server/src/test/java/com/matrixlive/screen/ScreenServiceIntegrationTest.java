@@ -34,7 +34,7 @@ class ScreenServiceIntegrationTest {
     Activity activity = activities.save(screenActivity("Screen Test", "Shanghai", "LIVE", Instant.now()));
 
     List<ScreenTemplateResponse> presets = screens.listTemplates(activity.getId());
-    assertEquals(4, presets.size());
+    assertEquals(5, presets.size());
     assertTrue(presets.stream().allMatch(ScreenTemplateResponse::preset));
 
     ScreenTemplateResponse template = screens.createTemplate(activity.getId(), new UpsertScreenTemplateRequest(

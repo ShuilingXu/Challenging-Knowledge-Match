@@ -43,6 +43,7 @@ public class SecurityConfiguration {
             // Pairing is one-time and validated against a stored hash before a scoped device JWT is issued.
             .requestMatchers(HttpMethod.POST, "/api/activities/*/screens/devices/*/session").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/activities").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/activities/*/turtle-soup/public").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/activities/*", "/api/activities/*/venues",
                 "/api/activities/*/registration-fields", "/api/activities/*/media/*/*").permitAll()
             .requestMatchers(HttpMethod.POST, "/api/activities/*/venues/*/registrations").permitAll()

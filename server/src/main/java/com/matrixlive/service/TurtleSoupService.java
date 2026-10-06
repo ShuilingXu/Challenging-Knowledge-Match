@@ -62,6 +62,30 @@ public class TurtleSoupService {
   }
   @Transactional(readOnly=true)
   public State state(UUID id) { return read(require(id, false)); }
+  @Transactional(readOnly=true)
+  public Map<String,Object> participantDisplay(UUID id) {
+    Activity source=activities.findById(id).orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "活动不存在"));
+    UUID venueId="VENUE".equals(source.getActivityType()) ? id : source.getParentActivityId();
+    List<Activity> candidates="TURTLE_SOUP".equals(source.getActivityType()) ? List.of(source)
+        : venueId==null ? List.of() : activities.findByParentActivityId(venueId);
+    for (Activity candidate : candidates) {
+      if (!"TURTLE_SOUP".equals(candidate.getActivityType()) || !candidate.isFeatureEnabled()
+          || !Set.of("LIVE", "FINISHED").contains(candidate.getStatus())) continue;
+      Activity ancestor=candidate;
+      boolean visible=true;
+      while (ancestor.getParentActivityId()!=null) {
+        ancestor=activities.findById(ancestor.getParentActivityId()).orElseThrow();
+        if (!ancestor.isFeatureEnabled() || !Set.of("LIVE", "REGISTRATION_OPEN", "FINISHED").contains(ancestor.getStatus())) visible=false;
+      }
+      State state=read(candidate);
+      if (visible && state.content()!=null && !"LOBBY".equals(state.stage())) {
+        return Map.of("title",state.content().title(), "surface",state.content().surface(),
+            "clues",state.revealedClueIndexes().stream().map(i -> state.content().clues().get(i)).toList(),
+            "clueNumbers",state.revealedClueIndexes().stream().map(i -> i+1).toList());
+      }
+    }
+    return Map.of();
+  }
   @Transactional
   public State save(UUID id, Content content) {
     Activity activity=require(id, true);
@@ -294,6 +318,8 @@ public class TurtleSoupService {
     try { activity.updateTurtleSoup(mapper.writeValueAsString(state)); }
     catch(Exception e) { throw new IllegalStateException(e); }
     events.send("/topic/activities/"+activity.getId(), Map.of("type", "turtle_soup.updated", "sentAt", Instant.now().toString()));
+    if (activity.getParentActivityId()!=null)
+      events.send("/topic/activities/"+activity.getParentActivityId(), Map.of("type", "turtle_soup.updated", "sentAt", Instant.now().toString()));
   }
   private DomainException conflict(String message) { return new DomainException(HttpStatus.CONFLICT, message); }
 }

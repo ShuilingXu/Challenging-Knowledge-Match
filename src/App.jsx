@@ -2,7 +2,7 @@ import { activityEntryGroups, participantFeatureLabel, participationLabel, contr
 import { PageHeader, StatusNotice } from "./StaffUi";
 import { QuestionBrowser, Pagination } from "./QuestionBrowser";
 import { filterQuestionSets, questionPage } from "./question-bank";
-import { TurtleSoupConsole, TurtleSoupScreen } from "./TurtleSoup";
+import { TurtleSoupConsole, TurtleSoupScreen, TurtleSoupParticipant } from "./TurtleSoup";
 import { Client } from "@stomp/stompjs";
 import {
   createContext,
@@ -587,7 +587,6 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage, activity }) {
             >
               <Icon size={18} />
               <span>{item.id === "control" ? navigation.controlLabel : item.id === "rewards" ? navigation.rewardsLabel : item.label}</span>
-              {item.id === "control" && <em>实况</em>}
             </button>
           );
         })}
@@ -4236,7 +4235,6 @@ function ScreensPage({ activityId }) {
               >
                 <div className="device-preview">
                   <Monitor size={19} />
-                  <span>实况</span>
                 </div>
                 <div>
                   <strong>{device.name}</strong>
@@ -6015,6 +6013,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
             <Trophy size={26} />
           </div>
           <InlineError text={error} onRetry={load} />
+          <TurtleSoupParticipant activityId={identityActivityId} participantToken={participantToken} useStream={useActivityStream} />
           {participant && participantToken && <button className="text-button" onClick={async () => {
             try { await api.participantLogout(identityActivityId); setParticipant(null); setLocalParticipantToken(null); }
             catch (cause) { setError(cause.message); }

@@ -144,15 +144,9 @@ public class ScreenService {
           writeJson(Map.of("templateId", initialTemplate.getId(), "source", "device-registration")));
     }
     var activity = requireActivity(activityId);
-    if ("TURTLE_SOUP".equals(activity.getActivityType())) {
-      Map<String, Object> soupData = Map.of("stage", "LOBBY");
-      if (activity.getTurtleSoup() != null) {
-        try {
-          soupData = com.matrixlive.service.TurtleSoupService.display(objectMapper.readValue(
-              activity.getTurtleSoup(), com.matrixlive.service.TurtleSoupService.State.class));
-        } catch (java.io.IOException exception) { throw new IllegalStateException(exception); }
-      }
-      device.updateDisplay(null, ScreenDisplayMode.TURTLE_SOUP, writeJson(soupData));
+    if (isSoupTemplate(initialTemplate) || (request.templateId()==null && "TURTLE_SOUP".equals(activity.getActivityType()))) {
+      device.updateDisplay(isSoupTemplate(initialTemplate) ? initialTemplate.getId() : null,
+          ScreenDisplayMode.TURTLE_SOUP, writeJson(soupDisplay(activityId)));
     }
     device = devices.save(device);
     ScreenDeviceResponse response = toDevice(device);
@@ -218,10 +212,11 @@ public class ScreenService {
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("templateId", template.getId());
     data.put("overrides", request.overrides() == null ? Map.of() : request.overrides());
-    String payload = writeJson(data);
+    boolean soupTemplate=isSoupTemplate(template);
+    String payload = writeJson(soupTemplate ? soupDisplay(activityId) : data);
     List<ScreenDisplayResponse> responses = new ArrayList<>();
     for (ScreenDevice device : targets) {
-      device.updateDisplay(template.getId(), ScreenDisplayMode.TEMPLATE, payload);
+      device.updateDisplay(template.getId(), soupTemplate ? ScreenDisplayMode.TURTLE_SOUP : ScreenDisplayMode.TEMPLATE, payload);
       ScreenDisplayResponse response = toDisplay(device);
       responses.add(response);
       broadcastDevice(activityId, device, "screen.display.updated", response);
@@ -375,6 +370,8 @@ public class ScreenService {
         preset(activityId, "番剧答题直播", "展示题目、倒计时和全场答题进度", List.of(
             component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#836c67")),
             component("question-title", ScreenComponentType.TEXT, Map.of("text", "下一道题目即将降临，准备发动技能")))),
+        preset(activityId, "海龟汤", "展示本会场当前汤面、已公开线索及揭晓后的汤底", List.of(
+            component("soup-title", ScreenComponentType.TEXT, Map.of("text", "海龟汤 · 情境推理")))),
         preset(activityId, "勇者积分榜", "展示答对加分、答错扣分与最终排名", List.of(
             component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#766b83")),
             component("leaderboard-title", ScreenComponentType.TEXT, Map.of("text", "勇者集结，积分决定番位")))))
@@ -384,6 +381,25 @@ public class ScreenService {
 
   private ScreenTemplate preset(UUID activityId, String name, String description, List<ScreenComponent> components) {
     return new ScreenTemplate(activityId, name, description, true, writeJson(components));
+  }
+
+  private boolean isSoupTemplate(ScreenTemplate template) {
+    return template!=null && template.isPreset() && "海龟汤".equals(template.getName());
+  }
+
+  private Map<String,Object> soupDisplay(UUID activityId) {
+    Activity owner=requireActivity(activityId);
+    List<Activity> candidates="TURTLE_SOUP".equals(owner.getActivityType()) ? List.of(owner)
+        : activities.findByParentActivityId(activityId);
+    for (Activity activity : candidates.stream().filter(a -> "TURTLE_SOUP".equals(a.getActivityType()) && a.isFeatureEnabled())
+        .sorted(Comparator.comparing(Activity::getUpdatedAt).reversed()).toList()) {
+      if (activity.getTurtleSoup()==null) continue;
+      try {
+        return com.matrixlive.service.TurtleSoupService.display(objectMapper.readValue(
+            activity.getTurtleSoup(), com.matrixlive.service.TurtleSoupService.State.class));
+      } catch (java.io.IOException exception) { throw new IllegalStateException(exception); }
+    }
+    return Map.of("stage", "LOBBY");
   }
 
   private ScreenComponent component(String id, ScreenComponentType type, Map<String, Object> config) {

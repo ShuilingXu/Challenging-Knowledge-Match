@@ -127,6 +127,29 @@ export function TurtleSoupScreen({ data = {}, scrollRef, fontScale = 100 }) {
 }
 
 const empty = { title: '', surface: '', clues: [], solution: '' }
+export function TurtleSoupParticipant({ activityId, participantToken, useStream }) {
+  const [data, setData] = useState({})
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    try { setData(await api.publicTurtleSoup(activityId)); setError('') }
+    catch (cause) { setError(cause.message) }
+  }, [activityId])
+  useEffect(() => {
+    setData({}); load()
+    const timer = setInterval(load, 5000)
+    return () => clearInterval(timer)
+  }, [load])
+  useStream(participantToken ? activityId : null, load, participantToken, setError)
+  if (error) return <StatusNotice text={error} tone="error" onRetry={load} />
+  if (!data.surface) return null
+  return <article className="answer-card soup-participant" aria-label="海龟汤">
+    <span className="type-chip">海龟汤</span><h2>{data.title}</h2>
+    <h3>汤面</h3><p className="soup-text">{data.surface}</p>
+    {!!data.clues?.length && <><h3>已公开提示</h3>{data.clues.map((clue, index) => <div key={data.clueNumbers[index]}>
+      <strong>提示 {data.clueNumbers[index]}</strong><p className="soup-text">{clue}</p>
+    </div>)}</>}
+  </article>
+}
 export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream }) {
   const [state, setState] = useState(null)
   const layoutRef = useRef(null)
@@ -175,7 +198,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   }
   const control = async (action, extra = {}) => {
     setBusy(true); setError(''); setConfirmReveal(false); setNotice('')
-    try { setState(await api.controlTurtleSoup(activity.id, { action, revision: state.revision, ...extra })); if (action === 'ADD_CLUE') setManualClue(''); setNotice(action === 'ADD_CLUE' && !extra.publishNow ? '临时线索已保存，尚未公开。' : '已同步到本会场大屏。') }
+    try { setState(await api.controlTurtleSoup(activity.id, { action, revision: state.revision, ...extra })); if (action === 'ADD_CLUE') setManualClue(''); setNotice(action === 'ADD_CLUE' && !extra.publishNow ? '临时线索已保存，尚未公开。' : '大屏展示已更新，用户端仅接收汤面和已公开提示。') }
     catch (cause) { setError(cause.message); await load() }
     finally { setBusy(false) }
   }
@@ -266,7 +289,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
           </fieldset>
         </form></details>}
       </div>
-      <aside className="soup-preview"><h2>大屏内容预览</h2><p>仅展示已公开内容；预览尺寸不同，分页数量以现场大屏为准。</p><TurtleSoupScreen data={preview} /><p>如新配对的大屏尚未显示内容，可重新同步当前展示。</p><button className="secondary-button" disabled={busy || !state} onClick={() => control(waiting ? 'RESET' : 'SYNC')}>同步当前展示</button></aside>
+      <aside className="soup-preview"><h2>大屏内容预览</h2><p>仅展示已公开内容；预览尺寸不同，分页数量以现场大屏为准。可在大屏设备页下发海龟汤模板。</p><TurtleSoupScreen data={preview} /></aside>
     </div></>}
   </div>
 }

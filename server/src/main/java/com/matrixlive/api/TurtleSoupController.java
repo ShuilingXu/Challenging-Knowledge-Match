@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 public class TurtleSoupController {
   private final TurtleSoupService service;
   public TurtleSoupController(TurtleSoupService service) { this.service=service; }
+  @GetMapping("/public") public java.util.Map<String,Object> participantDisplay(@PathVariable UUID activityId) { return service.participantDisplay(activityId); }
   @GetMapping("/playlist") public Playlist playlist(@PathVariable UUID activityId) { return service.playlist(activityId); }
   @PutMapping("/playlist") public Playlist configurePlaylist(@PathVariable UUID activityId, @Valid @RequestBody PlaylistRequest request) { return service.configurePlaylist(activityId, request.templateIds()); }
   @PostMapping("/switch") public State switchTemplate(@PathVariable UUID activityId, @Valid @RequestBody SwitchRequest request) { return service.switchTemplate(activityId, request); }

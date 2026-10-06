@@ -78,6 +78,58 @@ class TurtleSoupIntegrationTest {
     var activity=create();
     mvc.perform(get("/api/activities/"+activity.id()+"/turtle-soup")).andExpect(status().isUnauthorized());
   }
+  @Test void participantPayloadNeverContainsSolutionOrPrivateClues() throws Exception {
+    var activity=create();
+    var state=soup.save(activity.id(),new Content("Mystery","Surface",List.of("Private clue","Visible clue"),"Secret solution"));
+    assertTrue(soup.participantDisplay(activity.parentActivityId()).isEmpty());
+    QuizTestSupport.start(activities,activity.id());
+    state=soup.control(activity.id(),new Command("SHOW_SURFACE",state.revision()));
+    assertEquals("Surface",soup.participantDisplay(activity.parentActivityId()).get("surface"));
+    assertEquals(List.of(),soup.participantDisplay(activity.parentActivityId()).get("clues"));
+    state=soup.control(activity.id(),new Command("SHOW_CLUE",state.revision(),1,null,null));
+    assertEquals(List.of("Visible clue"),soup.participantDisplay(activity.parentActivityId()).get("clues"));
+    assertEquals(List.of(2),soup.participantDisplay(activity.parentActivityId()).get("clueNumbers"));
+    var other=create();
+    assertTrue(soup.participantDisplay(other.parentActivityId()).isEmpty());
+    state=soup.control(activity.id(),new Command("HIDE_CLUE",state.revision(),1,null,null));
+    assertEquals(List.of(),soup.participantDisplay(activity.parentActivityId()).get("clues"));
+    state=soup.control(activity.id(),new Command("SHOW_CLUE",state.revision(),1,null,null));
+    state=soup.control(activity.id(),new Command("REVEAL_SOLUTION",state.revision()));
+    assertFalse(soup.participantDisplay(activity.parentActivityId()).containsKey("solution"));
+    var json=mvc.perform(get("/api/activities/"+activity.parentActivityId()+"/turtle-soup/public"))
+        .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+    assertTrue(json.contains("Visible clue"));
+    assertFalse(json.contains("Private clue"));
+    assertFalse(json.contains("Secret solution"));
+    soup.control(activity.id(),new Command("RESET",state.revision()));
+    assertTrue(soup.participantDisplay(activity.parentActivityId()).isEmpty());
+  }
+  @Test void soupPresetRestoresCurrentContentOnSelectedAndNewScreens() {
+    var activity=create();
+    var venue=activity.parentActivityId();
+    var template=screens.listTemplates(venue).stream().filter(t -> "海龟汤".equals(t.name())).findFirst().orElseThrow();
+    assertEquals(1,screens.listTemplates(venue).stream().filter(t -> "海龟汤".equals(t.name())).count());
+    var first=screens.registerDevice(venue,new RegisterScreenDeviceRequest("First",1920,1080));
+    var other=screens.registerDevice(venue,new RegisterScreenDeviceRequest("Other",1920,1080));
+    var state=soup.save(activity.id(),new Content("Mystery","Surface",List.of("Clue","Private"),"Secret"));
+    QuizTestSupport.start(activities,activity.id());
+    state=soup.control(activity.id(),new Command("SHOW_SURFACE",state.revision()));
+    state=soup.control(activity.id(),new Command("NEXT_CLUE",state.revision()));
+    var ordinary=screens.listTemplates(venue).stream().filter(t -> !"海龟汤".equals(t.name())).findFirst().orElseThrow();
+    screens.applyTemplate(venue,ordinary.id(),new ApplyScreenTemplateRequest(null,null));
+    screens.applyTemplate(venue,template.id(),new ApplyScreenTemplateRequest(List.of(first.device().id()),null));
+    var display=screens.currentDisplay(venue,first.device().id());
+    assertEquals(ScreenDisplayMode.TURTLE_SOUP,display.mode());
+    assertEquals("Surface",display.data().get("surface"));
+    assertEquals(List.of("Clue"),display.data().get("clues"));
+    assertFalse(display.data().containsKey("solution"));
+    assertEquals(ScreenDisplayMode.TEMPLATE,screens.currentDisplay(venue,other.device().id()).mode());
+    var late=screens.registerDevice(venue,new RegisterScreenDeviceRequest("Late",1920,1080,template.id()));
+    assertEquals(List.of("Clue"),screens.currentDisplay(venue,late.device().id()).data().get("clues"));
+    state=soup.control(activity.id(),new Command("REVEAL_SOLUTION",state.revision()));
+    screens.applyTemplate(venue,template.id(),new ApplyScreenTemplateRequest(List.of(first.device().id()),null));
+    assertEquals("Secret",screens.currentDisplay(venue,first.device().id()).data().get("solution"));
+  }
   @Test void freelySelectsCluesInPublicOrderAndAddsPrivateOrImmediateHostClues() {
     var activity=create();
     var device=screens.registerDevice(activity.id(),new RegisterScreenDeviceRequest("Interactive",1920,1080));

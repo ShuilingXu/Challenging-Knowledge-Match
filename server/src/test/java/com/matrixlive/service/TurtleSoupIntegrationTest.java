@@ -125,6 +125,12 @@ class TurtleSoupIntegrationTest {
     state=soup.control(activity.id(),new Command("NEXT_PAGE",state.revision()));
     assertTrue(state.playback().paused());
     assertEquals(1,state.playback().step());
+    long frozenElapsed=state.playback().elapsedMs();
+    state=soup.control(activity.id(),new Command("SET_PLAYBACK_SPEED",state.revision(),null,null,null,12));
+    assertTrue(state.playback().paused());
+    assertEquals(1,state.playback().step());
+    assertEquals(Math.round(frozenElapsed * 12.0 / 15),state.playback().elapsedMs());
+    assertEquals(12,state.playback().paceSeconds());
     assertEquals(state,soup.state(activity.id()));
     var publicState=screens.currentDisplay(activity.id(),device.device().id()).data();
     assertNotNull(publicState.get("playback"));

@@ -24,8 +24,7 @@ export function paginateSoupText(text, fits) {
 }
 
 export function soupPlaybackFrame(pages, playback = {}, now = Date.now(), focus = 0) {
-  const duration = Math.max(Number(playback.paceSeconds) || 15,
-    Math.ceil(Math.max(...pages.map(p => Array.from(p.text).length), 0) / 12) + 3) * 1000
+  const duration = Math.max(8, Math.min(40, Number(playback.paceSeconds) || 15)) * 1000
   const elapsed = Math.max(0, Number(playback.elapsedMs) || 0)
     + (playback.paused ? 0 : Math.max(0, now - (Number(playback.startedAt) || now)))
   const count = Math.max(1, pages.length)

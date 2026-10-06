@@ -147,7 +147,9 @@ public class TurtleSoupService {
           case "SET_PLAYBACK_SPEED" -> {
             if (command.paceSeconds()==null || command.paceSeconds()<8 || command.paceSeconds()>40)
               throw new DomainException(HttpStatus.BAD_REQUEST,"翻页间隔需为 8 至 40 秒");
-            pace=command.paceSeconds(); elapsed=0; step=0;
+            // Preserve the current page and progress when changing its reading interval.
+            elapsed=Math.round(elapsed * (double) command.paceSeconds() / pace);
+            pace=command.paceSeconds();
           }
           default -> { }
         }

@@ -29,8 +29,10 @@ describe('shared playback clock', () => {
     expect(soupPlaybackFrame(pages, clock, 999999).index).toBe(1)
     expect(soupPlaybackFrame(pages, { paused:true, step:-1 }, 1000).index).toBe(2)
   })
-  it('allows time to read longer pages and leaves a single page still', () => {
-    expect(soupPlaybackFrame([{ text:'长'.repeat(360) }], { paceSeconds:8 },1000).duration).toBe(33000)
+  it('uses the selected interval even for long pages and leaves a single page still', () => {
+    expect(soupPlaybackFrame([{ text:'长'.repeat(360) }], { paceSeconds:8 },1000).duration).toBe(8000)
+    expect(soupPlaybackFrame(pages, { startedAt:1000, paceSeconds:15 },13000).index).toBe(0)
+    expect(soupPlaybackFrame(pages, { startedAt:1000, paceSeconds:8 },13000).index).toBe(1)
     expect(soupPlaybackFrame([{ text:'短' }], { startedAt:1 },999999).index).toBe(0)
   })
 })

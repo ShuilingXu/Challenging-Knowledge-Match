@@ -131,6 +131,23 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
     clues: selected.map((index) => content.clues[index]), clueNumbers: selected.map((index) => index + 1), ...(state.stage === 'SOLUTION' ? { solution: content.solution } : {}) }
   return <div className="page-content" ref={layoutRef}>
     <PageHeader eyebrow="会场海龟汤" title="海龟汤控场" description="准备汤稿 → 展示汤面 → 选择线索 → 揭晓汤底。观众在现场提问，无需手机报名或作答。" />
+    {state && <section ref={controlsRef} className="data-panel staff-panel soup-playback-controls" aria-label="大屏播放控制">
+      <div className="soup-playback-heading"><h2>大屏播放控制</h2><span className="type-chip">{waiting ? '展示汤面后可用' : state.playback?.paused ? '已暂停 · 可手动翻页' : '自动播放中'}</span></div>
+      <div className="soup-playback-buttons">
+        <button className="primary-button" disabled={disabled || waiting} onClick={() => control(state.playback?.paused ? 'RESUME_PLAYBACK' : 'PAUSE_PLAYBACK')}>{state.playback?.paused ? '▶ 继续播放' : 'Ⅱ 暂停播放'}</button>
+        <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('PREVIOUS_PAGE')}>← 上一页</button>
+        <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('NEXT_PAGE')}>下一页 →</button>
+        <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('RESTART_PLAYBACK')}>从头播放</button>
+      </div>
+      <div className="soup-speed-controls" aria-label="翻页速度">
+        <button className="secondary-button" disabled={disabled || waiting || (state.playback?.paceSeconds || 15) >= 40} onClick={() => control('SET_PLAYBACK_SPEED', { paceSeconds: Math.min(40, (state.playback?.paceSeconds || 15) + 3) })}>− 减速</button>
+        <span className="soup-speed-value">每页 <strong>{state.playback?.paceSeconds || 15}</strong> 秒</span>
+        <button className="secondary-button" disabled={disabled || waiting || (state.playback?.paceSeconds || 15) <= 8} onClick={() => control('SET_PLAYBACK_SPEED', { paceSeconds: Math.max(8, (state.playback?.paceSeconds || 15) - 3) })}>＋ 加速</button>
+      </div>
+      <p>加速缩短停留时间，减速延长停留时间（8–40 秒）。手动翻页会暂停；点“继续播放”恢复自动翻页。各分区一起翻页，单页内容保持不动。</p>
+      {dirty && <p>请先保存汤稿修改，再操作播放。</p>}
+      {activity.status !== 'LIVE' && <p>请先开始海龟汤活动，再展示汤面。</p>}
+    </section>}
     {lifecycle}
     <details className="data-panel staff-panel staff-form soup-playlist" open={waiting || playlistEditing || undefined}><summary>本会场使用的汤稿{content?.title && <span> · {content.title}</span>}</summary><p>汤稿来自所属母活动，可选多份依次使用。切换前请先回到候场；切换后线索和揭晓状态会清零，汤底不会自动上屏。</p>
       <label>当前汤稿<select aria-label="当前汤稿" value={playlist.activeTemplateId || ''} disabled={busy || !waiting || ended || dirty} onChange={async (e) => {
@@ -144,20 +161,11 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
     <StatusNotice text={error} tone="error" onRetry={load} />
     <StatusNotice text={notice} />
     {!state ? <p>正在读取汤稿…</p> : <>
-        <section ref={controlsRef} className="data-panel staff-panel staff-form soup-controls"><div><span className="type-chip">{waiting ? '候场' : running ? '推理中' : '已揭晓'}</span><h2>展示控制</h2><p>已公开 {state.revealedClues} / {content?.clues.length || 0} 条线索</p></div>
+        <section className="data-panel staff-panel staff-form soup-controls"><div><span className="type-chip">{waiting ? '候场' : running ? '推理中' : '已揭晓'}</span><h2>展示控制</h2><p>已公开 {state.revealedClues} / {content?.clues.length || 0} 条线索</p></div>
           <div className="soup-actions">
             <button className="primary-button" disabled={disabled || !waiting} onClick={() => control('SHOW_SURFACE')}>展示汤面</button>
             <button className="secondary-button" disabled={disabled || !running} onClick={() => setConfirmReveal(true)}>揭晓汤底</button>
             <button className="secondary-button" disabled={busy || waiting} onClick={() => control('RESET')}>回到候场 / 重置</button>
-          </div>
-          <div className="soup-playback-controls" aria-label="大屏播放控制">
-            <strong>大屏播放</strong>
-            <button className="secondary-button" disabled={disabled || waiting} onClick={() => control(state.playback?.paused ? 'RESUME_PLAYBACK' : 'PAUSE_PLAYBACK')}>{state.playback?.paused ? '继续播放' : '暂停播放'}</button>
-            <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('PREVIOUS_PAGE')}>上一页</button>
-            <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('NEXT_PAGE')}>下一页</button>
-            <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('RESTART_PLAYBACK')}>从头播放</button>
-            <label>翻页速度<select aria-label="翻页速度" value={state.playback?.paceSeconds || 15} disabled={disabled || waiting} onChange={e => control('SET_PLAYBACK_SPEED', { paceSeconds: Number(e.target.value) })}><option value={8}>快 · 至少 8 秒</option><option value={15}>标准 · 至少 15 秒</option><option value={25}>慢 · 至少 25 秒</option></select></label>
-            <small>上一页、下一页作用于各分区；手动翻页后暂停。长页会延长阅读时间。</small>
           </div>
           {confirmReveal && <div className="soup-reveal-confirm" role="alert"><p>确认将完整汤底展示给所有观众？</p><button className="primary-button" disabled={busy} onClick={() => control('REVEAL_SOLUTION')}>确认揭晓</button><button className="secondary-button" onClick={() => setConfirmReveal(false)}>继续推理</button></div>}
           {dirty && <p>有未保存的修改，请先保存汤稿。</p>}

@@ -21,3 +21,7 @@ test-assets/edge-qa-profile/
 **/.*.tmp/**
 /test-assets
 *.log
+/tmp/
+/output/*.zip
+/output/交付文件校验.json
+__pycache__/

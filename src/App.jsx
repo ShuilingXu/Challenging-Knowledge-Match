@@ -6939,7 +6939,7 @@ function ScreenPairingNotice({ status, error }) {
 
 function TurtleSoupDisplay({ display }) {
   const scrollRef = useRef(null);
-  useScreenScroll(scrollRef, display, `soup-${display.data?.stage}`);
+  useScreenScroll(scrollRef, display, `soup-${display.data?.stage}-${display.data?.title}`, "[data-screen-scroll]");
   return <TurtleSoupScreen data={display.data} scrollRef={scrollRef} />;
 }
 
@@ -7409,20 +7409,23 @@ function useLiveCountdown(state) {
   return remaining;
 }
 
-function useScreenScroll(scrollRef, display, contentKey) {
+function useScreenScroll(scrollRef, display, contentKey, paneSelector) {
   useEffect(() => {
     const container = scrollRef.current;
     if (!container) return undefined;
+    const panes = () => paneSelector ? [...container.querySelectorAll(paneSelector)] : [container];
     const target = Math.max(0, Number(display?.scrollPosition) || 0);
-    container.scrollTop = Math.min(target, container.scrollHeight);
+    panes().forEach((pane) => { pane.scrollTop = Math.min(target, pane.scrollHeight); });
     if (!display?.autoScroll) return undefined;
     const timer = window.setInterval(() => {
-      const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
-      if (!maxScroll) return;
-      container.scrollTop = container.scrollTop >= maxScroll ? 0 : Math.min(maxScroll, container.scrollTop + 1);
+      panes().forEach((pane) => {
+        const maxScroll = Math.max(0, pane.scrollHeight - pane.clientHeight);
+        if (!maxScroll) return;
+        pane.scrollTop = pane.scrollTop >= maxScroll ? 0 : Math.min(maxScroll, pane.scrollTop + 1);
+      });
     }, 80);
     return () => window.clearInterval(timer);
-  }, [display?.autoScroll, display?.scrollPosition, contentKey, scrollRef]);
+  }, [display?.autoScroll, display?.scrollPosition, contentKey, scrollRef, paneSelector]);
 }
 
 function ControlTimer({ state, onRestart }) {

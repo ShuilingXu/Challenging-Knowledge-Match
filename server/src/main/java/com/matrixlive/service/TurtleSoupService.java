@@ -24,8 +24,13 @@ public class TurtleSoupService {
       @NotBlank @Size(max=8000) String surface,
       @NotNull @Size(max=50) List<@NotBlank @Size(max=2000) String> clues,
       @NotBlank @Size(max=8000) String solution) { }
-  public record State(Content content, String stage, int revealedClues, long revision, List<Integer> revealedClueIndexes) {
+  public record Playback(boolean paused, long elapsedMs, long startedAt, long step, int paceSeconds, Integer focusClueNumber) {
+    public static Playback initial() { return new Playback(false, 0, System.currentTimeMillis(), 0, 15, null); }
+    public long position(long now) { return elapsedMs + (paused ? 0 : Math.max(0, now - startedAt)); }
+  }
+  public record State(Content content, String stage, int revealedClues, long revision, List<Integer> revealedClueIndexes, Playback playback) {
     public State {
+      if (playback == null) playback = Playback.initial();
       // Old persisted states represented a consecutive prefix. Preserve that public selection.
       if (revealedClueIndexes == null) {
         int count = Math.min(Math.max(0, revealedClues), content == null ? 0 : content.clues().size());
@@ -35,11 +40,17 @@ public class TurtleSoupService {
       revealedClues = revealedClueIndexes.size();
     }
     public State(Content content, String stage, int revealedClues, long revision) {
-      this(content, stage, revealedClues, revision, null);
+      this(content, stage, revealedClues, revision, null, null);
+    }
+    public State(Content content, String stage, int revealedClues, long revision, List<Integer> indexes) {
+      this(content, stage, revealedClues, revision, indexes, null);
     }
   }
   public record Command(@NotBlank String action, @Min(0) long revision,
-      @Min(0) Integer clueIndex, @Size(max=2000) String clue, Boolean publishNow) {
+      @Min(0) Integer clueIndex, @Size(max=2000) String clue, Boolean publishNow, @Min(8) @Max(40) Integer paceSeconds) {
+    public Command(String action, long revision, Integer index, String clue, Boolean publishNow) {
+      this(action, revision, index, clue, publishNow, null);
+    }
     public Command(String action, long revision) { this(action, revision, null, null, null); }
   }
   private final ActivityRepository activities;
@@ -81,6 +92,8 @@ public class TurtleSoupService {
       if (current.content()==null) throw conflict("请先保存汤稿");
     }
     String stage=current.stage();
+    Playback playback=current.playback();
+    long now=System.currentTimeMillis();
     Content content=current.content();
     List<Integer> selected=new ArrayList<>(current.revealedClueIndexes());
     switch(action) {
@@ -118,11 +131,37 @@ public class TurtleSoupService {
         if (!"SURFACE".equals(stage)) throw conflict("请先展示汤面，再揭晓汤底");
         stage="SOLUTION";
       }
+      case "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "NEXT_PAGE", "PREVIOUS_PAGE", "RESTART_PLAYBACK", "SET_PLAYBACK_SPEED" -> {
+        if (!Set.of("SURFACE", "SOLUTION").contains(stage)) throw conflict("请先展示汤面，再控制播放");
+        long elapsed=playback.position(now);
+        long step=playback.step();
+        boolean paused=playback.paused();
+        int pace=playback.paceSeconds();
+        Integer focus=playback.focusClueNumber();
+        switch(action) {
+          case "PAUSE_PLAYBACK" -> paused=true;
+          case "RESUME_PLAYBACK" -> paused=false;
+          case "NEXT_PAGE" -> { step++; paused=true; }
+          case "PREVIOUS_PAGE" -> { step--; paused=true; }
+          case "RESTART_PLAYBACK" -> { elapsed=0; step=0; paused=false; focus=null; }
+          case "SET_PLAYBACK_SPEED" -> {
+            if (command.paceSeconds()==null || command.paceSeconds()<8 || command.paceSeconds()>40)
+              throw new DomainException(HttpStatus.BAD_REQUEST,"翻页间隔需为 8 至 40 秒");
+            pace=command.paceSeconds(); elapsed=0; step=0;
+          }
+          default -> { }
+        }
+        playback=new Playback(paused,elapsed,now,step,pace,focus);
+      }
       case "SYNC" -> { }
       case "RESET" -> { stage="LOBBY"; selected.clear(); }
       default -> throw new DomainException(HttpStatus.BAD_REQUEST, "未知海龟汤操作");
     }
-    State next=new State(content, stage, selected.size(), current.revision()+1, selected);
+    // New public material starts a full reading interval; private edits do not interrupt playback.
+    if (Set.of("SHOW_SURFACE","REVEAL_SOLUTION","RESET").contains(action)
+        || (!selected.equals(current.revealedClueIndexes()) && !"HIDE_CLUE".equals(action)))
+      playback=new Playback(false,0,now,0,playback.paceSeconds(), !selected.equals(current.revealedClueIndexes()) && "SURFACE".equals(stage) && !selected.isEmpty() ? selected.getLast()+1 : null);
+    State next=new State(content, stage, selected.size(), current.revision()+1, selected, playback);
     store(activity, next);
     Playlist playlist=readPlaylist(activity);
     if(playlist.activeTemplateId()!=null) storePlaylist(activity,new Playlist(playlist.entries().stream()
@@ -136,6 +175,7 @@ public class TurtleSoupService {
   public static Map<String,Object> display(State state) {
     Map<String,Object> data=new HashMap<>();
     data.put("stage", state.stage());
+    data.put("playback", state.playback());
     if (state.content()!=null && !"LOBBY".equals(state.stage())) {
       data.put("title", state.content().title()); data.put("surface", state.content().surface());
       data.put("clues", state.revealedClueIndexes().stream().map(i -> state.content().clues().get(i)).toList());

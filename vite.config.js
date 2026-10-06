@@ -21,6 +21,8 @@ export default defineConfig({
     // They are not application source and must stay outside Vite's watch graph.
     watch: {
       ignored: [
+        '**/output/**',
+        '**/tmp/**',
         '**/test-assets/edge-qa-profile/**',
         '**/*.tmpdir',
         '**/*.tmpdir/**',

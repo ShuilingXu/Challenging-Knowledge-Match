@@ -89,7 +89,7 @@ class TurtleSoupIntegrationTest {
     var display=screens.currentDisplay(activity.id(),device.device().id());
     assertEquals(List.of("Third","First"),display.data().get("clues"));
     assertEquals(List.of(3,1),display.data().get("clueNumbers"));
-    assertFalse(display.data().toString().contains("Second"));
+    assertFalse(display.data().get("clues").toString().contains("Second"));
     assertFalse(display.data().containsKey("solution"));
     state=soup.control(activity.id(),new Command("HIDE_CLUE",state.revision(),2,null,null));
     assertEquals(List.of(0),state.revealedClueIndexes());
@@ -113,6 +113,50 @@ class TurtleSoupIntegrationTest {
     assertEquals(List.of(0,1),state.revealedClueIndexes());
     assertEquals(List.of("A","B"),TurtleSoupService.display(state).get("clues"));
     assertEquals(7,state.revision());
+  }
+  @Test void playbackCommandsPersistAcrossScreensWithoutExposingPrivateContent() throws Exception {
+    var activity=create();
+    var other=create();
+    var device=screens.registerDevice(activity.id(),new RegisterScreenDeviceRequest("Reading",1920,1080));
+    var otherDevice=screens.registerDevice(other.id(),new RegisterScreenDeviceRequest("Other venue",1920,1080));
+    var state=soup.save(activity.id(),new Content("Reading","Long surface",List.of("Visible","Private clue"),"Private truth"));
+    QuizTestSupport.start(activities,activity.id());
+    state=soup.control(activity.id(),new Command("SHOW_SURFACE",state.revision()));
+    state=soup.control(activity.id(),new Command("NEXT_PAGE",state.revision()));
+    assertTrue(state.playback().paused());
+    assertEquals(1,state.playback().step());
+    assertEquals(state,soup.state(activity.id()));
+    var publicState=screens.currentDisplay(activity.id(),device.device().id()).data();
+    assertNotNull(publicState.get("playback"));
+    assertFalse(publicState.containsKey("solution"));
+    assertEquals(List.of(),publicState.get("clues"));
+    assertFalse(screens.currentDisplay(other.id(),otherDevice.device().id()).data().containsKey("title"));
+    var late=screens.registerDevice(activity.id(),new RegisterScreenDeviceRequest("Late",1280,720));
+    assertEquals(publicState.get("playback"),screens.currentDisplay(activity.id(),late.device().id()).data().get("playback"));
+    state=soup.control(activity.id(),new Command("PREVIOUS_PAGE",state.revision()));
+    assertEquals(0,state.playback().step());
+    state=soup.control(activity.id(),new Command("RESUME_PLAYBACK",state.revision()));
+    assertFalse(state.playback().paused());
+    state=soup.control(activity.id(),new Command("SET_PLAYBACK_SPEED",state.revision(),null,null,null,25));
+    assertEquals(25,state.playback().paceSeconds());
+    state=soup.control(activity.id(),new Command("PAUSE_PLAYBACK",state.revision()));
+    state=soup.control(activity.id(),new Command("SHOW_CLUE",state.revision(),0,null,null));
+    assertFalse(state.playback().paused());
+    assertEquals(0,state.playback().elapsedMs());
+    assertEquals(1,state.playback().focusClueNumber());
+    state=soup.control(activity.id(),new Command("RESTART_PLAYBACK",state.revision()));
+    assertEquals(0,state.playback().step());
+    assertNull(state.playback().focusClueNumber());
+    long revision=state.revision();
+    assertThrows(DomainException.class,() -> soup.control(activity.id(),new Command("NEXT_PAGE",revision-1)));
+    assertThrows(DomainException.class,() -> soup.control(activity.id(),new Command("SET_PLAYBACK_SPEED",revision,null,null,null,0)));
+    var staff=users.findByUsernameIgnoreCase("event-staff").orElseThrow();
+    memberships.save(new com.matrixlive.security.auth.ActivityMembership(activity.parentActivityId(),staff.getId(),com.matrixlive.security.auth.UserRole.STAFF));
+    String token=jwt.issueAccountToken(staff).value();
+    mvc.perform(post("/api/activities/"+other.id()+"/turtle-soup/control").header("Authorization","Bearer "+token).contentType("application/json")
+        .content("{\"action\":\"NEXT_PAGE\",\"revision\":0}")).andExpect(status().isForbidden());
+    mvc.perform(post("/api/activities/"+activity.id()+"/turtle-soup/control").header("Authorization","Bearer "+token).contentType("application/json")
+        .content("{\"action\":\"PAUSE_PLAYBACK\",\"revision\":"+revision+"}")).andExpect(status().isOk());
   }
   @Test void staffMayControlButOnlyAdminsMayEditAndDevicesCannotReadThePrivateScript() throws Exception {
     var activity=create();

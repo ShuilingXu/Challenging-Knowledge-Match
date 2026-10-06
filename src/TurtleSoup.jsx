@@ -1,54 +1,68 @@
 import { PageHeader, StatusNotice } from "./StaffUi"
 import './turtle-soup.css'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
+import { paginateSoupText, soupPlaybackFrame } from './soupPlayback'
 
-// Fit within a readable range; extremely long material stays in its own pane.
-function SoupPane({ title, className = '', children }) {
+function SoupPane({ title, className = '', entries, playback, now, fontScale }) {
   const ref = useRef(null)
-  const [overflow, setOverflow] = useState(false)
+  const measureRef = useRef(null)
+  const [pages, setPages] = useState([{ text: '', number: null }])
+  const signature = JSON.stringify(entries)
   useLayoutEffect(() => {
-    const node = ref.current
+    const node = ref.current, measure = measureRef.current
     let frame, active = true
-    const fit = () => {
+    const paginate = () => {
       if (!active || !node.clientHeight) return
-      node.style.setProperty('--soup-fit', 1)
-      if (node.scrollHeight > node.clientHeight + 1) {
-        let low = .82, high = 1
-        for (let i = 0; i < 7; i++) {
-          const scale = (low + high) / 2
-          node.style.setProperty('--soup-fit', scale)
-          if (node.scrollHeight > node.clientHeight + 1) high = scale
-          else low = scale
-        }
-        node.style.setProperty('--soup-fit', low)
-      }
-      setOverflow(node.scrollHeight > node.clientHeight + 1)
+      measure.style.width = `${node.clientWidth}px`
+      const next = entries.flatMap(entry => paginateSoupText(entry.text, text => {
+        measure.textContent = text
+        return measure.getBoundingClientRect().height <= node.clientHeight + .5
+      }).map(text => ({ text, number: entry.number })))
+      setPages(next.length ? next : [{ text: '', number: null }])
     }
-    const schedule = () => { if (!active) return; cancelAnimationFrame(frame); frame = requestAnimationFrame(fit) }
-    fit()
+    const schedule = () => { if (!active) return; cancelAnimationFrame(frame); frame = requestAnimationFrame(paginate) }
+    paginate()
     const observer = new ResizeObserver(schedule)
     observer.observe(node)
     document.fonts?.ready.then(schedule)
     return () => { active = false; observer.disconnect(); cancelAnimationFrame(frame) }
-  }, [children])
+  }, [signature, fontScale])
+  const focus = playback?.focusClueNumber != null ? Math.max(0, pages.findIndex(p => p.number === playback.focusClueNumber)) : 0
+  const { index, progress } = soupPlaybackFrame(pages, playback, now, focus)
+  const current = pages[index]
   return <section className={`soup-pane ${className}`}>
-    <h2>{title}{overflow && <small>可滚动查看</small>}</h2>
-    <div ref={ref} className="soup-pane-scroll" data-screen-scroll role="region" aria-label={title} tabIndex={overflow ? 0 : undefined}>{children}</div>
+    <h2>{title}{current.number != null && <span className="soup-clue-number">线索 {current.number}</span>}</h2>
+    <div ref={ref} className="soup-page-viewport" role="region" aria-label={title}>
+      <p className="soup-page-text">{current.text}</p>
+      <p ref={measureRef} className="soup-page-text soup-page-measure" aria-hidden="true" />
+    </div>
+    <div className="soup-page-status"><span>第 {index + 1} / {pages.length} 页</span><span>{pages.length > 1 ? playback?.paused ? '播放已暂停' : '自动翻页' : '完整显示'}</span></div>
+    {pages.length > 1 && <div className="soup-page-progress" aria-hidden="true"><span style={{ width: `${progress * 100}%` }} /></div>}
   </section>
 }
 
-export function TurtleSoupScreen({ data = {}, scrollRef }) {
+export function TurtleSoupScreen({ data = {}, scrollRef, fontScale = 100 }) {
   const waiting = !data.stage || data.stage === 'LOBBY'
   const solution = data.stage === 'SOLUTION'
   const clues = !!data.clues?.length
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    setNow(Date.now())
+    if (waiting || data.playback?.paused) return
+    const timer = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(timer)
+  }, [waiting, data.playback])
+  const surface = useMemo(() => [{ text: data.surface || '' }], [data.surface])
+  const truth = useMemo(() => [{ text: data.solution || '' }], [data.solution])
+  const clueEntries = (data.clues || []).map((text, i) => ({ text, number: data.clueNumbers?.[i] ?? i + 1 }))
   return <article ref={scrollRef} className={`soup-screen ${waiting ? 'soup-screen--waiting' : ''}`}>
-    <header><span className="soup-kicker">海龟汤 · 情境推理</span><span>{waiting ? '候场' : data.stage === 'SOLUTION' ? '真相揭晓' : '一起寻找真相'}</span></header>
+    <header><span className="soup-kicker">海龟汤 · 情境推理</span><span>{waiting ? '候场' : solution ? '真相揭晓' : '一起寻找真相'}</span></header>
     <h1 title={waiting ? undefined : data.title}>{waiting ? '一个故事，藏着另一种真相' : data.title}</h1>
     {waiting ? <p className="soup-surface">向主持人提问，通过「是」「否」「无关」逐步还原故事。</p> : <div className={`soup-screen-body ${solution ? 'soup-screen-body--solution' : ''} ${clues ? 'soup-screen-body--clues' : ''}`}>
-      <SoupPane title="汤面" className="soup-surface-pane"><p className="soup-surface">{data.surface}</p></SoupPane>
-      {clues && <SoupPane title="已公开线索" className="soup-clues"><ol>{data.clues.map((clue, index) => <li key={index}><span>{String(data.clueNumbers?.[index] ?? index + 1).padStart(2, '0')}</span><p>{clue}</p></li>)}</ol></SoupPane>}
-      {solution && <SoupPane title="汤底 · 完整真相" className="soup-solution"><p>{data.solution}</p></SoupPane>}
+      <SoupPane title="汤面" className="soup-surface-pane" entries={surface} playback={data.playback} now={now} fontScale={fontScale} />
+      {clues && <SoupPane title="已公开线索" className="soup-clues" entries={clueEntries} playback={data.playback} now={now} fontScale={fontScale} />}
+      {solution && <SoupPane title="汤底 · 完整真相" className="soup-solution" entries={truth} playback={data.playback} now={now} fontScale={fontScale} />}
     </div>}
     <footer>现场提问 · 主持人回应 · 共同推理</footer>
   </article>
@@ -113,7 +127,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   const ended = ['FINISHED', 'CANCELLED'].includes(activity.status)
   const disabled = busy || dirty || !content || activity.status !== 'LIVE'
   const selected = state?.revealedClueIndexes || Array.from({ length: state?.revealedClues || 0 }, (_, i) => i)
-  const preview = waiting || !state ? { stage: 'LOBBY' } : { stage: state.stage, title: content.title, surface: content.surface,
+  const preview = waiting || !state ? { stage: 'LOBBY' } : { stage: state.stage, playback: state.playback, title: content.title, surface: content.surface,
     clues: selected.map((index) => content.clues[index]), clueNumbers: selected.map((index) => index + 1), ...(state.stage === 'SOLUTION' ? { solution: content.solution } : {}) }
   return <div className="page-content" ref={layoutRef}>
     <PageHeader eyebrow="会场海龟汤" title="海龟汤控场" description="准备汤稿 → 展示汤面 → 选择线索 → 揭晓汤底。观众在现场提问，无需手机报名或作答。" />
@@ -135,6 +149,15 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
             <button className="primary-button" disabled={disabled || !waiting} onClick={() => control('SHOW_SURFACE')}>展示汤面</button>
             <button className="secondary-button" disabled={disabled || !running} onClick={() => setConfirmReveal(true)}>揭晓汤底</button>
             <button className="secondary-button" disabled={busy || waiting} onClick={() => control('RESET')}>回到候场 / 重置</button>
+          </div>
+          <div className="soup-playback-controls" aria-label="大屏播放控制">
+            <strong>大屏播放</strong>
+            <button className="secondary-button" disabled={disabled || waiting} onClick={() => control(state.playback?.paused ? 'RESUME_PLAYBACK' : 'PAUSE_PLAYBACK')}>{state.playback?.paused ? '继续播放' : '暂停播放'}</button>
+            <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('PREVIOUS_PAGE')}>上一页</button>
+            <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('NEXT_PAGE')}>下一页</button>
+            <button className="secondary-button" disabled={disabled || waiting} onClick={() => control('RESTART_PLAYBACK')}>从头播放</button>
+            <label>翻页速度<select aria-label="翻页速度" value={state.playback?.paceSeconds || 15} disabled={disabled || waiting} onChange={e => control('SET_PLAYBACK_SPEED', { paceSeconds: Number(e.target.value) })}><option value={8}>快 · 至少 8 秒</option><option value={15}>标准 · 至少 15 秒</option><option value={25}>慢 · 至少 25 秒</option></select></label>
+            <small>上一页、下一页作用于各分区；手动翻页后暂停。长页会延长阅读时间。</small>
           </div>
           {confirmReveal && <div className="soup-reveal-confirm" role="alert"><p>确认将完整汤底展示给所有观众？</p><button className="primary-button" disabled={busy} onClick={() => control('REVEAL_SOLUTION')}>确认揭晓</button><button className="secondary-button" onClick={() => setConfirmReveal(false)}>继续推理</button></div>}
           {dirty && <p>有未保存的修改，请先保存汤稿。</p>}
@@ -177,7 +200,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
           </fieldset>
         </form></details>}
       </div>
-      <aside className="soup-preview"><h2>大屏内容预览</h2><p>与上屏内容一致，仅展示已公开内容。</p><TurtleSoupScreen data={preview} /><p>如新配对的大屏尚未显示内容，可重新同步当前展示。</p><button className="secondary-button" disabled={busy || !state} onClick={() => control(waiting ? 'RESET' : 'SYNC')}>同步当前展示</button></aside>
+      <aside className="soup-preview"><h2>大屏内容预览</h2><p>仅展示已公开内容；预览尺寸不同，分页数量以现场大屏为准。</p><TurtleSoupScreen data={preview} /><p>如新配对的大屏尚未显示内容，可重新同步当前展示。</p><button className="secondary-button" disabled={busy || !state} onClick={() => control(waiting ? 'RESET' : 'SYNC')}>同步当前展示</button></aside>
     </div></>}
   </div>
 }

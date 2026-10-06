@@ -118,3 +118,27 @@
 }
 @media(max-width:1100px) { .soup-preview { order:-1; } .soup-controls { position:static; } .soup-preview .soup-screen { height:clamp(340px, 54dvh, 620px); } }
 @media(max-height:650px) and (min-width:1101px) { .soup-controls, .soup-preview { position:static; } }
+
+.soup-screen .soup-pane { position:relative; gap:8px; }
+.soup-page-viewport { position:relative; flex:1; min-height:0; overflow:hidden; }
+.soup-screen .soup-page-text { margin:0; font-size:calc(clamp(20px, 2cqw, 36px) * var(--screen-font-scale, 1)); line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+.soup-page-measure { position:absolute; top:0; left:0; visibility:hidden; pointer-events:none; }
+.soup-page-status { display:flex; justify-content:space-between; gap:10px; flex:none; color:#b1cebd; font-size:clamp(10px, .9cqw, 16px); }
+.soup-clue-number { color:#e4c887; font-size:.8em; }
+.soup-page-progress { flex:none; height:3px; background:#ffffff12; border-radius:2px; overflow:hidden; }
+.soup-page-progress span { display:block; height:100%; background:#e4c887; }
+.soup-playback-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; width:100%; border-top:1px solid #cdd9d0; padding-top:12px; }
+.soup-playback-controls label { display:flex; align-items:center; gap:8px; }
+.soup-playback-controls select { font:inherit; padding:8px; border:1px solid #cdd9d0; border-radius:8px; background:#fffdf7; }
+.soup-playback-controls small { flex-basis:100%; color:#66746c; }
+.soup-preview .soup-screen .soup-page-text { font-size:15px; }
+@container (max-width:700px) { .soup-screen .soup-page-text { font-size:calc(18px * var(--screen-font-scale, 1)); } .soup-preview .soup-screen .soup-page-text { font-size:15px; } }
+.soup-preview { position:static; }
+.soup-preview .soup-screen { height:clamp(560px, 70dvh, 760px); }
+@media(max-height:650px) {
+  .soup-screen:not(.soup-screen--waiting) .soup-screen-body { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
+  .soup-screen-body--clues .soup-surface-pane,
+  .soup-screen-body--solution .soup-surface-pane,
+  .soup-screen-body--solution .soup-clues { display:none; }
+  .soup-screen .soup-screen-body .soup-pane { grid-column:1; grid-row:1; }
+}

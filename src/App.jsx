@@ -6939,8 +6939,8 @@ function ScreenPairingNotice({ status, error }) {
 
 function TurtleSoupDisplay({ display }) {
   const scrollRef = useRef(null);
-  useScreenScroll(scrollRef, display, `soup-${display.data?.stage}-${display.data?.title}`, "[data-screen-scroll]");
-  return <TurtleSoupScreen data={display.data} scrollRef={scrollRef} />;
+  // Soup uses its shared playback clock; legacy pixel scrolling must not move the page.
+  return <TurtleSoupScreen data={display.data} scrollRef={scrollRef} fontScale={display.fontScale} />;
 }
 
 function ScreenDisplay({ activityId, display, mode }) {

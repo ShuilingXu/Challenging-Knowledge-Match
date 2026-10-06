@@ -125,6 +125,12 @@
 .soup-page-measure { position:absolute; top:0; left:0; visibility:hidden; pointer-events:none; }
 .soup-page-status { display:flex; justify-content:space-between; gap:10px; flex:none; color:#b1cebd; font-size:clamp(10px, .9cqw, 16px); }
 .soup-clue-number { color:#e4c887; font-size:.8em; }
+.soup-clue-list { display:grid; gap:12px; }
+.soup-visible-clue { display:grid; grid-template-columns:32px minmax(0,1fr); align-items:start; gap:12px; padding:12px; border:1px solid #ffffff18; border-radius:10px; background:#ffffff06; }
+.soup-clue-badge { display:flex; align-items:center; justify-content:center; min-height:32px; border-radius:8px; background:#e4c88720; color:#e4c887; font-size:16px; font-weight:700; }
+.soup-screen .soup-visible-clue .soup-page-text { font-size:calc(clamp(18px, 1.65cqw, 30px) * var(--screen-font-scale, 1)); }
+.soup-preview .soup-screen .soup-visible-clue .soup-page-text { font-size:15px; }
+@container (max-width:700px) { .soup-visible-clue { grid-template-columns:26px minmax(0,1fr); padding:8px; gap:8px; } .soup-clue-badge { min-height:26px; font-size:13px; } .soup-clue-list { gap:8px; } }
 .soup-page-progress { flex:none; height:3px; background:#ffffff12; border-radius:2px; overflow:hidden; }
 .soup-page-progress span { display:block; height:100%; background:#e4c887; }
 /* Playback is the first control card and remains reachable while reading clues. */

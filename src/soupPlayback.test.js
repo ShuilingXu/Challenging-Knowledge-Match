@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { paginateSoupText, soupPlaybackFrame } from './soupPlayback'
+import { paginateSoupText, soupPlaybackFrame, paginateSoupClues, soupClueFrame } from './soupPlayback'
 
 describe('soup reading pages', () => {
   it('preserves the full story, whitespace and emoji across bounded pages', () => {
@@ -13,6 +13,31 @@ describe('soup reading pages', () => {
     expect(paginateSoupText('短故事', () => true)).toEqual(['短故事'])
     expect(paginateSoupText('abc', () => false)).toEqual(['a','b','c'])
     expect(paginateSoupText('', () => true)).toEqual([''])
+  })
+})
+
+describe('independent clue pages', () => {
+  const fits = clues => clues.reduce((size, c) => size + c.text.length + 2, 0) <= 20
+  it('shows several clues together and groups overflow without splitting short clues', () => {
+    const entries = [{number:3,text:'first'},{number:1,text:'second'},{number:7,text:'third'}]
+    expect(paginateSoupClues(entries.slice(0,2),fits)).toEqual([entries.slice(0,2)])
+    expect(paginateSoupClues(entries,fits)).toEqual([entries.slice(0,2),entries.slice(2)])
+  })
+  it('preserves an oversized clue and its number across pages', () => {
+    const entries = [{number:4,text:'very long clue text '.repeat(5)},{number:9,text:'short'}]
+    const pages = paginateSoupClues(entries,fits)
+    expect(pages.every(fits)).toBe(true)
+    expect(pages.flat().filter(c=>c.number===4).map(c=>c.text).join('')).toBe(entries[0].text)
+    expect(pages.flat().filter(c=>c.number===4).slice(1).every(c=>c.continued)).toBe(true)
+    expect(pages.flat().at(-1)).toEqual(entries[1])
+  })
+  it('only rotates overflow pages on its own reading clock', () => {
+    const pages = [[{number:1,text:'one'}],[{number:2,text:'two'}]]
+    expect(soupClueFrame(pages,1000,1000).index).toBe(0)
+    expect(soupClueFrame(pages,1000,16000).index).toBe(1)
+    expect(soupClueFrame(pages,1000,31000).index).toBe(0)
+    expect(soupClueFrame([pages.flat()],1000,999999).index).toBe(0)
+    expect(soupClueFrame([[{number:1,text:'x'.repeat(360)}]],1000).duration).toBe(33000)
   })
 })
 describe('shared playback clock', () => {

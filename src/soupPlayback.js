@@ -31,3 +31,30 @@ export function soupPlaybackFrame(pages, playback = {}, now = Date.now(), focus 
   const index = ((focus + Math.floor(elapsed / duration) + (Number(playback.step) || 0)) % count + count) % count
   return { index, duration, progress: count === 1 ? 0 : elapsed % duration / duration }
 }
+
+// Keep whole clues together where possible, splitting only a clue taller than the area.
+export function paginateSoupClues(entries, fits) {
+  const pages = []
+  let current = []
+  for (const entry of entries) {
+    if (fits([...current, entry])) { current.push(entry); continue }
+    if (current.length) { pages.push(current); current = [] }
+    if (fits([entry])) { current = [entry]; continue }
+    const fragments = paginateSoupText(entry.text, text => fits([{ ...entry, text }]))
+    fragments.forEach((text, i) => {
+      const fragment = { ...entry, text, continued: i > 0 }
+      if (i < fragments.length - 1) pages.push([fragment])
+      else current = [fragment]
+    })
+  }
+  if (current.length) pages.push(current)
+  return pages.length ? pages : [[]]
+}
+
+export function soupClueFrame(pages, startedAt, now = Date.now()) {
+  const longest = Math.max(0, ...pages.map(page => page.reduce((total, clue) => total + Array.from(clue.text).length, 0)))
+  const duration = Math.max(15, Math.ceil(longest / 12) + 3) * 1000
+  const elapsed = Math.max(0, now - startedAt)
+  return { index: Math.floor(elapsed / duration) % Math.max(1, pages.length), duration,
+    progress: pages.length > 1 ? elapsed % duration / duration : 0 }
+}

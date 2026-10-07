@@ -263,7 +263,12 @@ public final class ApiModels {
   }
 
   public record QuestionResponse(UUID id, String type, String title, List<String> options, int fullScore,
-      int displayOrder, String mediaUrl, boolean enabled, List<String> mediaUrls, List<String> answerMediaUrls) {
+      int displayOrder, String mediaUrl, boolean enabled, List<String> mediaUrls, List<String> answerMediaUrls,
+      List<String> answers) {
+    public QuestionResponse(UUID id, String type, String title, List<String> options, int fullScore,
+        int displayOrder, String mediaUrl, boolean enabled, List<String> mediaUrls, List<String> answerMediaUrls) {
+      this(id, type, title, options, fullScore, displayOrder, mediaUrl, enabled, mediaUrls, answerMediaUrls, List.of());
+    }
     public QuestionResponse(UUID id, String type, String title, List<String> options, int fullScore,
         int displayOrder, String mediaUrl, boolean enabled) {
       this(id, type, title, options, fullScore, displayOrder, mediaUrl, enabled,
@@ -271,8 +276,8 @@ public final class ApiModels {
     }
   }
 
-  /** Staff-only question view used by the live control room. Text answer keys are intentionally
-   * excluded from the participant-facing QuestionResponse. */
+  /** Staff-only question view used by the live control room. Participant answers are only
+   * exposed for the current question after the host reveals them. */
   public record QuestionControlResponse(UUID id, String type, String title, List<String> options, int fullScore,
       int displayOrder, String mediaUrl, List<String> textAcceptedAnswers, String textMatchMode, boolean enabled,
       List<String> mediaUrls, List<String> answerMediaUrls, List<String> answers) {

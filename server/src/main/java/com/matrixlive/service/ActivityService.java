@@ -2000,7 +2000,7 @@ public class ActivityService {
         .orElse(false);
     return new QuestionResponse(question.getId(), question.getType(), question.getTitle(), splitPipe(question.getOptions()),
         question.getFullScore(), question.getDisplayOrder(), question.getMediaUrl(), question.isEnabled(), question.getMediaUrls(),
-        revealed ? question.getAnswerMediaUrls() : List.of());
+        revealed ? question.getAnswerMediaUrls() : List.of(), revealed ? displayAnswers(question) : List.of());
   }
 
   private QuestionAdminResponse toQuestionAdmin(Question question) {

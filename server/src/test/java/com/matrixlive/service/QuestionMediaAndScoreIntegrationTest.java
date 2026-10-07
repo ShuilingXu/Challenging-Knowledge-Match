@@ -55,6 +55,47 @@ class QuestionMediaAndScoreIntegrationTest {
   }
 
   @Test
+  void onlyRevealsCurrentQuestionAnswersAndMediaInBothModes() {
+    for (String mode : List.of("STANDARD", "BUZZER")) {
+      var activity = QuizTestSupport.create(service, new CreateActivityRequest("Reveal " + mode, "Shanghai", Instant.now()));
+      service.updateActivity(activity.id(), new UpdateActivityRequest(null, null, null, null, null, null, null,
+          null, null, null, null, null, null, null, null, null, null, mode));
+      var answerUrls = List.of("https://example.test/answer.png");
+      var single = service.createQuestion(activity.id(), request(25, List.of(), answerUrls));
+      var multiple = service.createQuestion(activity.id(), new QuestionWriteRequest("MULTIPLE", "Pick two",
+          List.of("A", "B", "C"), Set.of("A", "C"), 25, 1, null, 40, true));
+      var text = service.createQuestion(activity.id(), new QuestionWriteRequest("TEXT", "Explain",
+          List.of(), Set.of(), 25, 2, null, 40, List.of("Reference answer", "Alternative answer"), "MANUAL", true,
+          List.of(), answerUrls));
+      for (var q : service.listQuestions(activity.id())) {
+        assertEquals(List.of(), q.answers());
+        assertEquals(List.of(), q.answerMediaUrls());
+      }
+      QuizTestSupport.start(service, activity.id());
+      for (var selected : List.of(single, multiple, text)) {
+        service.control(activity.id(), new ControlRequest("QUESTION_OPEN", selected.id(), 60));
+        for (var q : service.listQuestions(activity.id())) {
+          assertEquals(List.of(), q.answers());
+          assertEquals(List.of(), q.answerMediaUrls());
+        }
+        service.control(activity.id(), new ControlRequest("ANSWER_REVEALED", selected.id(), 0));
+        entityManager.flush();
+        entityManager.clear();
+        var expectedAnswers = "TEXT".equals(selected.type()) ? selected.textAcceptedAnswers() : selected.answers();
+        for (var q : service.listQuestions(activity.id())) {
+          assertEquals(q.id().equals(selected.id()) ? expectedAnswers : List.of(), q.answers());
+          assertEquals(q.id().equals(selected.id()) ? selected.answerMediaUrls() : List.of(), q.answerMediaUrls());
+        }
+      }
+      service.control(activity.id(), new ControlRequest("LOBBY", null, 0));
+      for (var q : service.listQuestions(activity.id())) {
+        assertEquals(List.of(), q.answers());
+        assertEquals(List.of(), q.answerMediaUrls());
+      }
+    }
+  }
+
+  @Test
   void readsLegacyMediaAndAllowsLegacyClientsToReplaceOrRemoveIt() {
     var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("Legacy question", "Shanghai", Instant.now()));
     var legacy = questions.save(new Question(activity.id(), "SINGLE", "Pick A", "A|B", "A", 15,

@@ -1,5 +1,6 @@
 import { activityEntryGroups, participantFeatureLabel, participationLabel, controlStatusHint, screenAnswerHint, venueDisplayName } from "./activity-flow";
 import { PageHeader, StatusNotice } from "./StaffUi";
+import { ParticipantAnswerReveal } from "./ParticipantAnswerReveal";
 import { QuestionBrowser, Pagination } from "./QuestionBrowser";
 import { filterQuestionSets, questionPage } from "./question-bank";
 import { TurtleSoupConsole, TurtleSoupScreen, TurtleSoupParticipant } from "./TurtleSoup";
@@ -6424,7 +6425,7 @@ function RegistrationFieldInput({ field, value, onChange }) {
   );
 }
 
-function BuzzCard({ activityId, participant, participantToken, question, state, activityStatus }) {
+export function BuzzCard({ activityId, participant, participantToken, question, state, activityStatus }) {
   const [entry, setEntry] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -6453,18 +6454,21 @@ function BuzzCard({ activityId, participant, participantToken, question, state, 
   if (!question) return <EmptyState icon={Clock3} title="等待主持人开题" description="开题后即可抢答。" />;
   return (
     <article className="answer-card buzzer-card">
-      <div className="answer-card__meta"><span>抢答模式</span><strong>{open ? formatSeconds(remaining) : "抢答未开放"}</strong></div>
+      <div className="answer-card__meta"><span>抢答模式</span><strong>{state?.stage === "ANSWER_REVEALED" ? "答案已公布" : open ? formatSeconds(remaining) : "抢答未开放"}</strong></div>
       <h2>{question.title}</h2>
       <QuestionMedia question={question} className="answer-question-media" />
       {open && !entry && <button className="primary-button buzzer-button" disabled={busy} onClick={buzz}>{busy ? "正在抢答…" : "抢答"}</button>}
       {entry && <div className="answer-feedback" role="status"><BadgeCheck size={20} /><div><strong>抢答成功 · 第 {entry.responseRank} 位</strong><span>{entry.awardedPoints == null ? "请等待主持人安排作答。" : `${entry.correct === true ? "回答正确" : entry.correct === false ? "回答不正确" : "主持人已判题"} · 本题 ${entry.awardedPoints} 分`}</span></div></div>}
-      {!open && !entry && <p>等待主持人开题，或本题抢答已结束。</p>}
+      {!open && !entry && state?.stage !== "ANSWER_REVEALED" && <p>等待主持人开题，或本题抢答已结束。</p>}
+      <ParticipantAnswerReveal question={question} state={state}>
+        <QuestionMedia question={question} className="answer-question-media" answer />
+      </ParticipantAnswerReveal>
       {error && <p className="form-error" role="alert">{error}<button className="text-button" onClick={load}>刷新抢答状态</button></p>}
     </article>
   );
 }
 
-function AnswerCard({
+export function AnswerCard({
   activityId,
   participant,
   participantToken,
@@ -6577,7 +6581,7 @@ function AnswerCard({
         {typeLabel(question.type)} · {question.fullScore || 100} 分
       </span>
       <h2>{question.title}</h2>
-      <QuestionMedia question={question} className="answer-question-media" answer={revealed} />
+      <QuestionMedia question={question} className="answer-question-media" />
       {text ? (
         <textarea
           className="text-answer"
@@ -6634,16 +6638,10 @@ function AnswerCard({
           <Send size={17} />
         </button>
       )}
-      {!canAnswer && !result && <p className="answer-wait-hint" role="status">{state?.stage === "QUESTION_OPEN" ? "本题答题时间已结束。无需刷新，答案公布后会自动更新。" : revealed ? "本题答案已公布，请等待主持人开启下一题。" : "请等待主持人开题，页面会自动更新。"}</p>}
-      {revealed && (
-        <div className="answer-feedback is-revealed">
-          <BadgeCheck size={20} />
-          <div>
-            <strong>本题答案已公布</strong>
-            <span>答题结果和积分会实时更新。</span>
-          </div>
-        </div>
-      )}
+      {!canAnswer && !result && !revealed && <p className="answer-wait-hint" role="status">{state?.stage === "QUESTION_OPEN" ? "本题答题时间已结束。无需刷新，答案公布后会自动更新。" : "请等待主持人开题，页面会自动更新。"}</p>}
+      <ParticipantAnswerReveal question={question} state={state}>
+        <QuestionMedia question={question} className="answer-question-media" answer />
+      </ParticipantAnswerReveal>
     </article>
   );
 }

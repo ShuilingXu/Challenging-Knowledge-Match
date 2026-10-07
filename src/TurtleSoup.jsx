@@ -102,7 +102,7 @@ function SoupCluesPane({ entries, fontScale }) {
 
 export function TurtleSoupScreen({ data = {}, scrollRef, fontScale = 100 }) {
   const waiting = !data.stage || data.stage === 'LOBBY'
-  const solution = data.stage === 'SOLUTION'
+  const solution = !waiting && !!data.solution
   const clues = !!data.clues?.length
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
@@ -145,6 +145,7 @@ export function TurtleSoupParticipant({ activityId, participantToken, useStream 
   return <article className="answer-card soup-participant" aria-label="海龟汤">
     <span className="type-chip">海龟汤</span><h2>{data.title}</h2>
     <h3>汤面</h3><p className="soup-text">{data.surface}</p>
+    {data.solution && <><h3>汤底 · 完整真相</h3><p className="soup-text">{data.solution}</p></>}
     {!!data.clues?.length && <><h3>已公开提示</h3>{data.clues.map((clue, index) => <div key={data.clueNumbers[index]}>
       <strong>提示 {data.clueNumbers[index]}</strong><p className="soup-text">{clue}</p>
     </div>)}</>}
@@ -160,7 +161,6 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [confirmReveal, setConfirmReveal] = useState(false)
   const [manualClue, setManualClue] = useState('')
   const [templates, setTemplates] = useState([])
   const [playlist, setPlaylist] = useState({entries: [], activeTemplateId: null})
@@ -197,8 +197,8 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
     finally { setBusy(false) }
   }
   const control = async (action, extra = {}) => {
-    setBusy(true); setError(''); setConfirmReveal(false); setNotice('')
-    try { setState(await api.controlTurtleSoup(activity.id, { action, revision: state.revision, ...extra })); if (action === 'ADD_CLUE') setManualClue(''); setNotice(action === 'ADD_CLUE' && !extra.publishNow ? '临时线索已保存，尚未公开。' : '大屏展示已更新，用户端仅接收汤面和已公开提示。') }
+    setBusy(true); setError(''); setNotice('')
+    try { setState(await api.controlTurtleSoup(activity.id, { action, revision: state.revision, ...extra })); if (action === 'ADD_CLUE') setManualClue(''); setNotice(action === 'ADD_CLUE' && !extra.publishNow ? '临时线索已保存，尚未公开。' : '展示已更新，汤面和汤底同时公开，线索按选择展示。') }
     catch (cause) { setError(cause.message); await load() }
     finally { setBusy(false) }
   }
@@ -209,9 +209,9 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   const disabled = busy || dirty || !content || activity.status !== 'LIVE'
   const selected = state?.revealedClueIndexes || Array.from({ length: state?.revealedClues || 0 }, (_, i) => i)
   const preview = waiting || !state ? { stage: 'LOBBY' } : { stage: state.stage, playback: state.playback, title: content.title, surface: content.surface,
-    clues: selected.map((index) => content.clues[index]), clueNumbers: selected.map((index) => index + 1), ...(state.stage === 'SOLUTION' ? { solution: content.solution } : {}) }
+    clues: selected.map((index) => content.clues[index]), clueNumbers: selected.map((index) => index + 1), solution: content.solution }
   return <div className="page-content" ref={layoutRef}>
-    <PageHeader eyebrow="会场海龟汤" title="海龟汤控场" description="准备汤稿 → 展示汤面 → 选择线索 → 揭晓汤底。观众在现场提问，无需手机报名或作答。" />
+    <PageHeader eyebrow="会场海龟汤" title="海龟汤控场" description="点击“展示汤面”后，汤面和汤底同时显示；线索可按需公开。观众在现场提问，无需手机报名或作答。" />
     {state && <section ref={controlsRef} className="data-panel staff-panel soup-playback-controls" aria-label="大屏播放控制">
       <div className="soup-playback-heading"><h2>大屏播放控制</h2><span className="type-chip">{waiting ? '展示汤面后可用' : state.playback?.paused ? '已暂停 · 可手动翻页' : '自动播放中'}</span></div>
       <div className="soup-playback-buttons">
@@ -230,7 +230,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
       {activity.status !== 'LIVE' && <p>请先开始海龟汤活动，再展示汤面。</p>}
     </section>}
     {lifecycle}
-    <details className="data-panel staff-panel staff-form soup-playlist" open={waiting || playlistEditing || undefined}><summary>本会场使用的汤稿{content?.title && <span> · {content.title}</span>}</summary><p>汤稿来自所属母活动，可选多份依次使用。切换前请先回到候场；切换后线索和揭晓状态会清零，汤底不会自动上屏。</p>
+    <details className="data-panel staff-panel staff-form soup-playlist" open={waiting || playlistEditing || undefined}><summary>本会场使用的汤稿{content?.title && <span> · {content.title}</span>}</summary><p>汤稿来自所属母活动，可选多份依次使用。切换前请先回到候场；切换后清空公开内容，点击“展示汤面”即可同时展示汤面和汤底。</p>
       <label>当前汤稿<select aria-label="当前汤稿" value={playlist.activeTemplateId || ''} disabled={busy || !waiting || ended || dirty} onChange={async (e) => {
         if (!e.target.value) return; setBusy(true); setError('');
         try { const next=await api.switchSoup(activity.id,e.target.value,state.revision); setState(next); setDraft(next.content || empty); setPlaylist(await api.soupPlaylist(activity.id)); setNotice('已切换汤稿，请点击“展示汤面”开始新故事。') } catch(cause) {setError(cause.message); await load()} finally {setBusy(false)}
@@ -242,13 +242,11 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
     <StatusNotice text={error} tone="error" onRetry={load} />
     <StatusNotice text={notice} />
     {!state ? <p>正在读取汤稿…</p> : <>
-        <section className="data-panel staff-panel staff-form soup-controls"><div><span className="type-chip">{waiting ? '候场' : running ? '推理中' : '已揭晓'}</span><h2>展示控制</h2><p>已公开 {state.revealedClues} / {content?.clues.length || 0} 条线索</p></div>
+        <section className="data-panel staff-panel staff-form soup-controls"><div><span className="type-chip">{waiting ? '候场' : '汤面和汤底已公开'}</span><h2>展示控制</h2><p>已公开 {state.revealedClues} / {content?.clues.length || 0} 条线索</p></div>
           <div className="soup-actions">
             <button className="primary-button" disabled={disabled || !waiting} onClick={() => control('SHOW_SURFACE')}>展示汤面</button>
-            <button className="secondary-button" disabled={disabled || !running} onClick={() => setConfirmReveal(true)}>揭晓汤底</button>
             <button className="secondary-button" disabled={busy || waiting} onClick={() => control('RESET')}>回到候场 / 重置</button>
           </div>
-          {confirmReveal && <div className="soup-reveal-confirm" role="alert"><p>确认将完整汤底展示给所有观众？</p><button className="primary-button" disabled={busy} onClick={() => control('REVEAL_SOLUTION')}>确认揭晓</button><button className="secondary-button" onClick={() => setConfirmReveal(false)}>继续推理</button></div>}
           {dirty && <p>有未保存的修改，请先保存汤稿。</p>}
           {activity.status !== 'LIVE' && <p>请先开始海龟汤；暂停期间可回到候场。</p>}
         </section>
@@ -267,7 +265,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
               </article>
             })}</div>
             {!content.clues.length && <p>还没有线索，可以现场临时添加。</p>}
-            <details><summary>查看汤底（仅主持人）</summary><p className="soup-text">{content.solution}</p></details></>}
+            <details><summary>查看汤底{waiting ? '（展示前仅主持人可见）' : '（已公开）'}</summary><p className="soup-text">{content.solution}</p></details></>}
         </section>
         <section className="data-panel staff-panel staff-form soup-manual"><h2>临时添加线索</h2><p>现场补充提示、澄清误解。保存后进入线索板，也可直接公开到大屏。</p>
           <label>临时线索<textarea maxLength={2000} rows={3} value={manualClue} disabled={busy || ended || state.stage === 'SOLUTION'} onChange={(e) => setManualClue(e.target.value)} placeholder="输入主持人现场补充的提示…" /></label>
@@ -284,7 +282,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
             <label>线索 · {draft.clues.length}/50</label>
             {draft.clues.map((clue, index) => <div className="soup-clue-editor" key={index}><label>线索 {index + 1}<textarea required maxLength={2000} rows={2} value={clue} onChange={(e) => edit({ clues: draft.clues.map((value, i) => i === index ? e.target.value : value) })} /></label><button type="button" className="secondary-button" onClick={() => edit({ clues: draft.clues.filter((_, i) => i !== index) })}>移除</button></div>)}
             <button type="button" className="secondary-button" disabled={draft.clues.length >= 50} onClick={() => edit({ clues: [...draft.clues, ''] })}>添加线索</button>
-            <label>汤底 · 完整真相<textarea required maxLength={8000} rows={5} value={draft.solution} onChange={(e) => edit({ solution: e.target.value })} placeholder="主持人参考的完整解释，揭晓前仅主持人可见。" /></label>
+            <label>汤底 · 完整真相<textarea required maxLength={8000} rows={5} value={draft.solution} onChange={(e) => edit({ solution: e.target.value })} placeholder="完整解释，点击“展示汤面”后与汤面一起公开。" /></label>
             <button className="primary-button" type="submit" disabled={!dirty}>保存汤稿</button>
           </fieldset>
         </form></details>}

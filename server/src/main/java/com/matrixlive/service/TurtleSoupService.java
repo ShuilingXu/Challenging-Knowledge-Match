@@ -79,9 +79,7 @@ public class TurtleSoupService {
       }
       State state=read(candidate);
       if (visible && state.content()!=null && !"LOBBY".equals(state.stage())) {
-        return Map.of("title",state.content().title(), "surface",state.content().surface(),
-            "clues",state.revealedClueIndexes().stream().map(i -> state.content().clues().get(i)).toList(),
-            "clueNumbers",state.revealedClueIndexes().stream().map(i -> i+1).toList());
+        return display(state);
       }
     }
     return Map.of();
@@ -206,7 +204,7 @@ public class TurtleSoupService {
       data.put("title", state.content().title()); data.put("surface", state.content().surface());
       data.put("clues", state.revealedClueIndexes().stream().map(i -> state.content().clues().get(i)).toList());
       data.put("clueNumbers", state.revealedClueIndexes().stream().map(i -> i+1).toList());
-      if ("SOLUTION".equals(state.stage())) data.put("solution", state.content().solution());
+      data.put("solution", state.content().solution());
     }
     return data;
   }

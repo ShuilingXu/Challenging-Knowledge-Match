@@ -5,7 +5,6 @@ import com.matrixlive.security.auth.ActivityMembershipRepository;
 import com.matrixlive.security.auth.UserAccount;
 import com.matrixlive.security.auth.UserAccountRepository;
 import com.matrixlive.security.auth.UserRole;
-import com.matrixlive.repository.ActivityRepository;
 import com.matrixlive.screen.ScreenDeviceRepository;
 import io.jsonwebtoken.JwtException;
 import java.util.List;
@@ -34,17 +33,17 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
   private final TokenRevocationService revocations;
   private final ActivityMembershipRepository memberships;
   private final UserAccountRepository users;
-  private final ActivityRepository activities;
+  private final ActivityAccessCache access;
   private final ScreenDeviceRepository devices;
 
   public StompJwtChannelInterceptor(JwtTokenService tokens, TokenRevocationService revocations,
-      ActivityMembershipRepository memberships, UserAccountRepository users, ActivityRepository activities,
+      ActivityMembershipRepository memberships, UserAccountRepository users, ActivityAccessCache access,
       ScreenDeviceRepository devices) {
     this.tokens = tokens;
     this.revocations = revocations;
     this.memberships = memberships;
     this.users = users;
-    this.activities = activities;
+    this.access = access;
     this.devices = devices;
   }
 
@@ -149,15 +148,16 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     Matcher activity = ACTIVITY_TOPIC.matcher(destination);
     if (!activity.matches()) return false;
     UUID activityId = UUID.fromString(activity.group(1));
-    if (activities.findById(activityId).filter(a -> !a.isFeatureEnabled()).isPresent()) return false;
+    ActivityAccessCache.Access scope = access.access(activityId).orElse(null);
+    if (scope != null && !scope.featureEnabled()) return false;
     if (principal.isSystemAdmin()) return true;
     if (principal.isParticipant()) {
-      boolean permittedActivity = activityId.equals(principal.activityId()) || activities.findById(activityId)
-          .filter(item -> item.isSharedParticipants() && principal.activityId().equals(item.getParentActivityId()))
-          .isPresent();
+      boolean permittedActivity = activityId.equals(principal.activityId())
+          || (scope != null && scope.sharedParticipants()
+              && principal.activityId().equals(scope.parentActivityId()));
       return permittedActivity && !destination.endsWith("/screens");
     }
     if (principal.userId() == null) return false;
-    return memberships.findByUserIdAndActivityId(principal.userId(), ActivityScopes.membershipActivity(activities,activityId)).isPresent();
+    return memberships.findByUserIdAndActivityId(principal.userId(), access.membershipActivity(activityId)).isPresent();
   }
 }

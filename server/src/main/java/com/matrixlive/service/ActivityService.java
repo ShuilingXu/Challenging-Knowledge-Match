@@ -102,6 +102,7 @@ public class ActivityService {
   private final LotteryDrawRepository lotteryDraws;
   private final LotteryChanceRepository lotteryChances;
   private final RealtimeEventBus realtime;
+  private final com.matrixlive.realtime.ScoreboardChangeBroadcaster scoreboardChanges;
   private final ObjectMapper objectMapper;
   private final ScreenService screens;
 
@@ -110,7 +111,9 @@ public class ActivityService {
       QuestionRepository questions, QuestionSetRepository questionSets, QuestionSetItemRepository questionSetItems,
       AnswerSubmissionRepository submissions, BuzzEntryRepository buzzEntries, ScoreLedgerRepository scoreLedgers,
       PrizePoolRepository prizePools, PrizeAwardRepository awards, LotteryDrawRepository lotteryDraws,
-      LotteryChanceRepository lotteryChances, RealtimeEventBus realtime, ObjectMapper objectMapper, ScreenService screens) {
+      LotteryChanceRepository lotteryChances, RealtimeEventBus realtime,
+      com.matrixlive.realtime.ScoreboardChangeBroadcaster scoreboardChanges, ObjectMapper objectMapper,
+      ScreenService screens) {
     this.activities = activities;
     this.memberships = memberships;
     this.venues = venues;
@@ -127,6 +130,7 @@ public class ActivityService {
     this.lotteryDraws = lotteryDraws;
     this.lotteryChances = lotteryChances;
     this.realtime = realtime;
+    this.scoreboardChanges = scoreboardChanges;
     this.objectMapper = objectMapper;
     this.screens = screens;
   }
@@ -482,7 +486,9 @@ public class ActivityService {
     List<UUID> questionIds = randomizeQuestionIds(validateQuestionSetItems(activityId, request.questionIds()), request.randomOrder());
     boolean active = Boolean.TRUE.equals(request.active());
     if (active && questionIds.isEmpty()) throw badRequest("An active question set must contain at least one question");
-    QuestionSet set = questionSets.save(new QuestionSet(activityId, name, cleanOptional(request.description()), active));
+    // Created inactive: Hibernate flushes inserts before updates, so an insert carrying active=true
+    // would hit uk_question_sets_single_active while the previous set is still active.
+    QuestionSet set = questionSets.save(new QuestionSet(activityId, name, cleanOptional(request.description()), false));
     replaceQuestionSetItems(set, questionIds);
     if (active) activateQuestionSet(set);
     QuestionSetResponse response = toQuestionSet(set);
@@ -505,10 +511,14 @@ public class ActivityService {
       throw badRequest("An active question set must contain at least one question");
     }
     boolean wasActive = set.isActive();
-    set.update(name, request.description() == null ? set.getDescription() : cleanOptional(request.description()), request.active());
+    boolean wantsActive = Boolean.TRUE.equals(request.active());
+    // Never let update() mark the set active: activateQuestionSet() deactivates the previous set
+    // first, and doing both in one flush would violate uk_question_sets_single_active.
+    set.update(name, request.description() == null ? set.getDescription() : cleanOptional(request.description()),
+        wantsActive ? Boolean.FALSE : request.active());
     if (request.description() != null) set.setDescription(cleanOptional(request.description()));
     replaceQuestionSetItems(set, questionIds);
-    if (Boolean.TRUE.equals(request.active())) activateQuestionSet(set);
+    if (wantsActive) activateQuestionSet(set);
     else if (Boolean.FALSE.equals(request.active()) && wasActive) {
       activities.findById(activityId).filter(activity -> questionSetId.equals(activity.getActiveQuestionSetId()))
           .ifPresent(activity -> activity.activateQuestionSet(null));
@@ -889,11 +899,16 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public List<Map<String, Object>> screenResponses(UUID activityId, UUID questionId) {
     requireQuestion(activityId, questionId);
-    return submissions
-              .findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, questionId).stream()
+    List<AnswerSubmission> answered = submissions
+        .findByActivityIdAndQuestionIdOrderBySubmittedAtAsc(activityId, questionId);
+    // One batch load instead of a participant lookup per submission; this runs after every answer.
+    Map<UUID, Participant> participantById = participants
+        .findAllById(answered.stream().map(AnswerSubmission::getParticipantId).collect(java.util.stream.Collectors.toSet()))
+        .stream().collect(java.util.stream.Collectors.toMap(Participant::getId, participant -> participant));
+    return answered.stream()
               .map(item -> {
                 Map<String, Object> response = new HashMap<>();
-                Participant participant = participants.findById(item.getParticipantId()).orElse(null);
+                Participant participant = participantById.get(item.getParticipantId());
                 response.put("participantName", participant == null ? "参与者" : participant.getName());
                 response.put("answers", readSubmittedAnswers(item.getSubmittedAnswers(), item.getQuestionId()));
                 response.put("awardedPoints", item.getAwardedPoints());
@@ -1189,9 +1204,13 @@ public class ActivityService {
   }
 
   private void activateQuestionSet(QuestionSet selected) {
-    questionSets.findByActivityIdOrderByUpdatedAtDesc(selected.getActivityId()).stream()
+    List<QuestionSet> previouslyActive = questionSets.findByActivityIdOrderByUpdatedAtDesc(selected.getActivityId()).stream()
         .filter(candidate -> !candidate.getId().equals(selected.getId()) && candidate.isActive())
-        .forEach(QuestionSet::deactivate);
+        .toList();
+    previouslyActive.forEach(QuestionSet::deactivate);
+    // uk_question_sets_single_active is checked per statement, so the deactivations must reach the
+    // database before the activation instead of relying on Hibernate's flush ordering.
+    if (!previouslyActive.isEmpty()) questionSets.flush();
     selected.activate();
     activities.findById(selected.getActivityId()).ifPresent(activity -> activity.activateQuestionSet(selected.getId()));
   }
@@ -1740,20 +1759,19 @@ public class ActivityService {
   private DomainException conflict(String message) { return new DomainException(HttpStatus.CONFLICT, message); }
   private DomainException badRequest(String message) { return new DomainException(HttpStatus.BAD_REQUEST, message); }
 
+  /**
+   * Score-shaped events are coalesced: fifty simultaneous answers carry the same meaning as one
+   * "the scores moved", and sending one message per answer made every subscribed client reload
+   * fifty times. Everything else is a discrete state change the host triggered, so it stays
+   * immediate.
+   */
   private void broadcast(UUID activityId, String type) {
+    if (com.matrixlive.realtime.ScoreboardChangeBroadcaster.isScoreboardEvent(type)) {
+      scoreboardChanges.scoreboardChanged(activityId);
+      return;
+    }
     realtime.send("/topic/activities/" + activityId,
         Map.of("type", type, "sentAt", Instant.now().toString()));
-    Activity source = activities.findById(activityId).orElse(null);
-    if (source != null && (type.startsWith("answer.") || type.startsWith("score.") || type.equals("participant.registered"))) {
-      UUID root = source.isSharedParticipants() ? source.getParentActivityId() : "VENUE".equals(source.getActivityType()) ? activityId : null;
-      if (root != null) {
-        Map<String, String> update = Map.of("type", "score.updated", "sentAt", Instant.now().toString());
-        if (!root.equals(activityId)) realtime.send("/topic/activities/" + root, update);
-        for (Activity child : activities.findByParentActivityId(root)) {
-          if (child.isSharedParticipants() && !child.getId().equals(activityId)) realtime.send("/topic/activities/" + child.getId(), update);
-        }
-      }
-    }
   }
 
   private List<Activity> descendants(UUID id) {
@@ -1829,8 +1847,18 @@ public class ActivityService {
   @Transactional(readOnly = true)
   public List<BuzzResponse> buzzes(UUID activityId, UUID questionId) {
     requireQuestion(activityId, questionId);
-    return buzzEntries.findByActivityIdAndQuestionIdOrderByResponseRankAsc(activityId, questionId).stream()
-        .map(entry -> toBuzz(entry, requireParticipant(activityId, entry.getParticipantId()))).toList();
+    List<BuzzEntry> entries = buzzEntries.findByActivityIdAndQuestionIdOrderByResponseRankAsc(activityId, questionId);
+    UUID scopeId = participantScopeActivity(activityId);
+    // Batch the participant load: requireParticipant per row also reloaded the activity each time.
+    Map<UUID, Participant> participantById = participants
+        .findAllById(entries.stream().map(BuzzEntry::getParticipantId).collect(java.util.stream.Collectors.toSet()))
+        .stream().filter(participant -> participant.getActivityId().equals(scopeId))
+        .collect(java.util.stream.Collectors.toMap(Participant::getId, participant -> participant));
+    return entries.stream().map(entry -> {
+      Participant participant = participantById.get(entry.getParticipantId());
+      if (participant == null) throw notFound("Participant does not exist in this activity");
+      return toBuzz(entry, participant);
+    }).toList();
   }
 
   @Transactional(readOnly = true)

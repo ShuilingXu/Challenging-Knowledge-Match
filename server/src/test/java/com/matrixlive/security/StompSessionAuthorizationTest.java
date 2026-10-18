@@ -28,8 +28,9 @@ class StompSessionAuthorizationTest {
   private java.security.Principal connectionUser;
 
   @BeforeEach void initialize() {
+    // A zero TTL keeps the access cache transparent so each assertion still reaches the repository mocks.
     interceptor = new StompJwtChannelInterceptor(tokens, revocations, memberships, users,
-        mock(ActivityRepository.class), mock(ScreenDeviceRepository.class));
+        new ActivityAccessCache(mock(ActivityRepository.class), 0, 16), mock(ScreenDeviceRepository.class));
     when(users.findById(userId)).thenReturn(Optional.of(account));
     when(memberships.findByUserIdAndActivityId(userId, activityId))
         .thenReturn(Optional.of(new ActivityMembership(activityId, userId, UserRole.STAFF)));

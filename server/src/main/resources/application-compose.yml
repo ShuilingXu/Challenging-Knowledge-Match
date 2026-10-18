@@ -4,10 +4,64 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:match}
     password: ${SPRING_DATASOURCE_PASSWORD:match}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      # Sized for ~50 concurrent participants plus screen devices. The server's PostgreSQL is
+      # shared with other applications and has max_connections=100, so this stays well below the
+      # remaining headroom; raise it only after checking pg_stat_activity.
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:10}
+      connection-timeout: 5000
+      validation-timeout: 2000
+      idle-timeout: 600000
+      max-lifetime: 1200000
+      keepalive-time: 300000
+      pool-name: knowledge-match-pool
   jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+    properties:
+      hibernate:
+        # Answer submission writes a submission plus a ledger row; batching keeps that to one round trip.
+        jdbc:
+          batch_size: 30
+          fetch_size: 50
+        order_inserts: true
+        order_updates: true
+        batch_versioned_data: true
+  flyway:
+    # migration-postgres carries PostgreSQL-only DDL (e.g. the partial unique index that enforces
+    # one active question set per activity). H2 has no partial indexes, so tests scan only the
+    # portable directory and never see that version.
+    locations: classpath:db/migration,classpath:db/migration-postgres
   data:
     redis:
       url: ${REDIS_URL:redis://redis:6379}
+
+server:
+  tomcat:
+    threads:
+      # 50 concurrent clients do not need the 200 thread default; fewer threads means less
+      # context switching and a shorter queue in front of the database pool.
+      max: ${TOMCAT_MAX_THREADS:100}
+      min-spare: 20
+    accept-count: 200
+    max-connections: 2000
+    connection-timeout: 20000
+
+app:
+  cache:
+    # The authorization layer reads the same activity row several times per request. A short
+    # window collapses those reads without making staff configuration changes feel stale.
+    activity-ttl-seconds: ${CACHE_ACTIVITY_TTL_SECONDS:2}
+    activity-max-entries: 2000
+    # A revoked token stays usable for at most this long; keep the window short.
+    revocation-ttl-seconds: ${CACHE_REVOCATION_TTL_SECONDS:3}
+    revocation-max-entries: 20000
+    site-settings-ttl-seconds: ${CACHE_SITE_SETTINGS_TTL_SECONDS:60}
+  realtime:
+    # One score notification per activity per window instead of one per answer.
+    score-broadcast-window-ms: ${SCORE_BROADCAST_WINDOW_MS:250}
+  screens:
+    # One screen/live-data refresh per activity per window instead of one per answer.
+    refresh-window-ms: ${SCREEN_REFRESH_WINDOW_MS:300}

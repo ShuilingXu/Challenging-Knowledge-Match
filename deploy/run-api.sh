@@ -23,7 +23,13 @@ export JWT_REFRESH_COOKIE_SECURE=true
 
 APP_BACKEND_PORT="${APP_BACKEND_PORT:-8082}"
 
+# Heap is pinned rather than left to the 1/4-of-RAM default: this host is shared with PostgreSQL,
+# Redis, MinIO and OpenResty and has no swap, so an unmanaged heap is what turns a traffic spike
+# into an OOM kill. 2 GB covers 50 concurrent participants with full scoreboard payloads.
+JAVA_OPTS="${JAVA_OPTS:--Xms2g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8}"
+
 exec /usr/lib/jvm/java-21-openjdk-amd64/bin/java \
+  $JAVA_OPTS \
   -jar "$APP_DIR/server/target/knowledge-match-api-0.1.0.jar" \
   --spring.profiles.active=compose \
   --server.address=127.0.0.1 \

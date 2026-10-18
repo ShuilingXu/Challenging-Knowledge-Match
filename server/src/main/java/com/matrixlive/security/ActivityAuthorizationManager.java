@@ -2,7 +2,6 @@ package com.matrixlive.security;
 
 import com.matrixlive.security.auth.ActivityMembershipRepository;
 import com.matrixlive.security.auth.UserRole;
-import com.matrixlive.repository.ActivityRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -19,16 +18,16 @@ import org.springframework.stereotype.Component;
 public class ActivityAuthorizationManager implements AuthorizationManager<RequestAuthorizationContext> {
   private static final Pattern ACTIVITY_PATH = Pattern.compile("^/api/activities/([0-9a-fA-F-]{36})(?:/(.*))?$");
   private final ActivityMembershipRepository memberships;
-  private final ActivityRepository activities;
+  private final ActivityAccessCache access;
 
-  public ActivityAuthorizationManager(ActivityMembershipRepository memberships, ActivityRepository activities) {
+  public ActivityAuthorizationManager(ActivityMembershipRepository memberships, ActivityAccessCache access) {
     this.memberships = memberships;
-    this.activities = activities;
+    this.access = access;
   }
 
   @Override
   public AuthorizationDecision check(Supplier<Authentication> authentication, RequestAuthorizationContext context) {
-    HttpServletRequest request = context.getRequest();
+    var request = context.getRequest();
     Matcher matcher = ACTIVITY_PATH.matcher(request.getRequestURI());
     if (!matcher.matches()) return new AuthorizationDecision(false);
     UUID activityId;
@@ -37,17 +36,20 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
     } catch (IllegalArgumentException exception) {
       return new AuthorizationDecision(false);
     }
-    if (activities.findById(activityId).filter(a -> !a.isFeatureEnabled()).isPresent()) return new AuthorizationDecision(false);
+    // One cached read answers every policy question below; the previous code reloaded the same
+    // activity row up to four times because open-in-view is disabled.
+    ActivityAccessCache.Access scope = access.access(activityId).orElse(null);
+    if (scope != null && !scope.featureEnabled()) return new AuthorizationDecision(false);
     String remainder = matcher.group(2) == null ? "" : matcher.group(2);
     Authentication current = authentication.get();
     if (current == null || !current.isAuthenticated() || !(current.getPrincipal() instanceof AuthenticatedPrincipal principal)) {
       return new AuthorizationDecision(false);
     }
     if (principal.isSystemAdmin()) return new AuthorizationDecision(true);
-    if (principal.isParticipant()) return new AuthorizationDecision(allowsParticipant(request, remainder, activityId, principal));
+    if (principal.isParticipant()) return new AuthorizationDecision(allowsParticipant(request, remainder, activityId, principal, scope));
     if (principal.isScreenDevice()) return new AuthorizationDecision(allowsScreenDevice(request, remainder, activityId, principal));
     if (principal.userId() == null) return new AuthorizationDecision(false);
-    UUID memberScope=ActivityScopes.membershipActivity(activities,activityId);
+    UUID memberScope = access.membershipActivity(activityId);
     UserRole membershipRole = memberships.findByUserIdAndActivityId(principal.userId(), memberScope)
         .map(item -> item.getRole()).orElse(null);
     if (membershipRole == null) return new AuthorizationDecision(false);
@@ -55,14 +57,16 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
     return new AuthorizationDecision(allowsStaff(request, remainder));
   }
 
-  private boolean allowsParticipant(HttpServletRequest request, String remainder, UUID activityId,
-      AuthenticatedPrincipal principal) {
-    if (activities.findById(activityId).filter(item -> "TURTLE_SOUP".equals(item.getActivityType())).isPresent()) return false;
-    if (!activityId.equals(principal.activityId()) && !activities.findById(activityId)
-        .filter(item -> item.isSharedParticipants() && principal.activityId().equals(item.getParentActivityId()))
-        .isPresent()) return false;
-    if (!activityId.equals(principal.activityId()) && activities.findById(activityId)
-        .filter(item -> "LOTTERY".equals(item.getActivityType())).isPresent()
+  private boolean allowsParticipant(HttpServletRequest request, String remainder,
+      UUID activityId, AuthenticatedPrincipal principal, ActivityAccessCache.Access scope) {
+    // A missing activity leaves every field null/false, which matches the previous "findById empty"
+    // behaviour exactly: the request proceeds to the service layer and fails there.
+    String activityType = scope == null ? null : scope.activityType();
+    if ("TURTLE_SOUP".equals(activityType)) return false;
+    if (!activityId.equals(principal.activityId())
+        && !(scope != null && scope.sharedParticipants()
+            && principal.activityId().equals(scope.parentActivityId()))) return false;
+    if (!activityId.equals(principal.activityId()) && "LOTTERY".equals(activityType)
         && !(remainder.equals("draws") || remainder.equals("prize-pools") || remainder.equals("awards")
             || remainder.matches("participants/[0-9a-fA-F-]{36}(?:/lottery-chances)?"))) return false;
     String method = request.getMethod();

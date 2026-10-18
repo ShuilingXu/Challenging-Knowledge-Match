@@ -5929,51 +5929,56 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
     setActivity(activityInfo);
     setSiteSettings(siteInfo);
   };
-  const load = useCallback(async () => {
-    setError("");
-    if (!participantToken) {
-      try {
-        const [registrationFields, venueList, activityInfo, siteInfo] =
-          await Promise.all([
-            api.registrationFields(identityActivityId),
-            api.venues(identityActivityId),
-            api.activity(activityId),
-            api.siteSettings(),
-          ]);
-        const configuredFields =
-          registrationFields.fields || registrationFields || [];
-        setFields(configuredFields);
-        setVenues(venueList || []);
-        setVenue((current) =>
-          activeVenueCode(venueList, current || requestedVenue),
-        );
-        applyPublicBrand(activityInfo, siteInfo);
-      } catch (cause) {
-        setFields([]);
-        setVenues([]);
-        setError(cause.message);
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
+  // Branding and site settings change when staff edit them, not once per answer. Pulling them on
+  // every realtime notification meant two of the six requests per reload never returned new data.
+  const loadBrand = useCallback(async () => {
     try {
-      const [questionList, control, board, answerList, activityInfo, siteInfo] =
-        await Promise.all([
-          lotteryMode ? Promise.resolve([]) : api.questions(activityId, participantToken),
-          api.controlState(lotteryMode ? identityActivityId : activityId, participantToken),
-          api.scoreboard(lotteryMode ? identityActivityId : activityId, participantToken),
-          participant?.id && !lotteryMode
-            ? api.submissions(activityId, participant.id, participantToken)
-            : Promise.resolve([]),
-          api.activity(activityId),
-          api.siteSettings(),
-        ]);
+      const [activityInfo, siteInfo] = await Promise.all([
+        api.activity(activityId),
+        api.siteSettings(),
+      ]);
+      applyPublicBrand(activityInfo, siteInfo);
+    } catch (cause) {
+      setError(cause.message);
+    }
+  }, [activityId]);
+  const loadRegistration = useCallback(async () => {
+    try {
+      const [registrationFields, venueList] = await Promise.all([
+        api.registrationFields(identityActivityId),
+        api.venues(identityActivityId),
+      ]);
+      const configuredFields =
+        registrationFields.fields || registrationFields || [];
+      setFields(configuredFields);
+      setVenues(venueList || []);
+      setVenue((current) =>
+        activeVenueCode(venueList, current || requestedVenue),
+      );
+      await loadBrand();
+    } catch (cause) {
+      setFields([]);
+      setVenues([]);
+      setError(cause.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [identityActivityId, loadBrand, requestedVenue]);
+  // The live slice: everything a participant must see change while the session runs.
+  const loadLive = useCallback(async () => {
+    try {
+      const [questionList, control, board, answerList] = await Promise.all([
+        lotteryMode ? Promise.resolve([]) : api.questions(activityId, participantToken),
+        api.controlState(lotteryMode ? identityActivityId : activityId, participantToken),
+        api.scoreboard(lotteryMode ? identityActivityId : activityId, participantToken),
+        participant?.id && !lotteryMode
+          ? api.submissions(activityId, participant.id, participantToken)
+          : Promise.resolve([]),
+      ]);
       setQuestions(questionList);
       setState(control);
       setScoreboard(board);
       setSubmissions(answerList);
-      applyPublicBrand(activityInfo, siteInfo);
       setParticipant((current) => {
         const score = board.find(
           (entry) => entry.participantId === current?.id,
@@ -5990,12 +5995,36 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
     } finally {
       setLoading(false);
     }
-  }, [activityId, identityActivityId, lotteryMode, participant?.id, participantToken, requestedVenue]);
+  }, [activityId, identityActivityId, lotteryMode, participant?.id, participantToken]);
+  const load = useCallback(async () => {
+    setError("");
+    if (!participantToken) return loadRegistration();
+    await Promise.all([loadBrand(), loadLive()]);
+  }, [loadBrand, loadLive, loadRegistration, participantToken]);
   useEffect(() => {
     load();
   }, [load]);
-  useActivityStream(activityId, load, participantToken, setError);
-  useActivityStream(identityActivityId !== activityId ? identityActivityId : null, load, participantToken, setError);
+  // A stable handler keeps the socket alive when the loaders change identity; before this, every
+  // score update rebuilt the callback and forced a reconnect.
+  const streamHandler = useRef(() => {});
+  streamHandler.current = (types) => {
+    if (!participantToken) {
+      load();
+      return;
+    }
+    // `types` is undefined for the 10s safety poll, which should refresh everything live.
+    if (!types || types.has("activity.updated")) loadBrand();
+    loadLive();
+  };
+  const onStreamEvent = useCallback((types) => streamHandler.current(types), []);
+  useActivityStream(
+    identityActivityId && identityActivityId !== activityId
+      ? [activityId, identityActivityId]
+      : activityId,
+    onStreamEvent,
+    participantToken,
+    setError,
+  );
   if (loading) return <LoadingPage label="正在连接活动现场" />;
   if (error && !questions.length)
     return <BackendProblem message={error} onRetry={load} />;
@@ -7392,11 +7421,17 @@ function ScreenWinners({ winners, display }) {
 }
 
 function useActivityStream(activityId, onEvent, token, onError) {
+  // Accepts one activity id or a list. A participant watching both its venue and its identity
+  // activity used to open two sockets and therefore reload twice per notification.
+  const wanted = (Array.isArray(activityId) ? activityId : [activityId]).filter(Boolean);
+  const streamKey = [...new Set(wanted)].sort().join(",");
   useEffect(() => {
+    const activityIds = streamKey ? streamKey.split(",") : [];
     const accessToken = token || getAccessToken();
-    if (!activityId || !accessToken) return undefined;
+    if (!activityIds.length || !accessToken) return undefined;
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     let pending;
+    let pendingTypes = new Set();
     const client = new Client({
       brokerURL: `${protocol}://${window.location.host}/ws`,
       reconnectDelay: 2500,
@@ -7411,12 +7446,25 @@ function useActivityStream(activityId, onEvent, token, onError) {
       onWebSocketError: () => onError("实时连接异常，正在重新连接"),
       onConnect: () => {
         const reload = (message) => {
-          try { if (JSON.parse(message.body)?.type === "screen.device.heartbeat") return; } catch { /* Reload malformed notifications. */ }
+          let type = "";
+          try {
+            type = JSON.parse(message.body)?.type || "";
+            if (type === "screen.device.heartbeat") return;
+          } catch { /* Reload malformed notifications. */ }
+          // Collect every type seen in the window: the caller may only care about some of them.
+          if (type) pendingTypes.add(type);
           if (pending) return;
-          pending = window.setTimeout(() => { pending = null; onEvent(); }, 200);
+          pending = window.setTimeout(() => {
+            pending = null;
+            const types = pendingTypes;
+            pendingTypes = new Set();
+            onEvent(types);
+          }, 300);
         };
-        client.subscribe(`/topic/activities/${activityId}`, reload);
-        if (!token) client.subscribe(`/topic/activities/${activityId}/screens`, reload);
+        activityIds.forEach((id) => client.subscribe(`/topic/activities/${id}`, reload));
+        if (!token) {
+          activityIds.forEach((id) => client.subscribe(`/topic/activities/${id}/screens`, reload));
+        }
         onEvent();
       },
     });
@@ -7434,10 +7482,11 @@ function useActivityStream(activityId, onEvent, token, onError) {
       } catch (cause) { if (!disposed) onError(cause.message); }
       finally { reconnecting = false; }
     };
+    // Safety poll: guarantees convergence even if a notification is missed or coalesced away.
     const poll = window.setInterval(() => { onEvent(); refreshConnection(); }, 10000);
     client.activate();
     return () => { disposed = true; window.clearInterval(poll); window.clearTimeout(pending); client.deactivate(); };
-  }, [activityId, onEvent, token, onError]);
+  }, [streamKey, onEvent, token, onError]);
 }
 
 function useScreenStream(deviceId, onEvent, token, onError, onDeleted) {

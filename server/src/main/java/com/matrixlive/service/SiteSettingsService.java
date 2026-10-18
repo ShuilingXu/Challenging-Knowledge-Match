@@ -2,9 +2,13 @@ package com.matrixlive.service;
 
 import static com.matrixlive.api.ApiModels.*;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.matrixlive.domain.SiteSettings;
 import com.matrixlive.media.StorageProperties;
 import com.matrixlive.repository.SiteSettingsRepository;
+import java.time.Duration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,17 +16,30 @@ import org.springframework.transaction.annotation.Transactional;
 public class SiteSettingsService {
   private static final String DEFAULT_DOMAIN = "localhost";
   private static final String DEFAULT_NAME = "Matrix Live";
+  private static final Long SETTINGS_ID = 1L;
 
   private final SiteSettingsRepository repository;
   private final StorageProperties storageProperties;
+  /** Every client loads the public branding on start, but it only changes when staff edit it. */
+  private final Cache<Long, SiteSettingsResponse> publicCache;
+  private final boolean cachingEnabled;
 
-  public SiteSettingsService(SiteSettingsRepository repository, StorageProperties storageProperties) {
+  public SiteSettingsService(SiteSettingsRepository repository, StorageProperties storageProperties,
+      @Value("${app.cache.site-settings-ttl-seconds:60}") long ttlSeconds) {
     this.repository = repository;
     this.storageProperties = storageProperties;
+    this.cachingEnabled = ttlSeconds > 0;
+    this.publicCache = Caffeine.newBuilder()
+        .maximumSize(1)
+        .expireAfterWrite(Duration.ofSeconds(Math.max(1, ttlSeconds)))
+        .build();
   }
 
   @Transactional(readOnly = true)
-  public SiteSettingsResponse get() { return toPublicResponse(current()); }
+  public SiteSettingsResponse get() {
+    if (!cachingEnabled) return toPublicResponse(current());
+    return publicCache.get(SETTINGS_ID, key -> toPublicResponse(current()));
+  }
 
   @Transactional(readOnly = true)
   public AdminSiteSettingsResponse getAdmin() { return toAdminResponse(current()); }
@@ -44,6 +61,7 @@ public class SiteSettingsService {
         secretValue(request.storageSessionToken(), settings.getStorageSessionToken(), clearCredentials),
         storageInput(request.storagePublicBaseUrl(), settings.getStoragePublicBaseUrl(), storageProperties.getPublicBaseUrl()),
         addressingStyle(request.storageAddressingStyle(), settings.getStorageAddressingStyle(), storageProperties.getAddressingStyle()));
+    publicCache.invalidate(SETTINGS_ID);
     return toAdminResponse(settings);
   }
 
@@ -63,7 +81,7 @@ public class SiteSettingsService {
   }
 
   private SiteSettings current() {
-    return repository.findById(1L).orElseGet(() -> repository.save(new SiteSettings(DEFAULT_DOMAIN, DEFAULT_NAME, null, null)));
+    return repository.findById(SETTINGS_ID).orElseGet(() -> repository.save(new SiteSettings(DEFAULT_DOMAIN, DEFAULT_NAME, null, null)));
   }
 
   private String value(String requested, String current, String fallback) {

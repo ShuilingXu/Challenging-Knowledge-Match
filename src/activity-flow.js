@@ -71,6 +71,18 @@ export function screenAnswerHint(result, remaining, stage) {
   return '请等待主持人开启答题'
 }
 
+// 答题、抢答与海龟汤大屏常驻加入二维码：迟到的观众也能随时扫码入场。
+export function screenJoinPrompt(mode) {
+  if (mode === 'TURTLE_SOUP') return { caption: '扫码加入', hint: '手机扫码一起猜汤' }
+  if (mode === 'QUESTION' || mode === 'RESULT') return { caption: '扫码加入', hint: '手机扫码答题 / 抢答' }
+  return null
+}
+
+export function screenJoinUrl(origin, activityId) {
+  const base = String(origin || '').replace(/\/+$/, '')
+  return `${base}/join/${activityId}`
+}
+
 export function venueDisplayName(code, venues = []) {
   return venues.find((venue) => venue.code === code)?.name || (code === 'main' ? '本会场' : code || '本会场')
 }

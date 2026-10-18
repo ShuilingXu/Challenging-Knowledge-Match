@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { availableActivities, participantActivityId, activityEntry, participantMatches, activityNavigation } from './activity-flow'
+import { availableActivities, participantActivityId, activityEntry, participantMatches, activityNavigation, screenJoinPrompt, screenJoinUrl } from './activity-flow'
 
 describe('participant activity routing', () => {
   it('uses venue feature switches for all operational navigation', () => {
@@ -52,5 +52,23 @@ describe('participant activity routing', () => {
   it('searches organization and custom registration values as well as identity', () => {
     expect(participantMatches({ name: 'Alice', organization: 'ACME', customFields: { team: 'Sales' } }, 'sales')).toBe(true)
     expect(participantMatches({ name: 'Alice', contact: '123456' }, '345')).toBe(true)
+  })
+})
+
+describe('big-screen join QR', () => {
+  it('keeps the join QR on quiz, buzz and turtle soup screens only', () => {
+    for (const mode of ['QUESTION', 'RESULT', 'TURTLE_SOUP']) expect(screenJoinPrompt(mode)).toBeTruthy()
+    for (const mode of ['LOBBY', 'TEMPLATE', 'SCOREBOARD', 'LEADERBOARD', 'WINNERS', 'ANNOUNCEMENT', 'FILE', '', undefined]) {
+      expect(screenJoinPrompt(mode)).toBe(null)
+    }
+  })
+  it('labels the soup QR for clue guessing instead of answering', () => {
+    expect(screenJoinPrompt('TURTLE_SOUP').caption).toBe('扫码加入')
+    expect(screenJoinPrompt('TURTLE_SOUP').hint).toContain('猜汤')
+    expect(screenJoinPrompt('QUESTION').hint).toContain('抢答')
+  })
+  it('points every QR at the same join entry used by templates', () => {
+    expect(screenJoinUrl('http://127.0.0.1:5173', 'venue-1')).toBe('http://127.0.0.1:5173/join/venue-1')
+    expect(screenJoinUrl('https://live.example.com/', 'venue-1')).toBe('https://live.example.com/join/venue-1')
   })
 })

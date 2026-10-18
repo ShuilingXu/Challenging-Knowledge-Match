@@ -25,7 +25,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { activityActions, activityStatusLabels, availableActivities, activityEntry, participantActivityId, participantMatches, activityNavigation } from "./activity-flow";
+import { activityActions, activityStatusLabels, availableActivities, activityEntry, participantActivityId, participantMatches, activityNavigation, screenJoinPrompt, screenJoinUrl } from "./activity-flow";
 import {
   Activity,
   ArrowDown,
@@ -3884,7 +3884,7 @@ function ScreensPage({ activityId }) {
     name: "",
     description: "",
     headline: "",
-    background: "#836c67",
+    background: "#f7ece1",
     backgroundImage: "",
     imageUrl: "",
     fileUrl: "",
@@ -6284,6 +6284,10 @@ function RegistrationCard({
       <p className="eyebrow">欢迎来到次元现场</p>
       <h2>{returning ? "查询我的参与信息" : "先确认你的现场身份"}</h2>
       <p>微信号/QQ 会在当前活动内唯一识别你。</p>
+      <div className="registration-mode" role="group" aria-label="选择登记方式">
+        <button type="button" aria-pressed={!returning} className={!returning ? "is-active" : ""} disabled={busy} onClick={() => { setReturning(false); setError(""); }}>首次登记</button>
+        <button type="button" aria-pressed={returning} className={returning ? "is-active" : ""} disabled={busy} onClick={() => { setReturning(true); setError(""); }}>已登记 · 找回</button>
+      </div>
       {activeVenues.length === 1 && venue === activeVenues[0].code ? <div className="registration-venue-summary"><MapPin size={18} /><div><strong>{activeVenues[0].name}</strong><small>已为你选好报名会场</small></div></div> : <label>
         会场
         <select
@@ -6353,9 +6357,6 @@ function RegistrationCard({
       <button className="primary-button" disabled={busy || !venue || !challenge}>
         {busy ? "正在提交" : returning ? "查询并继续参与" : "完成登记"}
         <ArrowRight size={17} />
-      </button>
-      <button type="button" className="text-button" onClick={() => { setReturning(!returning); setError(""); }}>
-        {returning ? "首次参与，填写登记" : "查询已登记的参与信息"}
       </button>
     </form>
   );
@@ -6474,6 +6475,9 @@ export function BuzzCard({ activityId, participant, participantToken, question, 
     finally { setBusy(false); }
   };
   if (!question) return <EmptyState icon={Clock3} title="等待主持人开题" description="开题后即可抢答。" />;
+  const options = asOptions(question);
+  const revealed = state?.stage === "ANSWER_REVEALED";
+  const correct = answerSet(question);
   return (
     <article className="answer-card buzzer-card">
       <div className="answer-card__meta"><span>抢答模式</span><strong>{state?.stage === "ANSWER_REVEALED" ? "答案已公布" : open ? formatSeconds(remaining) : "抢答未开放"}</strong></div>
@@ -6482,6 +6486,16 @@ export function BuzzCard({ activityId, participant, participantToken, question, 
       {open && !entry && <button className="primary-button buzzer-button" disabled={busy} onClick={buzz}>{busy ? "正在抢答…" : "抢答"}</button>}
       {entry && <div className="answer-feedback" role="status"><BadgeCheck size={20} /><div><strong>抢答成功 · 第 {entry.responseRank} 位</strong><span>{entry.awardedPoints == null ? "请等待主持人安排作答。" : `${entry.correct === true ? "回答正确" : entry.correct === false ? "回答不正确" : "主持人已判题"} · 本题 ${entry.awardedPoints} 分`}</span></div></div>}
       {!open && !entry && state?.stage !== "ANSWER_REVEALED" && <p>等待主持人开题，或本题抢答已结束。</p>}
+      {options.length > 0 && <div className="answer-options answer-options--readonly" aria-label="本题选项">
+        {options.map((option, index) => {
+          const hit = revealed && correct.has(option);
+          return <div className={hit ? "is-correct" : ""} key={`${option}-${index}`}>
+            <b>{String.fromCharCode(65 + index)}</b>
+            <span>{option}</span>
+            {hit && <Check size={17} />}
+          </div>;
+        })}
+      </div>}
       <ParticipantAnswerReveal question={question} state={state}>
         <QuestionMedia question={question} className="answer-question-media" answer />
       </ParticipantAnswerReveal>
@@ -6918,6 +6932,7 @@ function PublicScreen() {
   )
     return <ScreenPairingNotice status={status} error={error} />;
   const mode = display?.mode || "LOBBY";
+  const joinPrompt = screenJoinPrompt(mode);
   return (
     <main className="public-screen-page">
       <header className="public-screen-toolbar">
@@ -6938,12 +6953,42 @@ function PublicScreen() {
       </header>
       {error && <p role="status" className="form-error">{error} · 正在自动重试</p>}
       <section
-        className="public-canvas"
+        className={`public-canvas${joinPrompt ? " public-canvas--with-join" : ""}`}
         style={{ "--screen-font-scale": (display?.fontScale || 100) / 100 }}
       >
         <ScreenDisplay activityId={activityId} display={display} mode={mode} />
+        {joinPrompt && (
+          <ScreenJoinQr
+            url={screenJoinUrl(window.location.origin, activityId)}
+            caption={joinPrompt.caption}
+            hint={joinPrompt.hint}
+          />
+        )}
       </section>
     </main>
+  );
+}
+
+/* 常驻加入二维码：答题、抢答与海龟汤大屏右上角固定展示，内容滚动或翻页都不会带走它。 */
+export function ScreenJoinQr({ url, caption = "扫码加入", hint = "" }) {
+  return (
+    <aside className="screen-join-qr" aria-label={`${caption}二维码`}>
+      <span className="screen-join-qr__code">
+        <QRCodeSVG
+          value={url}
+          size={168}
+          level="M"
+          marginSize={1}
+          bgColor="#fffdf9"
+          fgColor="#3f3030"
+          title={`扫码加入：${url}`}
+        />
+      </span>
+      <span className="screen-join-qr__copy">
+        <strong>{caption}</strong>
+        {hint && <small>{hint}</small>}
+      </span>
+    </aside>
   );
 }
 
@@ -7046,20 +7091,27 @@ function TemplateScreen({ activityId, display }) {
   const components = display.template?.components || [];
   const visibleComponents = components.filter((item) => item.type !== "BACKGROUND");
   const imageOnly = visibleComponents.length === 1 && visibleComponents[0].type === "IMAGE";
+  const singleVisual = visibleComponents.filter((item) => item.type !== "TEXT").length === 1;
   const overrides = display.data?.overrides || {};
   const background =
     components.find((item) => item.type === "BACKGROUND")?.config || {};
-  const joinUrl = window.location.origin + "/join/" + activityId;
+  const joinUrl = screenJoinUrl(window.location.origin, activityId);
   useScreenScroll(containerRef, display, display.template?.id);
   return (
     <div
       ref={containerRef}
-      className={`template-screen${imageOnly ? " template-screen--image-only" : ""}`}
+      className={`template-screen${imageOnly ? " template-screen--image-only" : ""}${singleVisual ? " template-screen--single" : ""}`}
       style={{
         "--template-columns": Math.max(1, Math.min(3, visibleComponents.filter((item) => item.type !== "TEXT").length)),
-        background: background.imageUrl
-          ? "center / cover no-repeat url(" + background.imageUrl + ")"
-          : background.color || "#836c67",
+        // 背景色交给主题统一处理（纸张底色 + 模板主色），只有显式上传背景图时才整屏铺图。
+        "--template-tone": background.imageUrl ? "transparent" : background.color || "#f7ece1",
+        ...(background.imageUrl
+          ? {
+              backgroundImage: `url(${JSON.stringify(background.imageUrl)})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }
+          : {}),
       }}
     >
       {visibleComponents.map((item) => {

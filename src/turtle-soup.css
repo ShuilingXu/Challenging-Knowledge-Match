@@ -170,3 +170,36 @@
 .soup-answer-toggle[aria-checked="true"] .soup-answer-toggle__thumb { transform:translateX(20px); }
 .soup-answer-switch small { color:#66746c; }
 @media(max-width:600px) { .soup-answer-switch { gap:8px; } .soup-answer-toggle { flex:1 1 100%; justify-content:center; } .soup-answer-switch small { font-size:11px; } }
+
+/* ==========================================================================
+ * 大屏海龟汤 · 与后台统一的纸张配色
+ * 旧版是墨绿推理剧场；现在汤面、线索与汤底都落在同一张象牙纸上，
+ * 只用可可棕标题、柔金线索编号和细描边卡片区分层级，与后台工作区一致。
+ * ========================================================================== */
+.soup-screen { color: var(--soyo-text); background: transparent; }
+.soup-screen header { color: var(--soyo-hair); letter-spacing: .1em; }
+.soup-kicker { font-weight: 700; }
+.soup-screen h1 { color: var(--soyo-ink); font-weight: 800; letter-spacing: -.02em; }
+.soup-screen h2 { color: var(--soyo-cocoa); font-weight: 800; }
+.soup-screen .soup-pane {
+  border: 1px solid #eee2d4;
+  border-radius: 18px;
+  background: rgba(255, 253, 249, .84);
+  box-shadow: 0 10px 26px rgba(91, 65, 55, .06);
+}
+.soup-screen .soup-surface-pane { background: rgba(255, 253, 249, .88); }
+.soup-screen .soup-clues { background: rgba(255, 248, 232, .8); border-color: #efe0c6; }
+.soup-screen .soup-solution { border: 1px solid #e8d2a5; border-left: 4px solid var(--soyo-gold); background: rgba(247, 231, 187, .34); }
+.soup-screen .soup-page-text { color: var(--soyo-ink); }
+.soup-pane h2 small { color: var(--soyo-muted); }
+.soup-page-status { color: var(--soyo-muted); }
+.soup-clue-number { color: #a9803f; }
+.soup-visible-clue { border: 1px solid #eee2d4; border-radius: 12px; background: rgba(255, 253, 249, .72); }
+.soup-clue-badge { color: #8a6420; background: #f7e7bb; border: 1px solid #e8cf94; border-radius: 8px; }
+.soup-page-progress { background: #f0e4d6; }
+.soup-page-progress span { background: linear-gradient(90deg, var(--soyo-gold), #b98a3c); }
+.soup-screen footer { color: var(--soyo-muted); border-top: 1px solid #eee2d4; }
+.soup-screen--waiting .soup-surface { color: var(--soyo-cocoa); }
+.soup-pane-scroll:focus-visible { outline: 2px solid var(--soyo-gold); outline-offset: -2px; }
+/* 后台控场页的大屏预览：同一套纸张，放进卡片里。 */
+.soup-preview .soup-screen { background: var(--soyo-paper, #fffdf9); border: 1px solid var(--soyo-line, #eadfd4); box-shadow: var(--soyo-shadow); }

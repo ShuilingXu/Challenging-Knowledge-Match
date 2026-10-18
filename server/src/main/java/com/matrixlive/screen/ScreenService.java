@@ -360,20 +360,20 @@ public class ScreenService {
     Set<String> existing = templates.findByActivityIdOrderByUpdatedAtDesc(activityId).stream().filter(ScreenTemplate::isPreset).map(ScreenTemplate::getName).collect(java.util.stream.Collectors.toSet());
     templates.saveAll(List.of(
         preset(activityId, "星辉入场指引", "扫码完成登记，召唤队友加入本场挑战", List.of(
-            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#6f5960")),
+            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#f6e7e3")),
             component("headline", ScreenComponentType.TEXT, Map.of("text", "扫码登记，解锁挑战任务")),
             component("registration-qr", ScreenComponentType.REGISTRATION_QR, Map.of("label", "扫描二维码，创建你的冒险档案")))),
         preset(activityId, "传送门二维码", "展示活动入口，邀请伙伴一起出发", List.of(
-            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#648496")),
+            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#e8f0f6")),
             component("headline", ScreenComponentType.TEXT, Map.of("text", "穿过传送门，加入答题冒险")),
             component("activity-qr", ScreenComponentType.ACTIVITY_QR, Map.of("label", "扫描二维码，进入挑战现场")))),
         preset(activityId, "番剧答题直播", "展示题目、倒计时和全场答题进度", List.of(
-            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#836c67")),
+            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#f6ece1")),
             component("question-title", ScreenComponentType.TEXT, Map.of("text", "下一道题目即将降临，准备发动技能")))),
         preset(activityId, "海龟汤", "展示本会场当前汤面、已公开线索及揭晓后的汤底", List.of(
             component("soup-title", ScreenComponentType.TEXT, Map.of("text", "海龟汤 · 情境推理")))),
         preset(activityId, "勇者积分榜", "展示答对加分、答错扣分与最终排名", List.of(
-            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#766b83")),
+            component("background", ScreenComponentType.BACKGROUND, Map.of("color", "#efeaf2")),
             component("leaderboard-title", ScreenComponentType.TEXT, Map.of("text", "勇者集结，积分决定番位")))))
     .stream().filter(template -> !existing.contains(template.getName())).toList());
     state.markPresetsInitialized();

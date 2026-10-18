@@ -48,7 +48,8 @@ class TurtleSoupIntegrationTest {
     assertEquals("Visible surface",display.data().get("surface"));
     assertFalse(display.data().containsKey("solution"));
     assertEquals(List.of(),display.data().get("clues"));
-    assertThrows(DomainException.class, () -> soup.control(activity.id(),new Command("HIDE_SOLUTION",state.revision())));
+    long surfaceRevision=state.revision();
+    assertThrows(DomainException.class, () -> soup.control(activity.id(),new Command("HIDE_SOLUTION",surfaceRevision)));
     state=soup.control(activity.id(), new Command("NEXT_CLUE",state.revision()));
     assertEquals(List.of("First clue"),screens.currentDisplay(activity.id(),childScreen.device().id()).data().get("clues"));
     assertEquals(state,soup.state(activity.id()));

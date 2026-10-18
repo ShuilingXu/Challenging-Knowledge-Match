@@ -131,7 +131,10 @@ public final class ApiModels {
       UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole,
       String scoringMode, int correctScorePercent, int incorrectScorePercent,
       List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules,
-      String answerMode, UUID participantActivityId, boolean legacyOperations, boolean featureEnabled) {
+      String answerMode, UUID participantActivityId, boolean legacyOperations, boolean featureEnabled, boolean registrationAllowed) {
+    public ActivityResponse(UUID id, String name, String city, String status, Instant startsAt, Instant endsAt, String description, String clientDisplayName, String clientThemeColor, String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt, UUID parentActivityId, String activityType, UUID activeQuestionSetId, String viewerRole, String scoringMode, int correctScorePercent, int incorrectScorePercent, List<ScoreRule> correctRankRules, List<ScoreRule> incorrectRankRules, String answerMode, UUID participantActivityId, boolean legacyOperations, boolean featureEnabled) {
+      this(id,name,city,status,startsAt,endsAt,description,clientDisplayName,clientThemeColor,clientHeroImageUrl,clientBackgroundImageUrl,createdAt,updatedAt,parentActivityId,activityType,activeQuestionSetId,viewerRole,scoringMode,correctScorePercent,incorrectScorePercent,correctRankRules,incorrectRankRules,answerMode,participantActivityId,legacyOperations,featureEnabled,true);
+    }
     public ActivityResponse(UUID id, String name, String city, String status, Instant startsAt,
       Instant endsAt, String description, String clientDisplayName, String clientThemeColor,
       String clientHeroImageUrl, String clientBackgroundImageUrl, Instant createdAt, Instant updatedAt,

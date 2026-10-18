@@ -93,6 +93,11 @@ public class Activity {
   public String getSoupPlaylist() { return soupPlaylist; }
   public void updateSoupPlaylist(String value) { soupPlaylist = value; }
 
+  @Column(name = "registration_allowed", nullable = false)
+  private boolean registrationAllowed = true;
+  public boolean isRegistrationAllowed() { return registrationAllowed; }
+  public void setRegistrationAllowed(boolean value) { registrationAllowed = value; }
+
   @Version
   private long version;
 

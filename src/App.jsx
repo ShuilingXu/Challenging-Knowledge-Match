@@ -1,3 +1,4 @@
+import { CheckinPage, TicketLanding, RegistrationControl } from "./Checkin";
 import { activityEntryGroups, participantFeatureLabel, participationLabel, controlStatusHint, screenAnswerHint, venueDisplayName } from "./activity-flow";
 import { PageHeader, StatusNotice, ConfirmDialog } from "./StaffUi";
 import { ParticipantAnswerReveal } from "./ParticipantAnswerReveal";
@@ -110,6 +111,7 @@ const navItems = [
   { id: "soups", label: "海龟汤汤稿", icon: CircleHelp },
   { id: "soup-control", label: "海龟汤控场", icon: Radio },
   { id: "lottery-control", label: "抽奖控场", icon: Gift },
+  { id: "checkin", label: "签到与检票", icon: Ticket },
   { id: "participants", label: "参与者", icon: Users },
   { id: "rewards", label: "奖品与核销", icon: Gift },
   { id: "screens", label: "大屏管理", icon: Monitor },
@@ -121,6 +123,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
+          <Route path="/checkin/:activityId/:token" element={<TicketLanding />} />
           <Route path="/login" element={<LoginPage />} />
           <Route
             path="/admin/*"
@@ -504,7 +507,8 @@ function StaffApp() {
             element={currentActivity?.activityType === "EVENT" ? <QuestionsPage key={activityId} activityId={activityId} activity={currentActivity} canManage={canManage} /> : workspace("QUIZ", (active) => <QuestionsPage key={active.id} activityId={active.id} activity={active} canManage={canManage} />)}
           />
           <Route
-            path="participants"
+            path="checkin" element={<CheckinPage key={activityId} activity={currentActivity} activities={activities} canManage={canManage} reload={reloadActivities} setActivityId={setActivityId} />} />
+          <Route path="participants"
             element={soupActivity ? <Navigate to="/admin/control" replace /> : <ParticipantsPage key={activityId} activityId={activityId} />}
           />
           <Route
@@ -576,6 +580,7 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage, activity }) {
           && (item.id !== "questions" || navigation.showQuiz)
           && (item.id !== "control" || navigation.showControl)
           && (item.id !== "participants" || !["EVENT", "TURTLE_SOUP"].includes(activity?.activityType))
+          && (item.id !== "checkin" || !["EVENT", "TURTLE_SOUP"].includes(activity?.activityType))
           && (item.id !== "screens" || activity?.activityType !== "EVENT")
           && (item.id !== "rewards" || navigation.showRewards)).map((item) => {
           const Icon = item.icon;
@@ -679,6 +684,7 @@ function MainActivityPage({ activity, activities, setActivityId, canManage, relo
   return <div className="page-content">
     <PageHeader eyebrow={main ? "母活动管理" : "会场工作区"} title={activity.name} description={main ? "总题库和海龟汤汤稿请从左侧菜单管理。现场报名、展示和功能都在会场中进行。" : "先选好会场，再从左侧菜单操作已开启的功能。"} />
     <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />
+    {!main && canManage && <RegistrationControl activity={activity} reload={reload} />}
     <div className="activity-hub-links">{main ? <><Link className="secondary-button" to="/admin/questions">编辑总题库</Link></> : <><Link className="secondary-button" to="/admin/participants">本会场参与者</Link><a className="secondary-button" href={`/join/${activity.id}`} target="_blank" rel="noreferrer">本会场报名入口</a><a className="secondary-button" href={`/screen/${activity.id}`} target="_blank" rel="noreferrer">本会场大屏</a></>}{canManage && <Link className="primary-button" to="/admin/activities">{main ? "创建会场" : "修改会场功能"}</Link>}</div>
     <div className="prize-grid">{main ? venues.map((venue) => <article className="prize-pool-card" key={venue.id}><span className="type-chip">会场 · {activityStatusLabels[venue.status]}</span><h2>{venue.name}</h2><p>独立配置、人员和现场数据。</p><Link className="primary-button" to="/admin/overview" onClick={() => setActivityId(venue.id)}>进入会场<ArrowRight size={16} /></Link></article>) : featureLinks.map(([type,label,path,description]) => <article className="prize-pool-card" key={type}><span className="type-chip">{activity.features?.includes(type) ? "已开启" : "未开启"}</span><h2>{label}</h2><p>{description}</p>{activity.features?.includes(type) ? <Link className="primary-button" to={path}>进入{label}<ArrowRight size={16} /></Link> : <p>请在活动管理中编辑本会场，勾选此功能后使用。</p>}</article>)}</div>
     {main && !venues.length && <EmptyState icon={CalendarDays} title="尚未创建会场" description="到活动管理创建会场，并勾选需要的功能。" />}
@@ -757,6 +763,7 @@ function HostLotteryPage({ activity, reload, canManage }) {
   return <div className="page-content">
     <PageHeader eyebrow="会场抽奖" title="抽奖控场" description="按本会场总积分筛选参与者，主持人摇奖在同一奖池不重复选中已获奖者；停止后随机选出中奖人并发奖上屏。" />
     <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reload} />
+    {!main && canManage && <RegistrationControl activity={activity} reload={reload} />}
     <InlineError text={error} onRetry={attempt.current ? stop : load} />
     <label className="host-lottery-picker staff-form">摇奖奖池<select value={poolId} disabled={rolling || confirming || !!attempt.current} onChange={(e) => { setPoolId(e.target.value); setResult(null); setDisplayName(""); }}><option value="">请选择奖池</option>{pools.map((p) => <option key={p.id} value={p.id}>{p.name} · 剩余 {p.remainingQuantity} 件 · 最低 {p.minScore} 分</option>)}</select></label>
     {!pools.length && <EmptyState icon={Gift} title="尚未配置奖池" description="请先进入奖品管理，添加并启用主持人抽奖奖池。" />}
@@ -6084,6 +6091,7 @@ function ParticipantSessionPortal({ activityInfo, activities, lotteryMode }) {
           {!participant || !participantToken ? (
             <RegistrationCard
               activityId={identityActivityId}
+              registrationAllowed={activity?.registrationAllowed}
               venue={venue}
               venues={venues}
               setVenue={setVenue}
@@ -6249,13 +6257,13 @@ function ParticipantProfile({ activityId, participant, participantToken, venueNa
 
 function RegistrationCard({
   activityId,
+  registrationAllowed,
   venue,
   venues,
   setVenue,
   fields,
   onRegistered,
 }) {
-  const [returning, setReturning] = useState(false);
   const [challenge, setChallenge] = useState(null);
   const [challengeAnswer, setChallengeAnswer] = useState("");
   const renewChallenge = useCallback(async () => {
@@ -6288,18 +6296,15 @@ function RegistrationCard({
     setError("");
     try {
       const payload = buildRegistrationPayload(values, customValues);
-      const registered = returning ? null : await api.register(activityId, venue, payload);
-      if (registered) setReturning(true);
-      const session = await api.participantToken({
+      const session = await api.joinParticipant({
+        registration: payload,
         activityId,
         venue,
         contact: values.contact,
         challengeId: challenge?.challengeId,
         challengeAnswer,
       });
-      const person = returning
-        ? await api.participant(activityId, session.participantId, session.accessToken)
-        : registered;
+      const person = await api.participant(activityId, session.participantId, session.accessToken);
       onRegistered(person, session.accessToken);
     } catch (cause) {
       setError(cause.message);
@@ -6311,12 +6316,9 @@ function RegistrationCard({
   return (
     <form className="registration-card" onSubmit={submit}>
       <p className="eyebrow">欢迎来到次元现场</p>
-      <h2>{returning ? "查询我的参与信息" : "先确认你的现场身份"}</h2>
-      <p>微信号/QQ 会在当前活动内唯一识别你。</p>
-      <div className="registration-mode" role="group" aria-label="选择登记方式">
-        <button type="button" aria-pressed={!returning} className={!returning ? "is-active" : ""} disabled={busy} onClick={() => { setReturning(false); setError(""); }}>首次登记</button>
-        <button type="button" aria-pressed={returning} className={returning ? "is-active" : ""} disabled={busy} onClick={() => { setReturning(true); setError(""); }}>已登记 · 找回</button>
-      </div>
+      <h2>确认身份并参与</h2>
+      {registrationAllowed === false && <p>本场次仅允许预先录入签到表或参与者名单的人员报名。</p>}
+      <p>联系方式与场次共同识别身份；已登记人员会更新为本次填写的昵称。</p>
       {activeVenues.length === 1 && venue === activeVenues[0].code ? <div className="registration-venue-summary"><MapPin size={18} /><div><strong>{activeVenues[0].name}</strong><small>已为你选好报名会场</small></div></div> : <label>
         会场
         <select
@@ -6337,7 +6339,7 @@ function RegistrationCard({
           )}
         </select>
       </label>}
-      {!returning && <label>
+      {<label>
         昵称
         <input
           required
@@ -6359,7 +6361,7 @@ function RegistrationCard({
           placeholder="微信号或 QQ 号"
         />
       </label>
-      {!returning && dynamic.map((field) => (
+      {dynamic.map((field) => (
         <RegistrationFieldInput
           key={field.id || registrationFieldKey(field)}
           field={field}
@@ -6384,7 +6386,7 @@ function RegistrationCard({
       </label>
       <button type="button" className="text-button" onClick={renewChallenge} disabled={busy}>换一张验证码</button>
       <button className="primary-button" disabled={busy || !venue || !challenge}>
-        {busy ? "正在提交" : returning ? "查询并继续参与" : "完成登记"}
+        {busy ? "正在提交" : "确认并参与"}
         <ArrowRight size={17} />
       </button>
     </form>

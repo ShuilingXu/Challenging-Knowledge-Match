@@ -173,11 +173,11 @@ class ReviewRegressionTest {
     var venue = service.listVenues(a.id()).getFirst();
     var p = person(a.id());
     service.createVenue(a.id(), new VenueRequest("b", "B", 10, true));
-    assertThrows(
-        DomainException.class,
-        () ->
-            com.matrixlive.service.QuizTestSupport.register(service,
-                a.id(), "b", new RegisterParticipantRequest("Duplicate", p.contact(), null)));
+    var rejoined = com.matrixlive.service.QuizTestSupport.register(service,
+        a.id(), "b", new RegisterParticipantRequest("Updated nickname", p.contact(), null));
+    assertEquals(p.id(), rejoined.id());
+    assertEquals("Updated nickname", rejoined.name());
+    assertEquals(p.venue(), rejoined.venue());
     person(a.id());
     assertThrows(
         DomainException.class,

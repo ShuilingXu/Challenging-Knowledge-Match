@@ -290,6 +290,12 @@ export const api = {
     headers: participantToken ? { Authorization: `Bearer ${participantToken}` } : {},
   }),
   updateParticipant: (id, participantId, payload) => request(`/api/activities/${id}/participants/${participantId}`, { method: 'PATCH', body: payload }),
+  joinParticipant: async (payload) => {
+    const session = await request('/api/auth/participant-join', { method: 'POST', auth: false, body: payload })
+    sessionStorage.setItem(`matrix.participant-refresh.${payload.activityId}`, session.refreshToken)
+    setParticipantToken(payload.activityId, session.accessToken)
+    return session
+  },
   participantToken: async (payload) => {
     const session = await request('/api/auth/participant-token', { method: 'POST', auth: false, body: payload })
     sessionStorage.setItem(`matrix.participant-refresh.${payload.activityId}`, session.refreshToken)

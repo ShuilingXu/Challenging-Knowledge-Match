@@ -46,7 +46,6 @@ public class SecurityConfiguration {
             .requestMatchers(HttpMethod.GET, "/api/activities/*/turtle-soup/public").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/activities/*", "/api/activities/*/venues",
                 "/api/activities/*/registration-fields", "/api/activities/*/media/*/*").permitAll()
-            .requestMatchers(HttpMethod.POST, "/api/activities/*/venues/*/registrations").permitAll()
             .requestMatchers(HttpMethod.POST, "/api/activities").access(activityCreationAuthorizationManager)
             .requestMatchers("/api/admin/**").hasRole("SYSTEM_ADMIN")
             .requestMatchers("/api/activities/**").access(activityAuthorizationManager)

@@ -41,8 +41,10 @@ class ActivityDomainWorkflowTest {
     assertEquals("Operations", south.customFields().get("department"));
     assertEquals(1, service.listParticipants(activity.id(), "north").size());
     assertEquals(1, service.listParticipants(activity.id(), "south").size());
-    assertThrows(DomainException.class, () -> com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "north",
-        new RegisterParticipantRequest("Duplicate", "13800001000", "Matrix", Map.of("department", "Engineering"))));
+    var rejoined = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "north",
+        new RegisterParticipantRequest("Updated nickname", "13800001000", "Matrix", Map.of("department", "Engineering")));
+    assertEquals(north.id(), rejoined.id());
+    assertEquals("Updated nickname", rejoined.name());
     assertThrows(DomainException.class, () -> com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "west",
         new RegisterParticipantRequest("Unknown venue", "13800009999", "Matrix", Map.of("department", "Engineering"))));
   }

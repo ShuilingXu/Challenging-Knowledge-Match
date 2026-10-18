@@ -379,14 +379,22 @@ public class ActivityService {
     Venue venueEntity = venues.findForRegistration(scopeId, venue)
         .orElseThrow(() -> badRequest("Venue is not configured in this activity"));
     if (!venueEntity.isEnabled()) throw conflict("Venue is disabled");
+    String contact = normalizeContact(request.contact());
+    Participant existing = participants.findByActivityIdAndContact(scopeId, contact).stream().findFirst().orElse(null);
+    if (existing != null) {
+      if (!"ACTIVE".equals(existing.getStatus())) throw conflict("该参与者已停用，请联系工作人员");
+      existing.updateProfile(cleanRequired(request.name(), "Participant name"), null, null, null, null);
+      broadcast(activityId, "participant.updated");
+      return toParticipant(existing);
+    }
+    Activity registrationScope = requireActivity(scopeId);
+    if (!activity.isRegistrationAllowed() || !registrationScope.isRegistrationAllowed()) {
+      throw conflict("本场次仅允许预先录入的人员报名，请联系工作人员");
+    }
     if (venueEntity.getCapacity() != null
         && participants.countByActivityIdAndVenue(scopeId, venue) >= venueEntity.getCapacity()) {
       throw conflict("Venue registration capacity has been reached");
     }
-    String contact = normalizeContact(request.contact());
-    participants.findByActivityIdAndContact(scopeId, contact).stream().findFirst().ifPresent(existing -> {
-      throw conflict("This contact is already registered in the selected venue");
-    });
     Map<String, String> customFields = validateCustomFields(scopeId, request.customFields());
     Participant participant = participants.save(new Participant(scopeId, venue, contact,
         cleanRequired(request.name(), "Participant name"), cleanOptional(request.organization()),
@@ -1809,7 +1817,7 @@ public class ActivityService {
         activity.getCreatedAt(), activity.getUpdatedAt(), activity.getParentActivityId(), activity.getActivityType(),
         activity.getActiveQuestionSetId(), viewerRole, activity.getScoringMode(), activity.getCorrectScorePercent(),
         activity.getIncorrectScorePercent(), rules.getOrDefault("correct", List.of()), rules.getOrDefault("incorrect", List.of()), activity.getAnswerMode(),
-        activity.isSharedParticipants() && activity.getParentActivityId() != null ? activity.getParentActivityId() : activity.getId(), false, activity.isFeatureEnabled());
+        activity.isSharedParticipants() && activity.getParentActivityId() != null ? activity.getParentActivityId() : activity.getId(), false, activity.isFeatureEnabled(), activity.isRegistrationAllowed() && (!activity.isSharedParticipants() || activity.getParentActivityId() == null || activities.findById(activity.getParentActivityId()).map(Activity::isRegistrationAllowed).orElse(false)));
   }
 
   private void configureAnswerMode(Activity activity, String mode) {

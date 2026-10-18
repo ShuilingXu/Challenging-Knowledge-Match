@@ -11,7 +11,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "participants", uniqueConstraints = @UniqueConstraint(columnNames = {"activityId", "venue", "contact"}))
+@Table(name = "participants", uniqueConstraints = @UniqueConstraint(columnNames = {"activityId", "contact"}))
 public class Participant {
   @Id
   @GeneratedValue

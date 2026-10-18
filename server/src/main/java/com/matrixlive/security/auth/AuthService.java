@@ -124,10 +124,15 @@ public class AuthService {
       HttpServletRequest servletRequest) {
     String contact = normalizeContact(request.contact());
     humanVerification.verify(request.challengeId(), request.challengeAnswer(), servletRequest.getRemoteAddr(), hash(contact));
+    return verifiedParticipantToken(request, servletRequest);
+  }
+
+  AuthModels.ParticipantTokenResponse verifiedParticipantToken(AuthModels.ParticipantTokenRequest request, HttpServletRequest servletRequest) {
+    String contact = normalizeContact(request.contact());
     UUID participantScope = activities.findById(request.activityId())
         .filter(Activity::isSharedParticipants)
         .map(Activity::getParentActivityId).orElse(request.activityId());
-    var participant = participants.findByActivityIdAndVenueAndContact(participantScope, request.venue(), contact)
+    var participant = participants.findByActivityIdAndContact(participantScope, contact).stream().findFirst()
         .orElseThrow(() -> new DomainException(HttpStatus.UNAUTHORIZED, "身份验证失败，请检查登记信息"));
     if (!"ACTIVE".equals(participant.getStatus())) throw new DomainException(HttpStatus.UNAUTHORIZED, "身份验证失败，请检查登记信息");
     var clientSession = clientSessions.issue(com.matrixlive.security.PrincipalKind.PARTICIPANT, participantScope, participant.getId());

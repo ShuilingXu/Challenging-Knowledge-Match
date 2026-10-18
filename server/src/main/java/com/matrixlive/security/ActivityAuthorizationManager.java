@@ -107,6 +107,7 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
           && !remainder.startsWith("memberships")
           && !remainder.startsWith("question-sets");
     }
+    if (remainder.equals("checkin/redeem")) return "POST".equals(method);
     if ("control".equals(remainder)) return "POST".equals(method);
     if ("turtle-soup/switch".equals(remainder)) return "POST".equals(method);
     if ("turtle-soup/control".equals(remainder)) return "POST".equals(method);

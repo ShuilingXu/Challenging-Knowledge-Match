@@ -203,8 +203,10 @@ class ActivityServiceIntegrationTest {
     var activity = com.matrixlive.service.QuizTestSupport.create(service, new CreateActivityRequest("API 测试活动", "上海", Instant.now()));
     service.createVenue(activity.id(), new VenueRequest("south", "South Hall", 20, true));
     var participant = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "south", new RegisterParticipantRequest("测试用户", "138 0000 2048", "QA"));
-    assertThrows(DomainException.class, () -> com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "south",
-        new RegisterParticipantRequest("测试用户", "13800002048", "QA")));
+    var rejoined = com.matrixlive.service.QuizTestSupport.register(service, activity.id(), "south",
+        new RegisterParticipantRequest("Updated nickname", "13800002048", "QA"));
+    assertEquals(participant.id(), rejoined.id());
+    assertEquals("Updated nickname", rejoined.name());
 
     Question question = questions.save(new Question(activity.id(), "MULTIPLE", "哪些原则可信？", "A|B|C|D", "A,B,D", 100));
     String idempotencyKey = UUID.randomUUID().toString();
@@ -225,7 +227,7 @@ class ActivityServiceIntegrationTest {
     assertEquals(1, stats.submittedCount());
     assertEquals(0, stats.unansweredCount());
     assertEquals(1, stats.correctCount());
-    assertEquals("测试用户", stats.submissions().getFirst().participantName());
+    assertEquals("Updated nickname", stats.submissions().getFirst().participantName());
     assertEquals(1, stats.submissions().getFirst().responseRank());
   }
 

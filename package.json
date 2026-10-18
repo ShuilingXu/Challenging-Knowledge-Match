@@ -12,7 +12,11 @@
   "dependencies": {
     "@stomp/stompjs": "^7.3.0",
     "@vitejs/plugin-react": "latest",
+    "@zxing/browser": "^0.2.1",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
     "lucide-react": "latest",
+    "qrcode": "^1.5.4",
     "qrcode.react": "^4.2.0",
     "react": "latest",
     "react-dom": "latest",

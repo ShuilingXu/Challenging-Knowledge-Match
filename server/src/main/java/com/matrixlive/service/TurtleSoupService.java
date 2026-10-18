@@ -90,8 +90,8 @@ public class TurtleSoupService {
     State previous=read(activity);
     if (!"LOBBY".equals(previous.stage())) throw conflict("请先回到候场，再修改汤稿");
     if (Set.of("FINISHED", "CANCELLED").contains(activity.getStatus())) throw conflict("已结束的活动不能修改汤稿");
-    State next=new State(new Content(content.title().trim(), content.surface().trim(),
-        content.clues().stream().map(String::trim).toList(), content.solution().trim()), "LOBBY", 0, previous.revision()+1);
+    State next=lobby(new Content(content.title().trim(), content.surface().trim(),
+        content.clues().stream().map(String::trim).toList(), content.solution().trim()), previous.revision()+1, previous.playback());
     store(activity, next);
     Playlist playlist=readPlaylist(activity);
     if (playlist.activeTemplateId()!=null) storePlaylist(activity, new Playlist(playlist.entries().stream()
@@ -289,7 +289,7 @@ public class TurtleSoupService {
         ? previous.activeTemplateId() : entries.isEmpty() ? null : entries.getFirst().id();
     storePlaylist(activity,new Playlist(entries,active));
     Content content=active==null ? null : entries.stream().filter(t -> t.id().equals(active)).findFirst().orElseThrow().content();
-    State next=new State(content,"LOBBY",0,current.revision()+1);
+    State next=lobby(content,current.revision()+1,current.playback());
     store(activity,next);
     screens.publishActivityDisplay(activity.getParentActivityId(),ScreenDisplayMode.TURTLE_SOUP,display(next));
     return new Playlist(entries,active);
@@ -306,11 +306,16 @@ public class TurtleSoupService {
     Template selected=playlist.entries().stream().filter(t -> t.id().equals(request.templateId())).findFirst()
         .orElseThrow(() -> conflict("请先将汤稿选入本会场"));
     storePlaylist(activity,new Playlist(playlist.entries(),selected.id()));
-    State next=new State(selected.content(),"LOBBY",0,current.revision()+1);
+    State next=lobby(selected.content(),current.revision()+1,current.playback());
     store(activity,next);
     screens.publishActivityDisplay(id,ScreenDisplayMode.TURTLE_SOUP,display(next));
     screens.publishActivityDisplay(activity.getParentActivityId(),ScreenDisplayMode.TURTLE_SOUP,display(next));
     return next;
+  }
+  /** 回到候场，但保留主持人已经调好的翻页节奏（8–40 秒／页）。 */
+  private State lobby(Content content, long revision, Playback previous) {
+    return new State(content, "LOBBY", 0, revision, List.of(),
+        new Playback(false, 0, System.currentTimeMillis(), 0, previous.paceSeconds(), null));
   }
   private State read(Activity activity) {
     if (activity.getTurtleSoup()==null) return new State(null, "LOBBY", 0, 0);

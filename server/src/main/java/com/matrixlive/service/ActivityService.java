@@ -816,14 +816,16 @@ public class ActivityService {
     Activity controlled = requireActivity(activityId);
     if ("EVENT".equals(controlled.getActivityType())) return;
     if ("TURTLE_SOUP".equals(controlled.getActivityType())) {
+      // 暂停/关闭功能不再清空海龟汤进度，只把当前阶段原样重新推给大屏。
+      Map<String, Object> soup = new HashMap<>();
+      soup.put("stage", "LOBBY");
       if (controlled.getTurtleSoup() != null) {
         try {
-          var previous = objectMapper.readValue(controlled.getTurtleSoup(), TurtleSoupService.State.class);
-          controlled.updateTurtleSoup(objectMapper.writeValueAsString(new TurtleSoupService.State(previous.content(), "LOBBY", 0, previous.revision() + 1)));
+          soup = TurtleSoupService.display(objectMapper.readValue(controlled.getTurtleSoup(), TurtleSoupService.State.class));
         } catch (java.io.IOException exception) { throw new IllegalStateException(exception); }
       }
-      screens.publishActivityDisplay(activityId, ScreenDisplayMode.TURTLE_SOUP, Map.of("stage", "LOBBY"));
-      screens.publishActivityDisplay(controlled.getParentActivityId(), ScreenDisplayMode.TURTLE_SOUP, Map.of("stage", "LOBBY"));
+      screens.publishActivityDisplay(activityId, ScreenDisplayMode.TURTLE_SOUP, soup);
+      screens.publishActivityDisplay(controlled.getParentActivityId(), ScreenDisplayMode.TURTLE_SOUP, soup);
       return;
     }
     String stage = state.stage().trim().toUpperCase(Locale.ROOT);

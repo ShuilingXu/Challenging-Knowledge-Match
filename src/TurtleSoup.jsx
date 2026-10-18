@@ -1,7 +1,7 @@
-import { PageHeader, StatusNotice } from "./StaffUi"
+import { PageHeader, StatusNotice, ConfirmDialog } from "./StaffUi"
 import './turtle-soup.css'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { api } from './api'
+import { api, serverNow } from './api'
 import { paginateSoupText, soupPlaybackFrame, paginateSoupClues, soupClueFrame } from './soupPlayback'
 
 function SoupPane({ title, className = '', entries, playback, now, fontScale }) {
@@ -42,11 +42,12 @@ function SoupPane({ title, className = '', entries, playback, now, fontScale }) 
   </section>
 }
 
-function SoupCluesPane({ entries, fontScale }) {
+function SoupCluesPane({ entries, fontScale, paused = false }) {
   const ref = useRef(null), measureRef = useRef(null)
   const [pages, setPages] = useState([[]])
-  const [startedAt, setStartedAt] = useState(Date.now)
-  const [now, setNow] = useState(Date.now)
+  const [startedAt, setStartedAt] = useState(() => serverNow())
+  const [now, setNow] = useState(() => serverNow())
+  const pausedAt = useRef(0)
   const signature = JSON.stringify(entries)
   useLayoutEffect(() => {
     const node = ref.current, measure = measureRef.current
@@ -70,7 +71,7 @@ function SoupCluesPane({ entries, fontScale }) {
         return measure.getBoundingClientRect().height <= node.clientHeight + .5
       })
       setPages(next)
-      const time = Date.now()
+      const time = serverNow()
       setStartedAt(time); setNow(time)
     }
     const schedule = () => { if (!active) return; cancelAnimationFrame(frame); frame = requestAnimationFrame(paginate) }
@@ -81,10 +82,19 @@ function SoupCluesPane({ entries, fontScale }) {
     return () => { active = false; observer.disconnect(); cancelAnimationFrame(frame) }
   }, [signature, fontScale])
   useEffect(() => {
-    if (pages.length <= 1) return
-    const timer = setInterval(() => setNow(Date.now()), 250)
+    // 线索轮播跟着「暂停播放」一起冻结：记下暂停时刻，恢复时把起点往后挪同样的时长。
+    if (paused) { pausedAt.current = serverNow(); return undefined }
+    if (pausedAt.current) {
+      const time = serverNow()
+      const gap = time - pausedAt.current
+      pausedAt.current = 0
+      setStartedAt((value) => value + gap)
+      setNow(time)
+    }
+    if (pages.length <= 1) return undefined
+    const timer = setInterval(() => setNow(serverNow()), 250)
     return () => clearInterval(timer)
-  }, [pages.length])
+  }, [pages.length, paused])
   const { index, progress } = soupClueFrame(pages, startedAt, now)
   return <section className="soup-pane soup-clues">
     <h2>已公开线索<span className="soup-clue-number">共 {entries.length} 条</span></h2>
@@ -95,7 +105,7 @@ function SoupCluesPane({ entries, fontScale }) {
       </div>)}</div>
       <div ref={measureRef} className="soup-clue-list soup-page-measure" aria-hidden="true" />
     </div>
-    <div className="soup-page-status"><span>{pages.length > 1 ? `第 ${index + 1} / ${pages.length} 页` : `${entries.length} 条线索同屏`}</span><span>{pages.length > 1 ? '线索独立轮播' : '全部显示'}</span></div>
+    <div className="soup-page-status"><span>{pages.length > 1 ? `第 ${index + 1} / ${pages.length} 页` : `${entries.length} 条线索同屏`}</span><span>{pages.length > 1 ? paused ? '轮播已暂停' : '线索独立轮播' : '全部显示'}</span></div>
     {pages.length > 1 && <div className="soup-page-progress" aria-hidden="true"><span style={{ width: `${progress * 100}%` }} /></div>}
   </section>
 }
@@ -104,11 +114,11 @@ export function TurtleSoupScreen({ data = {}, scrollRef, fontScale = 100 }) {
   const waiting = !data.stage || data.stage === 'LOBBY'
   const solution = !waiting && !!data.solution
   const clues = !!data.clues?.length
-  const [now, setNow] = useState(Date.now)
+  const [now, setNow] = useState(() => serverNow())
   useEffect(() => {
-    setNow(Date.now())
+    setNow(serverNow())
     if (waiting || data.playback?.paused) return
-    const timer = setInterval(() => setNow(Date.now()), 250)
+    const timer = setInterval(() => setNow(serverNow()), 250)
     return () => clearInterval(timer)
   }, [waiting, data.playback])
   const surface = useMemo(() => [{ text: data.surface || '' }], [data.surface])
@@ -119,7 +129,7 @@ export function TurtleSoupScreen({ data = {}, scrollRef, fontScale = 100 }) {
     <h1 title={waiting ? undefined : data.title}>{waiting ? '一个故事，藏着另一种真相' : data.title}</h1>
     {waiting ? <p className="soup-surface">向主持人提问，通过「是」「否」「无关」逐步还原故事。</p> : <div className={`soup-screen-body ${solution ? 'soup-screen-body--solution' : ''} ${clues ? 'soup-screen-body--clues' : ''}`}>
       <SoupPane title="汤面" className="soup-surface-pane" entries={surface} playback={data.playback} now={now} fontScale={fontScale} />
-      {clues && <SoupCluesPane entries={clueEntries} fontScale={fontScale} />}
+      {clues && <SoupCluesPane entries={clueEntries} fontScale={fontScale} paused={!!data.playback?.paused} />}
       {solution && <SoupPane title="汤底 · 完整真相" className="soup-solution" entries={truth} playback={data.playback} now={now} fontScale={fontScale} />}
     </div>}
     <footer>现场提问 · 主持人回应 · 共同推理</footer>
@@ -141,7 +151,10 @@ export function TurtleSoupParticipant({ activityId, participantToken, useStream 
   }, [load])
   useStream(participantToken ? activityId : null, load, participantToken, setError)
   if (error) return <StatusNotice text={error} tone="error" onRetry={load} />
-  if (!data.surface) return null
+  if (!data.surface) return <article className="answer-card soup-participant" aria-label="海龟汤">
+    <span className="type-chip">海龟汤</span><h2>海龟汤即将开始</h2>
+    <p className="soup-text">主持人准备好后会在这里显示汤面，请留在大屏前等待。</p>
+  </article>
   return <article className="answer-card soup-participant" aria-label="海龟汤">
     <span className="type-chip">海龟汤</span><h2>{data.title}</h2>
     <h3>汤面</h3><p className="soup-text">{data.surface}</p>
@@ -166,6 +179,8 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   const [playlist, setPlaylist] = useState({entries: [], activeTemplateId: null})
   const [selectedIds, setSelectedIds] = useState([])
   const [playlistEditing, setPlaylistEditing] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [pendingTemplate, setPendingTemplate] = useState(null)
   useLayoutEffect(() => {
     const controls = controlsRef.current
     if (!controls) return
@@ -211,12 +226,24 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
     catch (cause) { setError(cause.message); await load() }
     finally { setBusy(false) }
   }
+  const switchTemplate = async (templateId) => {
+    setPendingTemplate(null); setBusy(true); setError('')
+    try {
+      // 允许在推理过程中直接换稿：先回到候场（收回公开内容），再切换。
+      const base = state.stage === 'LOBBY' ? state
+        : await api.controlTurtleSoup(activity.id, { action: 'RESET', revision: state.revision })
+      const next = await api.switchSoup(activity.id, templateId, base.revision)
+      setState(next); setDraft(next.content || empty); setPlaylist(await api.soupPlaylist(activity.id))
+      setNotice('已切换汤稿，请点击“展示汤面”开始新故事。')
+    } catch (cause) { setError(cause.message); await load() }
+    finally { setBusy(false) }
+  }
   const content = state?.content
   const waiting = state?.stage === 'LOBBY'
   const running = state?.stage === 'SURFACE'
   const solutionShown = state?.stage === 'SOLUTION'
   const ended = ['FINISHED', 'CANCELLED'].includes(activity.status)
-  const disabled = busy || dirty || !content || activity.status !== 'LIVE'
+  const disabled = busy || !content || activity.status !== 'LIVE'
   const selected = state?.revealedClueIndexes || Array.from({ length: state?.revealedClues || 0 }, (_, i) => i)
   const preview = waiting || !state ? { stage: 'LOBBY' } : { stage: state.stage, playback: state.playback, title: content.title, surface: content.surface,
     clues: selected.map((index) => content.clues[index]), clueNumbers: selected.map((index) => index + 1), ...(solutionShown ? { solution: content.solution } : {}) }
@@ -235,15 +262,15 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
         <span className="soup-speed-value">每页 <strong>{state.playback?.paceSeconds || 15}</strong> 秒</span>
         <button className="secondary-button" disabled={disabled || waiting || (state.playback?.paceSeconds || 15) <= 8} onClick={() => control('SET_PLAYBACK_SPEED', { paceSeconds: Math.max(8, (state.playback?.paceSeconds || 15) - 3) })}>＋ 加速</button>
       </div>
-      <p>仅控制汤面和汤底（8–40 秒／页）。手动翻页会暂停；点“继续播放”恢复。线索尽量同屏展示，放不下时独立轮播，不受这些按钮控制。</p>
-      {dirty && <p>请先保存汤稿修改，再操作播放。</p>}
+      <p>仅控制汤面和汤底（8–40 秒／页）。手动翻页会暂停；点“继续播放”恢复。线索尽量同屏展示，放不下时独立轮播，暂停时一起停住。</p>
+      {dirty && <p>有未保存的汤稿修改：播放与线索控场不受影响，离开页面前记得保存。</p>}
       {activity.status !== 'LIVE' && <p>请先开始海龟汤活动，再展示汤面。</p>}
     </section>}
     {lifecycle}
-    <details className="data-panel staff-panel staff-form soup-playlist" open={waiting || playlistEditing || undefined}><summary>本会场使用的汤稿{content?.title && <span> · {content.title}</span>}</summary><p>汤稿来自所属母活动，可选多份依次使用。切换前请先回到候场；切换后清空公开内容，点击“展示汤面”开始新故事，汤底由答案开关单独放出。</p>
-      <label>当前汤稿<select aria-label="当前汤稿" value={playlist.activeTemplateId || ''} disabled={busy || !waiting || ended || dirty} onChange={async (e) => {
-        if (!e.target.value) return; setBusy(true); setError('');
-        try { const next=await api.switchSoup(activity.id,e.target.value,state.revision); setState(next); setDraft(next.content || empty); setPlaylist(await api.soupPlaylist(activity.id)); setNotice('已切换汤稿，请点击“展示汤面”开始新故事。') } catch(cause) {setError(cause.message); await load()} finally {setBusy(false)}
+    <details className="data-panel staff-panel staff-form soup-playlist" open={waiting || playlistEditing || undefined}><summary>本会场使用的汤稿{content?.title && <span> · {content.title}</span>}{!waiting && content && <span> · 可切换</span>}</summary><p>汤稿来自所属母活动，可选多份依次使用。切换会先收回已公开内容、回到候场，翻页速度保留；之后点击“展示汤面”开始新故事，汤底由答案开关单独放出。</p>
+      <label>当前汤稿<select aria-label="当前汤稿" title={dirty ? '请先保存汤稿修改，再切换' : waiting ? undefined : '切换会自动回到候场，并收回已公开的线索'} value={playlist.activeTemplateId || ''} disabled={busy || ended || dirty} onChange={(e) => {
+        if (!e.target.value || e.target.value === playlist.activeTemplateId) return;
+        setPendingTemplate(e.target.value)
       }}><option value="">请选择已选入会场的汤稿</option>{playlist.entries.map((entry) => <option key={entry.id} value={entry.id}>{entry.content.title}</option>)}</select></label>
       {!playlist.entries.length && <p>尚未选入汤稿，请管理员点击“选择本会场汤稿”。</p>}
       {canManage && <button className="secondary-button" disabled={busy || !waiting || ended || dirty} onClick={() => {setSelectedIds(playlist.entries.map((entry) => entry.id));setPlaylistEditing(!playlistEditing)}}>选择本会场汤稿</button>}
@@ -251,11 +278,33 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
     </details>
     <StatusNotice text={error} tone="error" onRetry={load} />
     <StatusNotice text={notice} />
+    {confirmReset && <ConfirmDialog
+      title="回到候场并收回公开内容？"
+      description="大屏会回到候场画面，已公开的线索与汤底都会被收回。"
+      details={[`当前已公开 ${state?.revealedClues || 0} 条线索`, "汤稿内容不会被删除，重新“展示汤面”即可再次开始。"]}
+      confirmLabel="回到候场"
+      tone="danger"
+      busy={busy}
+      onCancel={() => setConfirmReset(false)}
+      onConfirm={() => { setConfirmReset(false); control('RESET') }}
+    />}
+    {pendingTemplate && <ConfirmDialog
+      title="切换汤稿？"
+      description={waiting
+        ? `将切换到《${playlist.entries.find((entry) => entry.id === pendingTemplate)?.content.title || '所选汤稿'}》，并从候场开始。`
+        : `将先回到候场、收回已公开内容，再切换到《${playlist.entries.find((entry) => entry.id === pendingTemplate)?.content.title || '所选汤稿'}》。`}
+      details={waiting ? ["当前翻页速度会保留。"] : ["已公开的线索会被清空。", "当前翻页速度会保留。"]}
+      confirmLabel={waiting ? "切换并回到候场" : "收回内容并切换"}
+      tone="danger"
+      busy={busy}
+      onCancel={() => setPendingTemplate(null)}
+      onConfirm={() => switchTemplate(pendingTemplate)}
+    />}
     {!state ? <p>正在读取汤稿…</p> : <>
         <section className="data-panel staff-panel staff-form soup-controls"><div><span className="type-chip">{waiting ? '候场' : solutionShown ? '答案已公开' : '推理进行中'}</span><h2>展示控制</h2><p>已公开 {state.revealedClues} / {content?.clues.length || 0} 条线索</p></div>
           <div className="soup-actions">
-            <button className="primary-button" disabled={disabled || !waiting} onClick={() => control('SHOW_SURFACE')}>展示汤面</button>
-            <button className="secondary-button" disabled={busy || waiting} onClick={() => control('RESET')}>回到候场 / 重置</button>
+            <button className="primary-button" disabled={disabled || !waiting || dirty} title={dirty ? '有未保存的汤稿修改，先保存再展示' : undefined} onClick={() => control('SHOW_SURFACE')}>展示汤面</button>
+            <button className="secondary-button" disabled={busy || waiting} onClick={() => setConfirmReset(true)}>回到候场 / 重置</button>
           </div>
           <div className="soup-answer-switch">
             <span className="soup-answer-switch__label" id="soup-answer-switch-label">答案 · 汤底</span>
@@ -265,7 +314,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
             </button>
             <small>独立开关：只放出或收回汤底，不影响汤面、线索和自动翻页。</small>
           </div>
-          {dirty && <p>有未保存的修改，请先保存汤稿。</p>}
+          {dirty && <p>有未保存的汤稿修改：先保存再展示汤面，改动才会送上大屏。</p>}
           {activity.status !== 'LIVE' && <p>请先开始海龟汤；暂停期间可回到候场。</p>}
         </section>
       <div className="soup-console-grid">
@@ -289,8 +338,8 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
           <label>临时线索<textarea maxLength={2000} rows={3} value={manualClue} disabled={busy || ended || state.stage === 'SOLUTION'} onChange={(e) => setManualClue(e.target.value)} placeholder="输入主持人现场补充的提示…" /></label>
           <small>{manualClue.length}/2000 字 · 已保存 {content?.clues.length || 0}/50 条</small>
           <div className="soup-actions">
-            <button type="button" className="secondary-button" disabled={disabled || !manualClue.trim() || content.clues.length >= 50 || state.stage === 'SOLUTION'} onClick={() => control('ADD_CLUE', { clue: manualClue, publishNow: false })}>保存为待展示线索</button>
-            <button type="button" className="primary-button" disabled={disabled || !running || !manualClue.trim() || content.clues.length >= 50} onClick={() => control('ADD_CLUE', { clue: manualClue, publishNow: true })}>添加并立即公开</button>
+            <button type="button" className="secondary-button" disabled={disabled || dirty || !manualClue.trim() || content.clues.length >= 50 || state.stage === 'SOLUTION'} title={dirty ? '有未保存的汤稿修改，先保存再加线索' : undefined} onClick={() => control('ADD_CLUE', { clue: manualClue, publishNow: false })}>保存为待展示线索</button>
+            <button type="button" className="primary-button" disabled={disabled || dirty || !running || !manualClue.trim() || content.clues.length >= 50} title={dirty ? '有未保存的汤稿修改，先保存再加线索' : undefined} onClick={() => control('ADD_CLUE', { clue: manualClue, publishNow: true })}>添加并立即公开</button>
           </div>
         </section>
         {canManage && <details className="data-panel staff-panel staff-form soup-editor" open={dirty || undefined}><summary>编辑当前汤稿（仅本会场）</summary><form onSubmit={save}><p>修改前请回到候场。线索可自由选择展示顺序，也可在推理时临时添加。</p>

@@ -1619,3 +1619,43 @@ a:focus-visible {
   .screen-options-new { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* 统一确认层：复用 .dialog 主题，只补操作区与危险动作样式。 */
+.dialog--confirm { width: min(460px, 100%); }
+.dialog-confirm__text { margin: 0; color: var(--soyo-text); font-size: 13px; line-height: 1.8; white-space: pre-wrap; }
+.dialog-confirm__list { display: grid; gap: 6px; margin: 12px 0 0; padding-left: 18px; color: var(--soyo-muted); font-size: 12px; line-height: 1.7; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.dialog-actions > button { flex: 0 1 auto; }
+
+/* 顺序列表多出一个「移出题组」按钮。 */
+.question-set-picker__selected > div { grid-template-columns: 24px minmax(0, 1fr) 28px 28px 28px; }
+
+/* 参与者端顶部恢复「活动名 + 当前阶段」：旧手机壳布局曾把这一块整体隐藏。 */
+.participant-header > div { display: grid; gap: 2px; min-width: 0; max-width: 52vw; text-align: center; }
+.participant-header > div strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.participant-header > div span { color: var(--soyo-muted); font-size: 11px; letter-spacing: 0.04em; }
+
+.danger-button {
+  min-height: 42px;
+  padding: 0 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #fff;
+  background: linear-gradient(135deg, #b06a68, var(--soyo-blush));
+  border: 1px solid transparent;
+  border-radius: 13px;
+  box-shadow: 0 8px 20px rgba(153, 88, 88, 0.2);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.danger-button:hover:not(:disabled) { background: linear-gradient(135deg, #a25f5e, #cd8c91); transform: translateY(-1px); }
+.danger-button:disabled { opacity: 0.62; cursor: not-allowed; }
+
+@media (max-width: 510px) {
+  .dialog-actions { flex-direction: column-reverse; }
+  .dialog-actions > button { width: 100%; }
+}
+

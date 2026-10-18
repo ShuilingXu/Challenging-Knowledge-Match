@@ -1,5 +1,5 @@
 import { activityEntryGroups, participantFeatureLabel, participationLabel, controlStatusHint, screenAnswerHint, venueDisplayName } from "./activity-flow";
-import { PageHeader, StatusNotice } from "./StaffUi";
+import { PageHeader, StatusNotice, ConfirmDialog } from "./StaffUi";
 import { ParticipantAnswerReveal } from "./ParticipantAnswerReveal";
 import { QuestionBrowser, Pagination } from "./QuestionBrowser";
 import { filterQuestionSets, questionPage } from "./question-bank";
@@ -449,7 +449,7 @@ function StaffApp() {
     const active = feature(type);
     const choices = features.filter((item) => item.activityType === type);
     if (!active) return <Navigate to="/admin/overview" replace />;
-    return <><section className="page-content" style={{paddingBottom: 0}}><p>当前会场：{currentActivity?.name}</p>{choices.length > 1 && <label>历史功能记录<select value={active.id} onChange={(e) => setFeatureSelections({...featureSelections, [`${activityId}.${type}`]: e.target.value})}>{choices.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}</section>{render(active)}</>;
+    return <>{choices.length > 1 && <section className="page-content" style={{ paddingBottom: 0 }}><label>历史功能记录<select value={active.id} onChange={(e) => setFeatureSelections({...featureSelections, [`${activityId}.${type}`]: e.target.value})}>{choices.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></section>}{render(active)}</>;
   };
   const lotteryActivity = currentActivity?.activityType === "LOTTERY";
   const soupActivity = currentActivity?.activityType === "TURTLE_SOUP";
@@ -718,6 +718,7 @@ function HostLotteryPage({ activity, reload, canManage }) {
   const [poolId, setPoolId] = useState(() => { try { return JSON.parse(sessionStorage.getItem(`matrix.host-draw.${activity.id}`))?.prizePoolId || ""; } catch { return ""; } });
   const [rolling, setRolling] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -759,8 +760,17 @@ function HostLotteryPage({ activity, reload, canManage }) {
     <InlineError text={error} onRetry={attempt.current ? stop : load} />
     <label className="host-lottery-picker staff-form">摇奖奖池<select value={poolId} disabled={rolling || confirming || !!attempt.current} onChange={(e) => { setPoolId(e.target.value); setResult(null); setDisplayName(""); }}><option value="">请选择奖池</option>{pools.map((p) => <option key={p.id} value={p.id}>{p.name} · 剩余 {p.remainingQuantity} 件 · 最低 {p.minScore} 分</option>)}</select></label>
     {!pools.length && <EmptyState icon={Gift} title="尚未配置奖池" description="请先进入奖品管理，添加并启用主持人抽奖奖池。" />}
-    <article className="data-panel staff-panel host-lottery-stage"><span className="type-chip">符合条件 {eligible.length} 人</span><h2 aria-live="polite">{displayName || "等待开始摇奖"}</h2>
-      {confirming ? <p>正在确认中奖结果…</p> : !rolling ? <button className="primary-button" disabled={activity.status !== "LIVE" || !pool?.enabled || !pool.remainingQuantity || !eligible.length || !!attempt.current} onClick={() => { setResult(null); setRolling(true); }}>开始摇奖</button> : <button className="primary-button" onClick={stop}>停止并公布中奖人</button>}
+    <article className="data-panel staff-panel host-lottery-stage"><span className="type-chip">符合条件 {eligible.length} 人</span><h2 aria-live="polite">{confirming ? "正在抽取中…" : displayName || "等待开始摇奖"}</h2>
+      {confirming ? <p>正在确认中奖结果…</p> : !rolling ? <button className="primary-button" disabled={activity.status !== "LIVE" || !pool?.enabled || !pool.remainingQuantity || !eligible.length || !!attempt.current} onClick={() => { setResult(null); setRolling(true); }}>开始摇奖</button> : <button className="primary-button" onClick={() => setStopConfirmOpen(true)}>停止并公布中奖人</button>}
+      {stopConfirmOpen && <ConfirmDialog
+        title="确认中奖人？"
+        description="停止后会立即从符合条件的人中随机选出一位，并生成领奖记录同步到大屏。"
+        details={[`奖池：${pool?.name || "未选择"}`, `剩余 ${pool?.remainingQuantity || 0} 件 · 符合条件 ${eligible.length} 人`, "确认后不能撤回，只能到「奖品与核销」作废这条记录。"]}
+        confirmLabel="停止并公布"
+        tone="danger"
+        onCancel={() => setStopConfirmOpen(false)}
+        onConfirm={() => { setStopConfirmOpen(false); stop(); }}
+      />}
       {!rolling && !confirming && !result && <p className="host-lottery-hint">{drawHint}</p>}
       <StatusNotice text={result ? `${result.participantName} · ${result.prizeName} · 已生成领奖记录并同步到大屏` : ""} />
     </article>
@@ -1758,7 +1768,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
     type: questionType,
     title: "",
     options: "选项 A\n选项 B\n选项 C\n选项 D",
-    answers: "B",
+    answers: "",
     fullScore: 100,
     partialCreditPercent: 40,
     textAcceptedAnswers: "",
@@ -2413,6 +2423,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
                   <input
                     required
                     value={form.answers}
+                    placeholder={form.type === "MULTIPLE" ? "例如：B,D" : "例如：B"}
                     onChange={(event) =>
                       setForm({ ...form, answers: event.target.value })
                     }
@@ -2651,6 +2662,15 @@ function QuestionsPage({ activityId, activity, canManage }) {
                       >
                         <ArrowDown size={15} />
                       </button>
+                      <button
+                        className="toolbar-icon"
+                        type="button"
+                        title="移出题组"
+                        aria-label={`移出题组 ${question?.title || questionId}`}
+                        onClick={() => toggleSetQuestion(questionId)}
+                      >
+                        <X size={15} />
+                      </button>
                     </div>
                   );
                 })}
@@ -2850,7 +2870,7 @@ function ParticipantsPage({ activityId }) {
               onChange={(event) => setQuery(event.target.value)}
               type="search"
               aria-label="检索参与人信息"
-              placeholder="搜索姓名、联系方式、组织或登记信息"
+              placeholder="搜索昵称、微信号/QQ 或登记信息"
             />
           </div>
           <span>
@@ -2901,7 +2921,7 @@ function ParticipantsPage({ activityId }) {
               title={participants.length ? "没有匹配的参与者" : "暂无参与者"}
               description={
                 participants.length
-                  ? "可按姓名、完整或部分 ID、联系方式继续检索。"
+                  ? "可按昵称、完整或部分 ID、微信号/QQ 继续检索。"
                   : "用户通过活动入口登记后会实时显示在这里。"
               }
             />
@@ -2927,7 +2947,7 @@ function ParticipantsPage({ activityId }) {
             </div>
             <div className="form-grid">
               <label>
-                姓名
+                昵称
                 <input
                   required
                   value={form.name || ""}
@@ -2937,7 +2957,7 @@ function ParticipantsPage({ activityId }) {
                 />
               </label>
               <label>
-                联系方式
+                微信号/QQ
                 <input
                   required
                   value={form.contact || ""}
@@ -3879,6 +3899,7 @@ function ScreensPage({ activityId }) {
   const [editingTemplate, setEditingTemplate] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [pairing, setPairing] = useState(null);
+  const [confirmScreenOpen, setConfirmScreenOpen] = useState(false);
   const [renamingDevice, setRenamingDevice] = useState(null);
   const [deviceBusy, setDeviceBusy] = useState(false);
   const [deviceForm, setDeviceForm] = useState({
@@ -4195,15 +4216,14 @@ function ScreensPage({ activityId }) {
             <span>扫描二维码或打开直达链接，令牌只可使用一次。</span>
           </div>
           <div className="pairing-callout__actions">
-            <a
+            <button
               className="secondary-button"
-              href={pairingUrl}
-              target="_blank"
-              rel="noreferrer"
+              type="button"
+              onClick={() => setConfirmScreenOpen(true)}
             >
               <Monitor size={16} />
               打开受控大屏
-            </a>
+            </button>
             <button
               className="secondary-button"
               type="button"
@@ -4214,6 +4234,19 @@ function ScreensPage({ activityId }) {
             </button>
           </div>
         </section>
+      )}
+      {confirmScreenOpen && pairing && (
+        <ConfirmDialog
+          title="在这台电脑上打开受控大屏？"
+          description={`配对链接只能在一台设备上打开一次。点「继续打开」会立即占用来宾屏名额，并把当前令牌作废。`}
+          details={[
+            `设备：${pairing.device.name}`,
+            "如果这台不是要投射的大屏主机，请改用「复制链接」发送到屏体电脑。",
+          ]}
+          confirmLabel="继续打开"
+          onCancel={() => setConfirmScreenOpen(false)}
+          onConfirm={() => { setConfirmScreenOpen(false); window.open(pairingUrl, "_blank", "noopener,noreferrer"); }}
+        />
       )}
       <div className="screens-admin-grid">
         <section className="data-panel">
@@ -5253,7 +5286,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
           </div>
           <h2>报名入口</h2>
           <p>
-            本页的入口均属于当前会场，联系方式在本会场内唯一。新建独立会场请到“活动管理”。
+            本页的入口均属于当前会场，微信号/QQ 在本会场内唯一。新建独立会场请到“活动管理”。
           </p>
           <span className="settings-caption">
             {venues.filter((venue) => venue.enabled).length} 个启用入口 ·{" "}
@@ -5411,7 +5444,7 @@ function SettingsPage({ user, activityId, activity, reloadActivities }) {
               <EmptyState
                 icon={ClipboardList}
                 title="暂无扩展字段"
-                description="姓名、联系方式和所属组织为系统固定字段；可在此增加活动专属登记信息。"
+                description="昵称和微信号/QQ 为系统固定字段；可在此增加活动专属登记信息。"
               />
             )}
           </div>
@@ -6181,7 +6214,7 @@ function ParticipantProfile({ activityId, participant, participantToken, venueNa
   useEffect(() => { load(); }, [load]);
   return <article className="participant-profile"><div className="workspace-heading"><h2>我的参与信息</h2><button className="toolbar-icon" title="刷新参与信息" onClick={load}><RefreshCw size={18} /></button></div>
     <InlineError text={error} onRetry={load} />
-    <dl>{[["姓名", detail.name], ["联系方式", detail.contact], ["组织", detail.organization], ["会场", venueName || venueDisplayName(detail.venue)], ["参与编号", detail.id], ["积分", detail.score], ...Object.entries(detail.customFields || {})].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? ""}</dd></div>)}</dl>
+    <dl>{[["昵称", detail.name], ["微信号/QQ", detail.contact], ...(detail.organization ? [["组织", detail.organization]] : []), ["会场", venueName || venueDisplayName(detail.venue)], ["参与编号", detail.id], ["积分", detail.score], ...Object.entries(detail.customFields || {})].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? ""}</dd></div>)}</dl>
   </article>;
 }
 
@@ -6204,7 +6237,6 @@ function RegistrationCard({
   const [values, setValues] = useState({
     name: "",
     contact: "",
-    organization: "",
   });
   const [customValues, setCustomValues] = useState({});
   const [error, setError] = useState("");
@@ -6251,7 +6283,7 @@ function RegistrationCard({
     <form className="registration-card" onSubmit={submit}>
       <p className="eyebrow">欢迎来到次元现场</p>
       <h2>{returning ? "查询我的参与信息" : "先确认你的现场身份"}</h2>
-      <p>联系方式会在当前活动内唯一识别你。</p>
+      <p>微信号/QQ 会在当前活动内唯一识别你。</p>
       {activeVenues.length === 1 && venue === activeVenues[0].code ? <div className="registration-venue-summary"><MapPin size={18} /><div><strong>{activeVenues[0].name}</strong><small>已为你选好报名会场</small></div></div> : <label>
         会场
         <select
@@ -6273,37 +6305,27 @@ function RegistrationCard({
         </select>
       </label>}
       {!returning && <label>
-        姓名
+        昵称
         <input
           required
           value={values.name}
           onChange={(event) =>
             setValues({ ...values, name: event.target.value })
           }
-          placeholder="输入真实姓名"
+          placeholder="输入昵称"
         />
       </label>}
       <label>
-        联系方式
+        微信号/QQ
         <input
           required
           value={values.contact}
           onChange={(event) =>
             setValues({ ...values, contact: event.target.value })
           }
-          placeholder="手机号或邮箱"
+          placeholder="微信号或 QQ 号"
         />
       </label>
-      {!returning && <label>
-        所属组织（可选）
-        <input
-          value={values.organization}
-          onChange={(event) =>
-            setValues({ ...values, organization: event.target.value })
-          }
-          placeholder="公司或团队"
-        />
-      </label>}
       {!returning && dynamic.map((field) => (
         <RegistrationFieldInput
           key={field.id || registrationFieldKey(field)}
@@ -6484,12 +6506,15 @@ export function AnswerCard({
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // 同一题的重复点击/重试必须复用同一把幂等键，否则服务端会把它当成第二次提交。
+  const submitKey = useRef("");
   const remaining = useLiveCountdown(state);
   useEffect(() => {
     setAnswers([]);
     setTextAnswer("");
     setResult(null);
     setError("");
+    submitKey.current = "";
   }, [question?.id]);
   useEffect(() => {
     if (submission)
@@ -6529,6 +6554,7 @@ export function AnswerCard({
     }
     setBusy(true);
     setError("");
+    if (!submitKey.current) submitKey.current = createIdempotencyKey();
     try {
       const response = await api.answer(
         activityId,
@@ -6536,13 +6562,20 @@ export function AnswerCard({
           participantId: participant.id,
           questionId: question.id,
           answers: value,
-          idempotencyKey: createIdempotencyKey(),
+          idempotencyKey: submitKey.current,
         },
         participantToken,
       );
+      submitKey.current = "";
       setResult(response);
       onAnswered(response);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) {
+        // 提交其实已经落库（例如响应超时后重试），按成功处理，不要报成失败。
+        submitKey.current = "";
+        setResult({ status: "SUBMITTED", feedback: "你的答案已经提交成功，无需重复提交。" });
+        return;
+      }
       setError(cause.message);
     } finally {
       setBusy(false);
@@ -6616,7 +6649,8 @@ export function AnswerCard({
             <strong>
               {resultLabel}
               {result.status !== "PENDING_REVIEW" &&
-                ` · ${result.awardedPoints || 0} 分`}
+                result.awardedPoints != null &&
+                ` · ${result.awardedPoints} 分`}
             </strong>
             <span>{resultNote}</span>
           </div>
@@ -7173,15 +7207,35 @@ function QuestionMedia({ question, className, volume, answer = false }) {
 function ActivityLifecycle({ activity, canManage, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(null);
   const change = async (status) => {
+    setPending(null);
     setBusy(true); setError("");
     try { await api.changeActivityStatus(activity.id, status); await onChanged?.(); }
     catch (cause) { setError(cause.message); }
     finally { setBusy(false); }
   };
+  const confirmCopy = (status) => {
+    if (status === "FINISHED") return {
+      title: "结束这个活动？",
+      description: `「${activity?.name || "当前活动"}」及其下属会场、环节会一起收尾，参与者不能再作答或抽奖。`,
+      details: ["结束后无法回到草稿，也不能撤销。"],
+      confirmLabel: "确认结束",
+    };
+    if (status === "PAUSED") return {
+      title: "暂停这个活动？",
+      description: activity?.activityType === "TURTLE_SOUP"
+        ? "暂停后大屏停留在当前画面，已公开线索与翻页节奏都会保留；恢复后可以继续控场。"
+        : "暂停会让现场大屏回到等待画面；答题的当前题目会结束，恢复后需要重新开题并重新计时。",
+      details: activity?.activityType === "TURTLE_SOUP" ? [] : ["已经收到的作答不会丢失，但本题不能再继续作答。"],
+      confirmLabel: "确认暂停",
+    };
+    return null;
+  };
   return <div className="activity-lifecycle"><strong>{activityStatusLabels[activity?.status]}</strong>
-    {canManage && activityActions(activity?.status, activity?.activityType).map(([status, label]) => <button className="secondary-button" type="button" key={status} disabled={busy} onClick={() => change(status)}>{label}</button>)}
+    {canManage && activityActions(activity?.status, activity?.activityType).map(([status, label]) => <button className="secondary-button" type="button" key={status} disabled={busy} onClick={() => { const copy = confirmCopy(status); if (copy) setPending({ status, ...copy }); else change(status); }}>{label}</button>)}
     <InlineError text={error} />
+    {pending && <ConfirmDialog {...pending} tone="danger" busy={busy} onCancel={() => setPending(null)} onConfirm={() => change(pending.status)} />}
   </div>;
 }
 

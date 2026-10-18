@@ -69,14 +69,15 @@ class TurtleSoupIntegrationTest {
     soup.control(activity.id(),new Command("RESET",state.revision()));
     assertFalse(screens.currentDisplay(activity.id(),childScreen.device().id()).data().containsKey("surface"));
   }
-  @Test void pauseClearsTheDisplayAndInvalidatesStaleCommands() {
+  @Test void pauseKeepsTheSoupProgressAndInvalidatesStaleCommands() {
     var activity=create();
     var state=soup.save(activity.id(),new Content("Mystery","Surface",List.of(),"Solution"));
     QuizTestSupport.start(activities,activity.id());
     state=soup.control(activity.id(),new Command("SHOW_SURFACE",state.revision()));
     activities.changeActivityStatus(activity.parentActivityId(),new ChangeActivityStatusRequest("PAUSED"));
-    assertEquals("LOBBY",soup.state(activity.id()).stage());
-    assertTrue(soup.state(activity.id()).revision()>state.revision());
+    // 暂停不再清空海龟汤进度：汤面保持展示，恢复后主持人可以继续控场。
+    assertEquals("SURFACE",soup.state(activity.id()).stage());
+    assertEquals(state.revision(),soup.state(activity.id()).revision());
     assertThrows(DomainException.class, () -> activities.control(activity.id(),new ControlRequest("QUESTION_OPEN",null,0)));
     assertThrows(DomainException.class, () -> activities.register(activity.id(),"main",new RegisterParticipantRequest("Viewer","contact",null)));
   }

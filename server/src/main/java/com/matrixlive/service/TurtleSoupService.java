@@ -140,7 +140,7 @@ public class TurtleSoupService {
         selected.remove(selected.size()-1);
       }
       case "ADD_CLUE" -> {
-        if (!Set.of("LOBBY", "SURFACE").contains(stage)) throw conflict("揭晓后请先回到候场，再添加线索");
+        if (!Set.of("LOBBY", "SURFACE").contains(stage)) throw conflict("答案公开时不能添加线索，请先收回答案");
         if (command.clue()==null || command.clue().isBlank() || command.clue().length()>2000)
           throw new DomainException(HttpStatus.BAD_REQUEST, "临时线索需为 1 至 2000 字");
         if (content.clues().size()>=50) throw conflict("最多保存 50 条线索");
@@ -152,6 +152,10 @@ public class TurtleSoupService {
       case "REVEAL_SOLUTION" -> {
         if (!"SURFACE".equals(stage)) throw conflict("请先展示汤面，再揭晓汤底");
         stage="SOLUTION";
+      }
+      case "HIDE_SOLUTION" -> {
+        if (!"SOLUTION".equals(stage)) throw conflict("答案尚未公开");
+        stage="SURFACE";
       }
       case "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "NEXT_PAGE", "PREVIOUS_PAGE", "RESTART_PLAYBACK", "SET_PLAYBACK_SPEED" -> {
         if (!Set.of("SURFACE", "SOLUTION").contains(stage)) throw conflict("请先展示汤面，再控制播放");
@@ -182,7 +186,7 @@ public class TurtleSoupService {
       default -> throw new DomainException(HttpStatus.BAD_REQUEST, "未知海龟汤操作");
     }
     // New public material starts a full reading interval; private edits do not interrupt playback.
-    if (Set.of("SHOW_SURFACE","REVEAL_SOLUTION","RESET").contains(action)
+    if (Set.of("SHOW_SURFACE","REVEAL_SOLUTION","HIDE_SOLUTION","RESET").contains(action)
         || (!selected.equals(current.revealedClueIndexes()) && !"HIDE_CLUE".equals(action)))
       playback=new Playback(false,0,now,0,playback.paceSeconds(), !selected.equals(current.revealedClueIndexes()) && "SURFACE".equals(stage) && !selected.isEmpty() ? selected.getLast()+1 : null);
     State next=new State(content, stage, selected.size(), current.revision()+1, selected, playback);
@@ -204,7 +208,8 @@ public class TurtleSoupService {
       data.put("title", state.content().title()); data.put("surface", state.content().surface());
       data.put("clues", state.revealedClueIndexes().stream().map(i -> state.content().clues().get(i)).toList());
       data.put("clueNumbers", state.revealedClueIndexes().stream().map(i -> i+1).toList());
-      data.put("solution", state.content().solution());
+      // The answer stays private until the host flips the dedicated reveal switch.
+      if ("SOLUTION".equals(state.stage())) data.put("solution", state.content().solution());
     }
     return data;
   }

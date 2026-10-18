@@ -3,10 +3,19 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { TurtleSoupScreen } from './TurtleSoup'
 
-describe('simultaneous soup display', () => {
-  it('includes the solution pane as soon as the surface is shown', () => {
+describe('independent soup answer switch', () => {
+  it('shows only the surface while the answer stays private', () => {
     const html = renderToStaticMarkup(createElement(TurtleSoupScreen, {
-      data: { stage: 'SURFACE', title: '故事', surface: '汤面内容', solution: '汤底内容', clues: [] },
+      data: { stage: 'SURFACE', title: '故事', surface: '汤面内容', clues: [] },
+    }))
+    expect(html).toContain('aria-label="汤面"')
+    expect(html).not.toContain('汤底 · 完整真相')
+    expect(html).not.toContain('soup-screen-body--solution')
+  })
+
+  it('adds the solution pane once the answer is released', () => {
+    const html = renderToStaticMarkup(createElement(TurtleSoupScreen, {
+      data: { stage: 'SOLUTION', title: '故事', surface: '汤面内容', solution: '汤底内容', clues: [] },
     }))
     expect(html).toContain('aria-label="汤面"')
     expect(html).toContain('aria-label="汤底 · 完整真相"')

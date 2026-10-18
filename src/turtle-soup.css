@@ -157,3 +157,16 @@
   .soup-screen-body--solution .soup-clues { display:none; }
   .soup-screen .soup-screen-body .soup-pane { grid-column:1; grid-row:1; }
 }
+/* Dedicated answer switch: releasing or retracting the truth never depends on other controls. */
+.soup-answer-switch { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; margin-top:4px; padding-top:12px; border-top:1px dashed #dbe5df; }
+.soup-answer-switch__label { color:#28533b; font-weight:700; }
+.soup-answer-toggle { display:flex; align-items:center; gap:10px; min-height:44px; padding:8px 16px; color:#3c5546; font:inherit; font-weight:700; background:#f4f9f5; border:1px solid #cad9ce; border-radius:999px; cursor:pointer; }
+.soup-answer-toggle[aria-checked="true"] { color:#7a5417; background:#fff6e4; border-color:#c79a4d; }
+.soup-answer-toggle:disabled { opacity:.55; cursor:not-allowed; }
+.soup-answer-toggle:focus-visible { outline:2px solid #599271; outline-offset:2px; }
+.soup-answer-toggle__track { position:relative; flex:none; width:44px; height:24px; border-radius:999px; background:#cfdad2; transition:background .15s; }
+.soup-answer-toggle[aria-checked="true"] .soup-answer-toggle__track { background:#c79a4d; }
+.soup-answer-toggle__thumb { position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px #00000033; transition:transform .15s; }
+.soup-answer-toggle[aria-checked="true"] .soup-answer-toggle__thumb { transform:translateX(20px); }
+.soup-answer-switch small { color:#66746c; }
+@media(max-width:600px) { .soup-answer-switch { gap:8px; } .soup-answer-toggle { flex:1 1 100%; justify-content:center; } .soup-answer-switch small { font-size:11px; } }

@@ -45,21 +45,26 @@ class TurtleSoupIntegrationTest {
     state=soup.control(activity.id(), new Command("SHOW_SURFACE",revision));
     var display=screens.currentDisplay(activity.parentActivityId(),mainScreen.device().id());
     assertEquals(ScreenDisplayMode.TURTLE_SOUP,display.mode());
-    assertEquals("Secret solution",display.data().get("solution"));
+    assertEquals("Visible surface",display.data().get("surface"));
+    assertFalse(display.data().containsKey("solution"));
     assertEquals(List.of(),display.data().get("clues"));
+    assertThrows(DomainException.class, () -> soup.control(activity.id(),new Command("HIDE_SOLUTION",state.revision())));
     state=soup.control(activity.id(), new Command("NEXT_CLUE",state.revision()));
     assertEquals(List.of("First clue"),screens.currentDisplay(activity.id(),childScreen.device().id()).data().get("clues"));
     assertEquals(state,soup.state(activity.id()));
     var lateScreen=screens.registerDevice(activity.id(),new RegisterScreenDeviceRequest("Late screen",1920,1080));
     var lateDisplay=screens.currentDisplay(activity.id(),lateScreen.device().id());
     assertEquals(List.of("First clue"),lateDisplay.data().get("clues"));
-    assertEquals("Secret solution",lateDisplay.data().get("solution"));
+    assertFalse(lateDisplay.data().containsKey("solution"));
     assertThrows(DomainException.class, () -> soup.control(activity.id(),new Command("NEXT_CLUE",revision)));
     assertThrows(DomainException.class, () -> soup.save(activity.id(),new Content("Changed","surface",List.of(),"solution")));
     state=soup.control(activity.id(),new Command("PREVIOUS_CLUE",state.revision()));
     assertEquals(List.of(),screens.currentDisplay(activity.id(),childScreen.device().id()).data().get("clues"));
     state=soup.control(activity.id(),new Command("REVEAL_SOLUTION",state.revision()));
     assertEquals("Secret solution",screens.currentDisplay(activity.parentActivityId(),mainScreen.device().id()).data().get("solution"));
+    state=soup.control(activity.id(),new Command("HIDE_SOLUTION",state.revision()));
+    assertEquals("Visible surface",screens.currentDisplay(activity.id(),childScreen.device().id()).data().get("surface"));
+    assertFalse(screens.currentDisplay(activity.parentActivityId(),mainScreen.device().id()).data().containsKey("solution"));
     soup.control(activity.id(),new Command("RESET",state.revision()));
     assertFalse(screens.currentDisplay(activity.id(),childScreen.device().id()).data().containsKey("surface"));
   }
@@ -78,17 +83,17 @@ class TurtleSoupIntegrationTest {
     var activity=create();
     mvc.perform(get("/api/activities/"+activity.id()+"/turtle-soup")).andExpect(status().isUnauthorized());
   }
-  @Test void participantPayloadShowsSurfaceAndSolutionButOnlyPublicClues() throws Exception {
+  @Test void participantPayloadKeepsTheSolutionPrivateUntilRevealed() throws Exception {
     var activity=create();
     var state=soup.save(activity.id(),new Content("Mystery","Surface",List.of("Private clue","Visible clue"),"Secret solution"));
     assertTrue(soup.participantDisplay(activity.parentActivityId()).isEmpty());
     QuizTestSupport.start(activities,activity.id());
     state=soup.control(activity.id(),new Command("SHOW_SURFACE",state.revision()));
     assertEquals("Surface",soup.participantDisplay(activity.parentActivityId()).get("surface"));
-    assertEquals("Secret solution",soup.participantDisplay(activity.parentActivityId()).get("solution"));
+    assertFalse(soup.participantDisplay(activity.parentActivityId()).containsKey("solution"));
     var initialJson=mvc.perform(get("/api/activities/"+activity.parentActivityId()+"/turtle-soup/public"))
         .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-    assertTrue(initialJson.contains("Secret solution"));
+    assertFalse(initialJson.contains("Secret solution"));
     assertFalse(initialJson.contains("Private clue"));
     assertEquals(List.of(),soup.participantDisplay(activity.parentActivityId()).get("clues"));
     state=soup.control(activity.id(),new Command("SHOW_CLUE",state.revision(),1,null,null));
@@ -127,7 +132,7 @@ class TurtleSoupIntegrationTest {
     assertEquals(ScreenDisplayMode.TURTLE_SOUP,display.mode());
     assertEquals("Surface",display.data().get("surface"));
     assertEquals(List.of("Clue"),display.data().get("clues"));
-    assertEquals("Secret",display.data().get("solution"));
+    assertFalse(display.data().containsKey("solution"));
     assertEquals(ScreenDisplayMode.TEMPLATE,screens.currentDisplay(venue,other.device().id()).mode());
     var late=screens.registerDevice(venue,new RegisterScreenDeviceRequest("Late",1920,1080,template.id()));
     assertEquals(List.of("Clue"),screens.currentDisplay(venue,late.device().id()).data().get("clues"));
@@ -147,7 +152,7 @@ class TurtleSoupIntegrationTest {
     assertEquals(List.of("Third","First"),display.data().get("clues"));
     assertEquals(List.of(3,1),display.data().get("clueNumbers"));
     assertFalse(display.data().get("clues").toString().contains("Second"));
-    assertEquals("Secret solution",display.data().get("solution"));
+    assertFalse(display.data().containsKey("solution"));
     state=soup.control(activity.id(),new Command("HIDE_CLUE",state.revision(),2,null,null));
     assertEquals(List.of(0),state.revealedClueIndexes());
     state=soup.control(activity.id(),new Command("ADD_CLUE",state.revision(),null,"Private improvisation",false));
@@ -169,6 +174,7 @@ class TurtleSoupIntegrationTest {
     var state=soup.state(activity.id());
     assertEquals(List.of(0,1),state.revealedClueIndexes());
     assertEquals(List.of("A","B"),TurtleSoupService.display(state).get("clues"));
+    assertFalse(TurtleSoupService.display(state).containsKey("solution"));
     assertEquals(7,state.revision());
   }
   @Test void playbackCommandsPersistAcrossScreensWithoutExposingPrivateContent() throws Exception {
@@ -191,7 +197,7 @@ class TurtleSoupIntegrationTest {
     assertEquals(state,soup.state(activity.id()));
     var publicState=screens.currentDisplay(activity.id(),device.device().id()).data();
     assertNotNull(publicState.get("playback"));
-    assertEquals("Private truth",publicState.get("solution"));
+    assertFalse(publicState.containsKey("solution"));
     assertEquals(List.of(),publicState.get("clues"));
     assertFalse(screens.currentDisplay(other.id(),otherDevice.device().id()).data().containsKey("title"));
     var late=screens.registerDevice(activity.id(),new RegisterScreenDeviceRequest("Late",1280,720));

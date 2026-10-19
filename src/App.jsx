@@ -1382,6 +1382,7 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
 
 function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const [questions, setQuestions] = useState([]);
+  const [questionSets, setQuestionSets] = useState([]);
   const [state, setState] = useState(null);
   const [scoreboard, setScoreboard] = useState([]);
   const remaining = useLiveCountdown(state);
@@ -1414,11 +1415,13 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const load = useCallback(async () => {
     if (!activityId) return;
     try {
-      const [allQuestions, control, board] = await Promise.all([
+      const [allQuestions, control, board, sets] = await Promise.all([
         api.questionsControl(activityId),
         api.controlState(activityId),
         api.scoreboard(activityId),
+        api.questionSets(activityId),
       ]);
+      setQuestionSets(sets);
       setQuestions(allQuestions);
       setState(control);
       setScoreboard(board);
@@ -1504,6 +1507,36 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
       />
       <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reloadActivities} />
       <InlineError text={error} onRetry={load} />
+      <section className="data-panel">
+        <div className="data-panel__toolbar">
+          <label className="dialog-field">
+            使用题组
+            <select
+              aria-label="选择控场题组"
+              value={questionSets.find((set) => set.active)?.id || ""}
+              disabled={busy || state?.stage === "QUESTION_OPEN"}
+              onChange={async (event) => {
+                const setId = event.target.value;
+                if (!setId) return;
+                setBusy(true);
+                setError("");
+                try {
+                  await api.activateQuestionSet(activityId, setId);
+                  selectedQuestionRef.current = "";
+                  await load();
+                } catch (cause) { setError(cause.message); }
+                finally { setBusy(false); }
+              }}
+            >
+              <option value="" disabled>尚未选择题组（使用全部启用题目）</option>
+              {questionSets.filter((set) => set.enabled).map((set) => (
+                <option key={set.id} value={set.id}>{set.name} · {set.items?.length || 0} 道题目</option>
+              ))}
+            </select>
+          </label>
+          <p>{state?.stage === "QUESTION_OPEN" ? "请先结束当前题目，再切换题组。" : "仅可选择管理员已启用的题组，选择后同步参与端和大屏。"}</p>
+        </div>
+      </section>
       <div className="control-layout-new">
         <section>
           <div className="control-connection">
@@ -1790,7 +1823,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
   const [submissions, setSubmissions] = useState([]);
   const [dialog, setDialog] = useState(null);
   const [questionSetDialog, setQuestionSetDialog] = useState(null);
-  const [questionSetForm, setQuestionSetForm] = useState({ name: "", description: "", questionIds: [], active: false, randomOrder: false });
+  const [questionSetForm, setQuestionSetForm] = useState({ name: "", description: "", questionIds: [], enabled: true, randomOrder: false });
   const [syncDialog, setSyncDialog] = useState(null);
   const [syncIds, setSyncIds] = useState([]);
   const [syncNotice, setSyncNotice] = useState("");
@@ -1878,7 +1911,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
   const openSetCreate = () => {
     setError("");
     setSelectedPage(1);
-    setQuestionSetForm({ name: "", description: "", questionIds: [], active: false, randomOrder: false });
+    setQuestionSetForm({ name: "", description: "", questionIds: [], enabled: true, randomOrder: false });
     setQuestionSetDialog("create");
   };
   const openSetEdit = (set) => {
@@ -1888,7 +1921,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
       name: set.name,
       description: set.description || "",
       questionIds: (set.items || []).map((item) => item.questionId),
-      active: Boolean(set.active),
+      enabled: Boolean(set.enabled),
       randomOrder: false,
     });
     setQuestionSetDialog(set);
@@ -1923,7 +1956,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
         name: questionSetForm.name,
         description: questionSetForm.description,
         questionIds: questionSetForm.questionIds,
-        active: Boolean(questionSetForm.active),
+        enabled: Boolean(questionSetForm.enabled),
         randomOrder: Boolean(questionSetForm.randomOrder),
       };
       if (questionSetDialog === "create") await api.createQuestionSet(activityId, payload);
@@ -1936,11 +1969,11 @@ function QuestionsPage({ activityId, activity, canManage }) {
       setBusy("");
     }
   };
-  const activateSet = async (set) => {
-    setBusy(`activate-set-${set.id}`);
+  const toggleSetEnabled = async (set) => {
+    setBusy(`enable-set-${set.id}`);
     setError("");
     try {
-      await api.activateQuestionSet(activityId, set.id);
+      await api.updateQuestionSet(activityId, set.id, { name: set.name, enabled: !set.enabled });
       await load();
     } catch (cause) {
       setError(cause.message);
@@ -2137,7 +2170,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
     setBusy("sync"); setError("");
     try {
       const synced = await (syncDialog.kind === "sets" ? api.syncQuestionSets(activityId, syncIds) : api.syncQuestions(activityId, syncIds));
-      setSyncNotice(`已同步 ${synced.length} ${syncDialog.kind === "sets" ? "个题组及其题目，请检查后下发" : "道题目"}。`);
+      setSyncNotice(`已同步 ${synced.length} ${syncDialog.kind === "sets" ? "个题组及其题目，请检查启用状态，再由主持人在控场选择" : "道题目"}。`);
       setSyncDialog(null); await load();
     } catch (cause) { setError(cause.message); } finally { setBusy(""); }
   };
@@ -2173,9 +2206,9 @@ function QuestionsPage({ activityId, activity, canManage }) {
         </div>}
       />
       <InlineError text={error} onRetry={load} />
-      {canManage && activity?.activityType !== "EVENT" && <section className="data-panel"><div className="data-panel__toolbar"><div><h2>同步总题库与题组</h2><p>草稿阶段可复制母活动题目或整个题组。再次同步更新内容及顺序，保留本会场题目启用状态和题组下发状态。</p></div><div className="page-header-actions"><button type="button" className="secondary-button" disabled={busy !== "" || activity?.status !== "DRAFT"} onClick={() => openSync("questions")}>选择总题库题目</button><button type="button" className="secondary-button" disabled={busy !== "" || activity?.status !== "DRAFT"} onClick={() => openSync("sets")}>选择总题组</button></div></div></section>}
+      {canManage && activity?.activityType !== "EVENT" && <section className="data-panel"><div className="data-panel__toolbar"><div><h2>同步总题库与题组</h2><p>草稿阶段可复制母活动题目或整个题组。再次同步更新内容及顺序，保留本会场题目与题组的启用状态，以及控场选组状态。</p></div><div className="page-header-actions"><button type="button" className="secondary-button" disabled={busy !== "" || activity?.status !== "DRAFT"} onClick={() => openSync("questions")}>选择总题库题目</button><button type="button" className="secondary-button" disabled={busy !== "" || activity?.status !== "DRAFT"} onClick={() => openSync("sets")}>选择总题组</button></div></div></section>}
       <StatusNotice text={syncNotice} />
-      {syncDialog && <Dialog title={syncDialog.kind === "sets" ? "选择要同步的题组" : "选择要同步的题目"} onClose={() => setSyncDialog(null)}><div className="dialog-form"><InlineError text={error} /><p>仅复制勾选项，翻页或搜索不会清除选择。题组内题目会一起同步，保留母活动题目顺序，新题组需检查后手动下发。</p>
+      {syncDialog && <Dialog title={syncDialog.kind === "sets" ? "选择要同步的题组" : "选择要同步的题目"} onClose={() => setSyncDialog(null)}><div className="dialog-form"><InlineError text={error} /><p>仅复制勾选项，翻页或搜索不会清除选择。题组内题目会一起同步，保留母活动题目顺序，新题组由管理员检查启用状态，再由主持人在控场选择。</p>
         {syncDialog.kind === "questions" ? <QuestionBrowser label="总题库" questions={syncDialog.questions} selectedIds={syncIds} onSelection={setSyncIds} renderQuestion={(q) => <label className="collection-choice" key={q.id}><input type="checkbox" checked={syncIds.includes(q.id)} onChange={() => toggleSync(q.id)} /><span><strong>{q.title}</strong><small>{typeLabel(q.type)} · {q.enabled ? "已启用" : "已停用"}</small></span></label>} /> : <>
           <div className="search-input"><Search size={17} /><input aria-label="总题组搜索" value={syncQuery} onChange={(e) => { setSyncQuery(e.target.value); setSyncPage(1); }} placeholder="搜索题组名称、题目或答案" /></div>
           <div className="collection-selection-actions"><span>已选 {syncIds.length} 个题组（跨页保留）</span><button type="button" className="secondary-button" onClick={() => setSyncIds([...new Set([...syncIds, ...filterQuestionSets(syncDialog.sets, syncDialog.questions, syncQuery).map((set) => set.id)])])}>选择全部筛选结果</button><button type="button" className="text-button" onClick={() => setSyncIds([])}>清空全部选择</button></div>
@@ -2230,7 +2263,8 @@ function QuestionsPage({ activityId, activity, canManage }) {
         <div className="data-panel__toolbar">
           <div>
             <p className="eyebrow">题组编排</p>
-            <h2>组卷与下发</h2>
+            <h2>题组启用管理</h2>
+            <p>启用后由主持人在控场中选择使用的题组。</p>
           </div>
           <button className="secondary-button" type="button" onClick={openSetCreate}>
             <Plus size={16} />
@@ -2249,23 +2283,21 @@ function QuestionsPage({ activityId, activity, canManage }) {
                   {set.items?.length || 0} 道题目{set.description ? ` · ${set.description}` : ""}
                 </small>
               </div>
-              <span className={set.active ? "online-status" : "offline-status"}>
+              <span className={set.enabled ? "online-status" : "offline-status"}>
                 <i />
-                {set.active ? "当前下发" : "未下发"}
+                {set.enabled ? "已启用" : "未启用"}
               </span>
               <button className="toolbar-icon" type="button" title="编辑题组" onClick={() => openSetEdit(set)}>
                 <Pencil size={16} />
               </button>
-              {!set.active && (
-                <button
-                  className="secondary-button"
-                  type="button"
-                  disabled={busy === `activate-set-${set.id}`}
-                  onClick={() => activateSet(set)}
-                >
-                  下发
-                </button>
-              )}
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={busy !== ""}
+                onClick={() => toggleSetEnabled(set)}
+              >
+                {set.enabled ? "停用" : "启用"}
+              </button>
               <button
                 className="toolbar-icon"
                 type="button"
@@ -2281,7 +2313,7 @@ function QuestionsPage({ activityId, activity, canManage }) {
             <EmptyState
               icon={ClipboardList}
               title={questionSets.length ? "没有匹配的题组" : "尚未创建题组"}
-              description="选择题库中的题目组成答题活动，并通过下发按钮让参与端使用该题组。"
+              description="选择题库中的题目组成题组，启用后由主持人在控场中选择使用。"
             />
           )}
         </div>
@@ -2692,10 +2724,10 @@ function QuestionsPage({ activityId, activity, canManage }) {
             <label className="toggle-control">
               <input
                 type="checkbox"
-                checked={Boolean(questionSetForm.active)}
-                onChange={(event) => setQuestionSetForm({ ...questionSetForm, active: event.target.checked })}
+                checked={Boolean(questionSetForm.enabled)}
+                onChange={(event) => setQuestionSetForm({ ...questionSetForm, enabled: event.target.checked })}
               />
-              保存后立即下发到当前活动
+              启用题组，允许主持人在控场中选择
             </label>
             <button className="primary-button" disabled={busy === "question-set"}>
               {busy === "question-set" ? "正在保存" : "保存题组"}

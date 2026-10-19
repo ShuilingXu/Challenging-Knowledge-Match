@@ -133,6 +133,58 @@ class VenueWorkspaceIntegrationTest {
     mvc.perform(post("/api/activities/"+qa.id()+"/question-sets/sync").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isForbidden());
   }
 
+  @Test void staffSelectsEnabledQuestionSetsButCannotManageAvailability() throws Exception {
+    var main = create("EVENT", null);
+    var venue = create("VENUE", main.id());
+    var quiz = create("QUIZ", venue.id());
+    var otherVenue = create("VENUE", main.id());
+    var otherQuiz = create("QUIZ", otherVenue.id());
+    var first = question(quiz.id(), "First");
+    var second = question(quiz.id(), "Second");
+    var set = service.createQuestionSet(quiz.id(), new QuestionSetRequest("Enabled", null, List.of(second.id()), false, false, true));
+    var disabled = service.createQuestionSet(quiz.id(), new QuestionSetRequest("Disabled", null, List.of(first.id()), false, false, false));
+    var user = users.save(new UserAccount("set-host-" + UUID.randomUUID(), "Host", "unused", null));
+    memberships.save(new ActivityMembership(venue.id(), user.getId(), UserRole.STAFF));
+    String token = tokens.issueAccountToken(user).value();
+    String base = "/api/activities/" + quiz.id() + "/question-sets";
+    mvc.perform(get(base).header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+    mvc.perform(post(base + "/" + set.id() + "/activate").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+    assertEquals(List.of(second.id()), service.listQuestionControl(quiz.id()).stream().map(QuestionControlResponse::id).toList());
+    assertEquals(List.of(second.id()), service.listQuestions(quiz.id()).stream().map(QuestionResponse::id).toList());
+    mvc.perform(post(base + "/" + disabled.id() + "/activate").header("Authorization", "Bearer " + token)).andExpect(status().isConflict());
+    mvc.perform(put(base + "/" + disabled.id()).header("Authorization", "Bearer " + token)
+        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Disabled\",\"enabled\":true}")).andExpect(status().isForbidden());
+    mvc.perform(post(base).header("Authorization", "Bearer " + token)
+        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"New\"}")).andExpect(status().isForbidden());
+    mvc.perform(delete(base + "/" + set.id()).header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
+    mvc.perform(post("/api/activities/" + otherQuiz.id() + "/question-sets/" + set.id() + "/activate")
+        .header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
+    var stopped = service.updateQuestionSet(quiz.id(), set.id(), new QuestionSetRequest("Enabled", null, null, null, false, false));
+    assertFalse(stopped.enabled());
+    assertFalse(stopped.active());
+    assertNull(service.activity(quiz.id()).activeQuestionSetId());
+    assertEquals("LOBBY", service.controlState(quiz.id()).stage());
+    var enabled = service.updateQuestionSet(quiz.id(), set.id(), new QuestionSetRequest("Enabled", null, null, null, false, true));
+    assertTrue(enabled.enabled());
+    assertFalse(enabled.active());
+  }
+
+  @Test void switchingQuestionSetsRequiresClosingTheCurrentQuestion() {
+    var quiz = QuizTestSupport.create(service, new CreateActivityRequest("Switch sets", "Shanghai", Instant.now()));
+    var first = question(quiz.id(), "First");
+    var second = question(quiz.id(), "Second");
+    var set = service.createQuestionSet(quiz.id(), new QuestionSetRequest("First set", null, List.of(first.id()), true));
+    var next = service.createQuestionSet(quiz.id(), new QuestionSetRequest("Next set", null, List.of(second.id()), false));
+    QuizTestSupport.start(service, quiz.id());
+    service.control(quiz.id(), new ControlRequest("QUESTION_OPEN", first.id(), 30));
+    assertThrows(DomainException.class, () -> service.activateQuestionSet(quiz.id(), next.id()));
+    assertEquals(set.id(), service.activity(quiz.id()).activeQuestionSetId());
+    service.control(quiz.id(), new ControlRequest("ANSWER_REVEALED", first.id(), 0));
+    service.activateQuestionSet(quiz.id(), next.id());
+    assertEquals("LOBBY", service.controlState(quiz.id()).stage());
+    assertNull(service.controlState(quiz.id()).questionId());
+  }
+
   @Test void randomOrderIsSavedAndIdenticalAcrossRepeatedReads() {
     var main=create("EVENT",null); var venue=create("VENUE",main.id()); var quiz=create("QUIZ",venue.id());
     List<UUID> ids=new ArrayList<>(); for(int i=0;i<12;i++) ids.add(question(quiz.id(),"Question "+i).id());

@@ -105,10 +105,11 @@ public class ActivityAuthorizationManager implements AuthorizationManager<Reques
       return !"questions/source".equals(remainder)
           && !"questions/admin".equals(remainder)
           && !remainder.startsWith("memberships")
-          && !remainder.startsWith("question-sets");
+          && !(remainder.startsWith("question-sets") && !"question-sets".equals(remainder));
     }
     if (remainder.equals("checkin/redeem")) return "POST".equals(method);
     if ("control".equals(remainder)) return "POST".equals(method);
+    if (remainder.matches("question-sets/[0-9a-fA-F-]{36}/activate")) return "POST".equals(method);
     if ("turtle-soup/switch".equals(remainder)) return "POST".equals(method);
     if ("turtle-soup/control".equals(remainder)) return "POST".equals(method);
     if ("host-draws".equals(remainder)) return "POST".equals(method);

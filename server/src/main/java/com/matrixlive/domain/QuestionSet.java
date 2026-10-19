@@ -31,6 +31,9 @@ public class QuestionSet {
   private boolean active;
 
   @Column(nullable = false)
+  private boolean enabled = true;
+
+  @Column(nullable = false)
   private Instant createdAt;
 
   @Column(nullable = false)
@@ -58,6 +61,8 @@ public class QuestionSet {
   public String getName() { return name; }
   public String getDescription() { return description; }
   public boolean isActive() { return active; }
+  public boolean isEnabled() { return enabled; }
+  public void setEnabled(boolean value) { enabled = value; updatedAt = Instant.now(); }
   public Instant getCreatedAt() { return createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }
 

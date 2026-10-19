@@ -307,7 +307,10 @@ public final class ApiModels {
       @NotBlank @Size(max = 180) String name,
       @Size(max = 1000) String description,
       List<@NotNull UUID> questionIds,
-      Boolean active, Boolean randomOrder) {
+      Boolean active, Boolean randomOrder, Boolean enabled) {
+    public QuestionSetRequest(String name, String description, List<UUID> questionIds, Boolean active, Boolean randomOrder) {
+      this(name, description, questionIds, active, randomOrder, null);
+    }
     public QuestionSetRequest(String name, String description, List<UUID> questionIds, Boolean active) {
       this(name, description, questionIds, active, false);
     }
@@ -319,7 +322,7 @@ public final class ApiModels {
 
   public record QuestionSetItemResponse(UUID questionId, String title, String type, int displayOrder) { }
 
-  public record QuestionSetResponse(UUID id, UUID activityId, String name, String description, boolean active,
+  public record QuestionSetResponse(UUID id, UUID activityId, String name, String description, boolean active, boolean enabled,
       List<QuestionSetItemResponse> items, Instant createdAt, Instant updatedAt) { }
 
   public record SubmitAnswerRequest(@NotNull UUID participantId, @NotNull UUID questionId,

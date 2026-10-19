@@ -497,6 +497,7 @@ public class ActivityService {
     // Created inactive: Hibernate flushes inserts before updates, so an insert carrying active=true
     // would hit uk_question_sets_single_active while the previous set is still active.
     QuestionSet set = questionSets.save(new QuestionSet(activityId, name, cleanOptional(request.description()), false));
+    if (request.enabled() != null) set.setEnabled(request.enabled());
     replaceQuestionSetItems(set, questionIds);
     if (active) activateQuestionSet(set);
     QuestionSetResponse response = toQuestionSet(set);
@@ -506,6 +507,7 @@ public class ActivityService {
 
   @Transactional
   public QuestionSetResponse updateQuestionSet(UUID activityId, UUID questionSetId, QuestionSetRequest request) {
+    activities.findForUpdate(activityId).orElseThrow(() -> notFound("Activity not found"));
     QuestionSet set = requireQuestionSet(activityId, questionSetId);
     String name = request.name() == null ? set.getName() : cleanRequired(request.name(), "Question set name is required");
     if (!name.equals(set.getName()) && questionSets.existsByActivityIdAndName(activityId, name)) {
@@ -519,17 +521,25 @@ public class ActivityService {
       throw badRequest("An active question set must contain at least one question");
     }
     boolean wasActive = set.isActive();
+    if (request.enabled() != null) set.setEnabled(request.enabled());
     boolean wantsActive = Boolean.TRUE.equals(request.active());
     // Never let update() mark the set active: activateQuestionSet() deactivates the previous set
     // first, and doing both in one flush would violate uk_question_sets_single_active.
     set.update(name, request.description() == null ? set.getDescription() : cleanOptional(request.description()),
         wantsActive ? Boolean.FALSE : request.active());
     if (request.description() != null) set.setDescription(cleanOptional(request.description()));
-    replaceQuestionSetItems(set, questionIds);
+    if (request.questionIds() != null || Boolean.TRUE.equals(request.randomOrder())) replaceQuestionSetItems(set, questionIds);
     if (wantsActive) activateQuestionSet(set);
     else if (Boolean.FALSE.equals(request.active()) && wasActive) {
       activities.findById(activityId).filter(activity -> questionSetId.equals(activity.getActiveQuestionSetId()))
           .ifPresent(activity -> activity.activateQuestionSet(null));
+    }
+    if (!set.isEnabled() && set.isActive()) {
+      set.deactivate();
+      activities.findById(activityId).ifPresent(activity -> {
+        activity.activateQuestionSet(null);
+        control(activityId, new ControlRequest("LOBBY", null, 0));
+      });
     }
     QuestionSetResponse response = toQuestionSet(set);
     broadcast(activityId, "question_set.updated");
@@ -538,11 +548,18 @@ public class ActivityService {
 
   @Transactional
   public QuestionSetResponse activateQuestionSet(UUID activityId, UUID questionSetId) {
+    Activity activity = activities.findForUpdate(activityId).orElseThrow(() -> notFound("Activity not found"));
     QuestionSet set = requireQuestionSet(activityId, questionSetId);
+    if (!set.isActive() && "QUESTION_OPEN".equals(activity.getControlStage())) {
+      throw conflict("请先结束当前题目，再切换题组");
+    }
     if (questionSetItems.findByQuestionSetIdOrderByDisplayOrderAsc(questionSetId).isEmpty()) {
       throw badRequest("An active question set must contain at least one question");
     }
-    activateQuestionSet(set);
+    if (!set.isActive()) {
+      activateQuestionSet(set);
+      control(activityId, new ControlRequest("LOBBY", null, 0));
+    }
     QuestionSetResponse response = toQuestionSet(set);
     broadcast(activityId, "question_set.activated");
     return response;
@@ -1212,6 +1229,7 @@ public class ActivityService {
   }
 
   private void activateQuestionSet(QuestionSet selected) {
+    if (!selected.isEnabled()) throw conflict("题组未启用，请联系管理员启用后再选择");
     List<QuestionSet> previouslyActive = questionSets.findByActivityIdOrderByUpdatedAtDesc(selected.getActivityId()).stream()
         .filter(candidate -> !candidate.getId().equals(selected.getId()) && candidate.isActive())
         .toList();
@@ -2057,7 +2075,7 @@ public class ActivityService {
           return new QuestionSetItemResponse(item.getQuestionId(), question == null ? "已删除题目" : question.getTitle(),
               question == null ? "UNKNOWN" : question.getType(), item.getDisplayOrder());
         }).toList();
-    return new QuestionSetResponse(set.getId(), set.getActivityId(), set.getName(), set.getDescription(), set.isActive(),
+    return new QuestionSetResponse(set.getId(), set.getActivityId(), set.getName(), set.getDescription(), set.isActive(), set.isEnabled(),
         items, set.getCreatedAt(), set.getUpdatedAt());
   }
 

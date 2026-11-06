@@ -26,3 +26,4 @@ test-assets/edge-qa-profile/
 /output/*.jar
 /output/交付文件校验.json
 __pycache__/
+/软件著作权申请资料

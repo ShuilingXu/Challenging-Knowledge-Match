@@ -168,6 +168,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   const [state, setState] = useState(null)
   const layoutRef = useRef(null)
   const controlsRef = useRef(null)
+  const [confirmSolution, setConfirmSolution] = useState(false)
   const [draft, setDraft] = useState(empty)
   const [dirty, setDirty] = useState(false)
   const dirtyRef = useRef(false)
@@ -242,6 +243,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
   const waiting = state?.stage === 'LOBBY'
   const running = state?.stage === 'SURFACE'
   const solutionShown = state?.stage === 'SOLUTION'
+  const nextClueIndex = content?.clues?.findIndex((_, index) => !(state?.revealedClueIndexes || Array.from({ length: state?.revealedClues || 0 }, (_, i) => i)).includes(index)) ?? -1
   const ended = ['FINISHED', 'CANCELLED'].includes(activity.status)
   const disabled = busy || !content || activity.status !== 'LIVE'
   const selected = state?.revealedClueIndexes || Array.from({ length: state?.revealedClues || 0 }, (_, i) => i)
@@ -249,7 +251,24 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
     clues: selected.map((index) => content.clues[index]), clueNumbers: selected.map((index) => index + 1), ...(solutionShown ? { solution: content.solution } : {}) }
   return <div className="page-content" ref={layoutRef}>
     <PageHeader eyebrow="会场海龟汤" title="海龟汤控场" description="点击“展示汤面”开始推理；汤底由独立开关放出或收回。线索可按需公开，观众在现场提问，无需手机报名或作答。" />
-    {state && <section ref={controlsRef} className="data-panel staff-panel soup-playback-controls" aria-label="大屏播放控制">
+    {state && <section className="data-panel staff-panel soup-controls live-next-step">
+      <span className="type-chip">{waiting ? '候场' : solutionShown ? '答案已公开' : '推理进行中'}</span>
+      <h2>{content?.title || '请先选择汤稿'}</h2><p>已公开 {selected.length} / {content?.clues.length || 0} 条线索。也可在下方线索板自由选择提示。</p>
+      <div className="soup-actions"><button className="primary-button" disabled={disabled || (waiting && dirty) || solutionShown} onClick={() => {
+        if (waiting) control('SHOW_SURFACE');
+        else if (nextClueIndex >= 0) control('SHOW_CLUE', { clueIndex: nextClueIndex });
+        else setConfirmSolution(true);
+      }}>{waiting ? '展示汤面，开始推理' : solutionShown ? '本故事已揭晓' : nextClueIndex >= 0 ? `公开线索 ${nextClueIndex + 1}` : '揭晓汤底'}</button>
+      {running && nextClueIndex >= 0 && <button className="secondary-button" disabled={disabled} onClick={() => setConfirmSolution(true)}>提前揭晓汤底</button>}</div>
+      {activity.status !== 'LIVE' && <p>请在下方环节状态中开始或恢复海龟汤。</p>}
+      {dirty && <p>汤稿有未保存的修改，请保存后再展示汤面。</p>}
+      <details className="live-settings"><summary>收回答案与回到候场</summary><div className="soup-actions">
+        <button className="secondary-button" disabled={disabled || !solutionShown} onClick={() => control('HIDE_SOLUTION')}>收回汤底</button>
+        <button className="secondary-button" disabled={busy || waiting} onClick={() => setConfirmReset(true)}>回到候场 / 重置</button>
+      </div></details>
+    </section>}
+    {confirmSolution && <ConfirmDialog title="揭晓汤底？" description="完整答案将展示到观众大屏，汤面和已公开线索保留。" confirmLabel="确认揭晓" busy={busy} onCancel={() => setConfirmSolution(false)} onConfirm={() => { setConfirmSolution(false); control('REVEAL_SOLUTION'); }} />}
+    {state && <details ref={controlsRef} className="data-panel staff-panel soup-playback-controls live-settings" aria-label="大屏播放控制"><summary>翻页与播放设置</summary>
       <div className="soup-playback-heading"><h2>大屏播放控制</h2><span className="type-chip">{waiting ? '展示汤面后可用' : state.playback?.paused ? '已暂停 · 可手动翻页' : '自动播放中'}</span></div>
       <div className="soup-playback-buttons">
         <button className="primary-button" disabled={disabled || waiting} onClick={() => control(state.playback?.paused ? 'RESUME_PLAYBACK' : 'PAUSE_PLAYBACK')}>{state.playback?.paused ? '▶ 继续播放' : 'Ⅱ 暂停播放'}</button>
@@ -265,8 +284,8 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
       <p>仅控制汤面和汤底（8–40 秒／页）。手动翻页会暂停；点“继续播放”恢复。线索尽量同屏展示，放不下时独立轮播，暂停时一起停住。</p>
       {dirty && <p>有未保存的汤稿修改：播放与线索控场不受影响，离开页面前记得保存。</p>}
       {activity.status !== 'LIVE' && <p>请先开始海龟汤活动，再展示汤面。</p>}
-    </section>}
-    {lifecycle}
+    </details>}
+    <details className="live-settings" open={activity.status !== "LIVE" || undefined}><summary>环节状态与结束操作 · {activity.status === "LIVE" ? "进行中" : activity.status === "PAUSED" ? "已暂停" : "未进行"}</summary>{lifecycle}</details>
     <details className="data-panel staff-panel staff-form soup-playlist" open={waiting || playlistEditing || undefined}><summary>本会场使用的汤稿{content?.title && <span> · {content.title}</span>}{!waiting && content && <span> · 可切换</span>}</summary><p>汤稿来自所属母活动，可选多份依次使用。切换会先收回已公开内容、回到候场，翻页速度保留；之后点击“展示汤面”开始新故事，汤底由答案开关单独放出。</p>
       <label>当前汤稿<select aria-label="当前汤稿" title={dirty ? '请先保存汤稿修改，再切换' : waiting ? undefined : '切换会自动回到候场，并收回已公开的线索'} value={playlist.activeTemplateId || ''} disabled={busy || ended || dirty} onChange={(e) => {
         if (!e.target.value || e.target.value === playlist.activeTemplateId) return;
@@ -301,22 +320,7 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
       onConfirm={() => switchTemplate(pendingTemplate)}
     />}
     {!state ? <p>正在读取汤稿…</p> : <>
-        <section className="data-panel staff-panel staff-form soup-controls"><div><span className="type-chip">{waiting ? '候场' : solutionShown ? '答案已公开' : '推理进行中'}</span><h2>展示控制</h2><p>已公开 {state.revealedClues} / {content?.clues.length || 0} 条线索</p></div>
-          <div className="soup-actions">
-            <button className="primary-button" disabled={disabled || !waiting || dirty} title={dirty ? '有未保存的汤稿修改，先保存再展示' : undefined} onClick={() => control('SHOW_SURFACE')}>展示汤面</button>
-            <button className="secondary-button" disabled={busy || waiting} onClick={() => setConfirmReset(true)}>回到候场 / 重置</button>
-          </div>
-          <div className="soup-answer-switch">
-            <span className="soup-answer-switch__label" id="soup-answer-switch-label">答案 · 汤底</span>
-            <button type="button" role="switch" aria-checked={solutionShown} aria-labelledby="soup-answer-switch-label" className="soup-answer-toggle" disabled={disabled || waiting} onClick={() => control(solutionShown ? 'HIDE_SOLUTION' : 'REVEAL_SOLUTION')}>
-              <span className="soup-answer-toggle__track" aria-hidden="true"><span className="soup-answer-toggle__thumb" /></span>
-              <strong>{solutionShown ? '已放出 · 点击收回' : waiting ? '展示汤面后可用' : '未放出 · 点击放出'}</strong>
-            </button>
-            <small>独立开关：只放出或收回汤底，不影响汤面、线索和自动翻页。</small>
-          </div>
-          {dirty && <p>有未保存的汤稿修改：先保存再展示汤面，改动才会送上大屏。</p>}
-          {activity.status !== 'LIVE' && <p>请先开始海龟汤；暂停期间可回到候场。</p>}
-        </section>
+
       <div className="soup-console-grid">
       <div className="soup-console-main">
         <section className="data-panel staff-panel staff-form soup-private"><h2>交互线索板</h2><p>根据现场推断自由选择任意线索。公开顺序与推理过程一致，可单独撤回；未公开内容仅主持人可见。</p>
@@ -334,14 +338,14 @@ export function TurtleSoupConsole({ activity, canManage, lifecycle, useStream })
             {!content.clues.length && <p>还没有线索，可以现场临时添加。</p>}
             <details><summary>查看汤底{solutionShown ? '（已公开到大屏）' : '（仅主持人可见）'}</summary><p className="soup-text">{content.solution}</p></details></>}
         </section>
-        <section className="data-panel staff-panel staff-form soup-manual"><h2>临时添加线索</h2><p>现场补充提示、澄清误解。保存后进入线索板，也可直接公开到大屏。</p>
+        <details className="data-panel staff-panel staff-form soup-manual"><summary>临时添加线索</summary><p>现场补充提示、澄清误解。保存后进入线索板，也可直接公开到大屏。</p>
           <label>临时线索<textarea maxLength={2000} rows={3} value={manualClue} disabled={busy || ended || state.stage === 'SOLUTION'} onChange={(e) => setManualClue(e.target.value)} placeholder="输入主持人现场补充的提示…" /></label>
           <small>{manualClue.length}/2000 字 · 已保存 {content?.clues.length || 0}/50 条</small>
           <div className="soup-actions">
             <button type="button" className="secondary-button" disabled={disabled || dirty || !manualClue.trim() || content.clues.length >= 50 || state.stage === 'SOLUTION'} title={dirty ? '有未保存的汤稿修改，先保存再加线索' : undefined} onClick={() => control('ADD_CLUE', { clue: manualClue, publishNow: false })}>保存为待展示线索</button>
             <button type="button" className="primary-button" disabled={disabled || dirty || !running || !manualClue.trim() || content.clues.length >= 50} title={dirty ? '有未保存的汤稿修改，先保存再加线索' : undefined} onClick={() => control('ADD_CLUE', { clue: manualClue, publishNow: true })}>添加并立即公开</button>
           </div>
-        </section>
+        </details>
         {canManage && <details className="data-panel staff-panel staff-form soup-editor" open={dirty || undefined}><summary>编辑当前汤稿（仅本会场）</summary><form onSubmit={save}><p>修改前请回到候场。线索可自由选择展示顺序，也可在推理时临时添加。</p>
           <fieldset disabled={busy || !waiting || ended}>
             <label>故事标题<input required maxLength={160} value={draft.title} onChange={(e) => edit({ title: e.target.value })} placeholder="例如：最后一班电梯" /></label>

@@ -111,3 +111,16 @@ export function activityNavigation(activity) {
     rewardsLabel: lottery ? '自助抽奖与核销' : '奖品与核销',
   }
 }
+
+// Preparation only changes the host preview; publishing requires a separate action.
+export function quizNextStep(state, preparedQuestionId, currentId, nextId, remaining) {
+  if (!state || !currentId) return { action: 'WAIT', label: '等待题目', disabled: true }
+  if (state.stage === 'QUESTION_OPEN') return {
+    action: remaining > 0 ? 'CONFIRM_REVEAL' : 'REVEAL',
+    label: remaining > 0 ? '结束作答并公布答案' : '公布答案',
+  }
+  if (preparedQuestionId || !state.questionId || state.stage === 'LOBBY') return { action: 'OPEN', label: '开始本题', questionId: currentId }
+  if (nextId) return { action: 'PREPARE', label: '准备下一题', questionId: nextId }
+  if (state.stage === 'SCOREBOARD' || state.stage === 'WINNERS' || state.stage === 'ENDED') return { action: 'WAIT', label: '本轮已完成', disabled: true }
+  return { action: 'SCOREBOARD', label: '展示积分榜' }
+}

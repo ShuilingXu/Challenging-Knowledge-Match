@@ -1,5 +1,5 @@
 import { CheckinPage, TicketLanding, RegistrationControl } from "./Checkin";
-import { activityEntryGroups, participantFeatureLabel, participationLabel, controlStatusHint, screenAnswerHint, venueDisplayName } from "./activity-flow";
+import { quizNextStep, activityEntryGroups, participantFeatureLabel, participationLabel, controlStatusHint, screenAnswerHint, venueDisplayName } from "./activity-flow";
 import { PageHeader, StatusNotice, ConfirmDialog } from "./StaffUi";
 import { ParticipantAnswerReveal } from "./ParticipantAnswerReveal";
 import { QuestionBrowser, Pagination } from "./QuestionBrowser";
@@ -104,7 +104,8 @@ import { parseQuestionImport, questionImportTemplate } from "./question-import";
 
 const AuthContext = createContext(null);
 const navItems = [
-  { id: "overview", label: "活动总览", icon: Grid2X2 },
+  { id: "overview", label: "现场控制", icon: Radio },
+  { id: "prepare", label: "活动准备", icon: Grid2X2 },
   { id: "activities", label: "活动管理", icon: CalendarDays },
   { id: "control", label: "实时控场", icon: Radio },
   { id: "questions", label: "题库与组卷", icon: CircleHelp },
@@ -414,7 +415,7 @@ function StaffApp() {
       setActivityId((current) => {
         const saved=list.find((item) => item.id === current);
         return saved && !["EVENT", "VENUE"].includes(saved.activityType) ? saved.parentActivityId
-          : saved?.id || list.find((item) => ["EVENT", "VENUE"].includes(item.activityType))?.id || "";
+          : saved?.id || list.find((item) => item.activityType === "VENUE")?.id || list.find((item) => item.activityType === "EVENT")?.id || "";
       });
     } catch (cause) {
       setError(cause.message);
@@ -480,13 +481,15 @@ function StaffApp() {
           setActivityId={setActivityId}
           onMenuToggle={() => setSidebarOpen(true)}
         />
+        {currentActivity?.activityType === "VENUE" && <LiveLinks activity={currentActivity} />}
         <Routes>
           <Route
             path="overview"
             element={
-              ["EVENT", "VENUE"].includes(currentActivity?.activityType) ? <MainActivityPage key={activityId} activity={currentActivity} activities={activities} setActivityId={setActivityId} canManage={canManage} reload={reloadActivities} /> : <OverviewPage activityId={activityId} activities={activities} />
+              currentActivity?.activityType === "VENUE" ? <LiveDesk activity={currentActivity} /> : ["EVENT", "VENUE"].includes(currentActivity?.activityType) ? <MainActivityPage key={activityId} activity={currentActivity} activities={activities} setActivityId={setActivityId} canManage={canManage} reload={reloadActivities} /> : <OverviewPage activityId={activityId} activities={activities} />
             }
           />
+          <Route path="prepare" element={currentActivity ? <MainActivityPage key={activityId} activity={currentActivity} activities={activities} setActivityId={setActivityId} canManage={canManage} reload={reloadActivities} /> : <Navigate to="/admin/activities" replace />} />
           <Route
             path="activities"
             element={
@@ -573,7 +576,8 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage, activity }) {
         </small>
       </div>
       <nav>
-        {navItems.filter((item) => (canManage || !["activities", "screens", "settings"].includes(item.id))
+        {(() => {
+          const visible = navItems.filter((item) => (canManage || !["activities", "screens", "settings"].includes(item.id))
           && (item.id !== "soups" || (canManage && activity?.activityType === "EVENT"))
           && (item.id !== "soup-control" || activity?.features?.includes("TURTLE_SOUP"))
           && (item.id !== "lottery-control" || activity?.features?.includes("LOTTERY"))
@@ -582,20 +586,15 @@ function StaffSidebar({ user, open, onClose, onSignOut, canManage, activity }) {
           && (item.id !== "participants" || !["EVENT", "TURTLE_SOUP"].includes(activity?.activityType))
           && (item.id !== "checkin" || !["EVENT", "TURTLE_SOUP"].includes(activity?.activityType))
           && (item.id !== "screens" || activity?.activityType !== "EVENT")
-          && (item.id !== "rewards" || navigation.showRewards)).map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              type="button"
-              className={active === item.id ? "is-active" : ""}
-              key={item.id}
-              onClick={() => go(`/admin/${item.id}`)}
-            >
-              <Icon size={18} />
-              <span>{item.id === "control" ? navigation.controlLabel : item.id === "rewards" ? navigation.rewardsLabel : item.label}</span>
-            </button>
-          );
-        })}
+          && (item.id !== "rewards" || navigation.showRewards));
+          const renderItem = (item) => {
+            const Icon = item.icon;
+            return <button type="button" className={active === item.id ? "is-active" : ""} key={item.id} onClick={() => go(`/admin/${item.id}`)}><Icon size={18} /><span>{item.id === "overview" && activity?.activityType === "EVENT" ? "选择会场" : item.id === "rewards" ? "发奖核销" : item.label}</span></button>;
+          };
+          const liveIds = ["overview", "checkin", "rewards"];
+          return <>{visible.filter(item => liveIds.includes(item.id)).map(renderItem)}
+            <details className="preparation-nav" key={activity?.id} open={visible.some(item => !liveIds.includes(item.id) && item.id === active) || undefined}><summary>活动准备与更多操作</summary>{visible.filter(item => !liveIds.includes(item.id)).map(renderItem)}</details></>;
+        })()}
       </nav>
       <div className="sidebar-footer">
         <button type="button" onClick={() => window.open("/knowledge-match-user-manual.pdf", "_blank", "noopener,noreferrer")}>
@@ -622,8 +621,6 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
   const current = activities.find((item) => item.id === activityId);
   const navigation = activityNavigation(current);
   const orderedActivities = orderActivityTree(activities).filter((item) => ["EVENT", "VENUE"].includes(item.activityType));
-  const currentVenue = current?.activityType === "VENUE" ? current : activities.find((item) => item.id === current?.parentActivityId && item.activityType === "VENUE");
-  const selectableVenues = activities.filter((item) => item.activityType === "VENUE" && (!current || current.activityType !== "EVENT" || item.parentActivityId === current.id));
   const currentPage = navItems.find(
     (item) => item.id === location.pathname.split("/").pop(),
   );
@@ -647,7 +644,7 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
         <span>{current?.name || "未选择活动"}</span>
       </div>
       <div className="topbar-actions">
-        <div className="activity-select"><MapPin size={15} /><select aria-label="选择会场" value={currentVenue?.id || ""} onChange={(event) => { if (event.target.value) setActivityId(event.target.value); }}><option value="">选择会场</option>{selectableVenues.map((venue) => <option key={venue.id} value={venue.id}>{venue.name}</option>)}</select></div>
+
         <div className="activity-select">
           <MapPin size={15} />
           <select
@@ -663,10 +660,7 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
           </select>
           <ChevronDown size={15} />
         </div>
-        <button className="toolbar-icon" type="button" aria-label="通知">
-          <Bell size={19} />
-          <i />
-        </button>
+
       </div>
     </header>
   );
@@ -675,6 +669,24 @@ function StaffTopbar({ activities, activityId, setActivityId, onMenuToggle }) {
 function orderActivityTree(activities) {
   const walk = (item) => [item, ...activities.filter((child) => child.parentActivityId === item.id).flatMap(walk)];
   return activities.filter((item) => !activities.some((parent) => parent.id === item.parentActivityId)).flatMap(walk);
+}
+
+const liveSegments = [
+  ["QUIZ", "答题 / 抢答", "/admin/control", "预览题目、开题计时、公布答案"],
+  ["TURTLE_SOUP", "海龟汤", "/admin/soup-control", "展示汤面、公开线索、揭晓汤底"],
+  ["LOTTERY", "抽奖", "/admin/lottery-control", "选择奖品、开始摇奖、确认结果"],
+];
+
+function LiveLinks({ activity }) {
+  return <nav className="live-segment-nav" aria-label="现场环节"><Link to="/admin/overview">现场首页</Link>{liveSegments.filter(([type]) => activity.features?.includes(type)).map(([type, label, path]) => <Link key={type} to={path}>{label}</Link>)}</nav>;
+}
+
+function LiveDesk({ activity }) {
+  return <div className="page-content"><PageHeader eyebrow="现场模式" title={activity.name} description="选择当前环节开始操作，随时从上方切换环节。题目、汤稿和设备设置在“活动准备与更多操作”中。" />
+    <div className="prize-grid">{liveSegments.filter(([type]) => activity.features?.includes(type)).map(([type, label, path, description]) => <article className="prize-pool-card" key={type}><h2>{label}</h2><p>{description}</p><Link className="primary-button" to={path}>进入控场<ArrowRight size={16} /></Link></article>)}</div>
+    {!activity.features?.length && <EmptyState icon={Radio} title="本会场尚未开启互动环节" description="请在活动准备中开启答题、海龟汤或抽奖。" />}
+    <section className="data-panel live-ready"><h2>开场前确认</h2><p>确认会场正确，使用现场设备检查大屏，再进入对应环节开始活动。</p><div className="activity-hub-links"><Link className="secondary-button" to="/admin/prepare">活动准备</Link><a className="secondary-button" href={`/join/${activity.id}`} target="_blank" rel="noreferrer">观众加入入口</a></div></section>
+  </div>;
 }
 
 function MainActivityPage({ activity, activities, setActivityId, canManage, reload }) {
@@ -1383,6 +1395,9 @@ function ActivitiesPage({ activities, reload, user, setActivityId }) {
 function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const [questions, setQuestions] = useState([]);
   const [questionSets, setQuestionSets] = useState([]);
+  const [preparedQuestionId, setPreparedQuestionId] = useState("");
+  const [answerSeconds, setAnswerSeconds] = useState(30);
+  const [confirmReveal, setConfirmReveal] = useState(false);
   const [state, setState] = useState(null);
   const [scoreboard, setScoreboard] = useState([]);
   const remaining = useLiveCountdown(state);
@@ -1429,11 +1444,13 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
         (control.questionId && allQuestions.some((item) => item.enabled && item.id === control.questionId)
           ? control.questionId
           : allQuestions.find((item) => item.enabled)?.id) || "";
-      const nextSelection = allQuestions.some(
+      // An open round always follows the published question, including changes from another host.
+      const nextSelection = control.stage === "QUESTION_OPEN" ? nextQuestionId : allQuestions.some(
         (item) => item.enabled && item.id === selectedQuestionRef.current,
       )
         ? selectedQuestionRef.current
         : nextQuestionId;
+      if (control.stage === "QUESTION_OPEN") setPreparedQuestionId("");
       selectedQuestionRef.current = nextSelection;
       setSelectedQuestionId(nextSelection);
       setError("");
@@ -1457,7 +1474,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
   const selectionIsOpen = Boolean(
     !controlsClosed && remaining > 0 && current && state?.stage === "QUESTION_OPEN" && state.questionId === current.id,
   );
-  const canJumpToSelection = Boolean(current) && current.id !== state?.questionId;
+  const nextStep = quizNextStep(state, preparedQuestionId, current?.id, nextQuestion?.id, remaining);
   const selectQuestion = (questionId) => {
     selectedQuestionRef.current = questionId;
     setSelectedQuestionId(questionId);
@@ -1488,9 +1505,10 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
         questionId,
         seconds:
           overrides.seconds ??
-          (stage === "QUESTION_OPEN" ? 30 : state?.seconds || 0),
+          (stage === "QUESTION_OPEN" ? answerSeconds : state?.seconds || 0),
       });
       setState(next);
+      setPreparedQuestionId("");
       await loadStats(questionId);
     } catch (cause) {
       setError(cause.message);
@@ -1507,7 +1525,8 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
       />
       <ActivityLifecycle activity={activity} canManage={canManage} onChanged={reloadActivities} />
       <InlineError text={error} onRetry={load} />
-      <section className="data-panel">
+      <details className="data-panel live-settings"><summary>题组与答题时长</summary>
+        <label>每题答题时长（秒）<input type="number" min="1" max="86400" value={answerSeconds} disabled={busy || state?.stage === "QUESTION_OPEN"} onChange={event => setAnswerSeconds(Math.max(1, Math.min(86400, Number(event.target.value) || 30)))} /></label>
         <div className="data-panel__toolbar">
           <label className="dialog-field">
             使用题组
@@ -1536,7 +1555,7 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
           </label>
           <p>{state?.stage === "QUESTION_OPEN" ? "请先结束当前题目，再切换题组。" : "仅可选择管理员已启用的题组，选择后同步参与端和大屏。"}</p>
         </div>
-      </section>
+      </details>
       <div className="control-layout-new">
         <section>
           <div className="control-connection">
@@ -1549,11 +1568,12 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
           </div>
           <article className="control-question">
             <div className="question-top">
-              <span>待发布题目</span>
+              <span>{state?.stage === "QUESTION_OPEN" ? "正在进行的题目" : "题目预览（开题后才上屏）"}</span>
               <select
                 aria-label="选择控场题目"
+                disabled={busy || state?.stage === "QUESTION_OPEN"}
                 value={current?.id || ""}
-                onChange={(event) => selectQuestion(event.target.value)}
+                onChange={(event) => { selectQuestion(event.target.value); setPreparedQuestionId(event.target.value); }}
               >
                 <option value="">请选择题目</option>
                 {enabledQuestions
@@ -1678,66 +1698,22 @@ function ControlPage({ activityId, activity, reloadActivities, canManage }) {
               </>}
             </section>
           </article>
-          <div className="control-actions">
-            <button
-              className="secondary-button"
-              disabled={busy || !current || controlsClosed}
-              onClick={() => update("QUESTION_OPEN", { seconds: 30 })}
-            >
-              <Play size={17} />
-              开题并计时
-            </button>
-            <button
-              className="accent-button"
-              disabled={busy || !canJumpToSelection || controlsClosed}
-              onClick={() => {
-                selectQuestion(current.id);
-                update("QUESTION_OPEN", {
-                  questionId: current.id,
-                  seconds: 30,
-                });
-              }}
-            >
-              <ArrowRight size={17} />
-              跳题并开始
-            </button>
-            <button
-              className="secondary-button"
-              disabled={busy || !nextQuestion || controlsClosed}
-              onClick={() => {
-                if (!nextQuestion) return;
-                selectQuestion(nextQuestion.id);
-                update("QUESTION_OPEN", { questionId: nextQuestion.id, seconds: 30 });
-              }}
-            >
-              <ArrowRight size={17} />
-              下一题并开始
-            </button>
-            <button
-              className="accent-button"
-              disabled={busy || !state?.questionId}
-              onClick={() => update("ANSWER_REVEALED", { seconds: 0 })}
-            >
-              <BadgeCheck size={17} />
-              公布答案
-            </button>
-            <button
-              className="primary-button"
-              disabled={busy || !activityId}
-              onClick={() => update("SCOREBOARD", { seconds: 0 })}
-            >
-              发布积分榜
-              <ArrowRight size={17} />
-            </button>
-            <button
-              className="secondary-button"
-              disabled={busy || !activityId}
-              onClick={() => update("WINNERS", { seconds: 0 })}
-            >
-              <Trophy size={17} />
-              确认获奖并上屏
-            </button>
+          <div className="live-next-step" aria-label="下一步操作">
+            <p>{controlsClosed ? controlStatusHint(activity?.status) : state?.stage === "QUESTION_OPEN" ? remaining > 0 ? "观众正在作答，结束前请留足时间。" : "答题时间已结束，可以公布答案。" : preparedQuestionId || !state?.questionId || state?.stage === "LOBBY" ? `确认题目后开始，答题时长 ${answerSeconds} 秒。` : "本题已完成，准备下一题后可先预览，再开始计时。"}</p>
+            <button className="primary-button" disabled={busy || controlsClosed || nextStep.disabled} onClick={() => {
+              if (nextStep.action === "CONFIRM_REVEAL") setConfirmReveal(true);
+              else if (nextStep.action === "REVEAL") update("ANSWER_REVEALED", { seconds: 0 });
+              else if (nextStep.action === "OPEN") update("QUESTION_OPEN", { questionId: nextStep.questionId, seconds: answerSeconds });
+              else if (nextStep.action === "PREPARE") { selectQuestion(nextStep.questionId); setPreparedQuestionId(nextStep.questionId); }
+              else if (nextStep.action === "SCOREBOARD") update("SCOREBOARD", { seconds: 0 });
+            }}>{busy ? "正在更新…" : nextStep.label}<ArrowRight size={17} /></button>
           </div>
+          {confirmReveal && <ConfirmDialog title="提前结束作答并公布答案？" description="观众将不能继续提交，本题答案立即同步到手机和大屏。" confirmLabel="结束并公布" busy={busy} onCancel={() => setConfirmReveal(false)} onConfirm={() => { setConfirmReveal(false); update("ANSWER_REVEALED", { seconds: 0 }); }} />}
+          <details className="live-settings"><summary>更多控场操作</summary><div className="control-actions">
+            <button className="secondary-button" disabled={busy || controlsClosed || !current || state?.stage === "QUESTION_OPEN"} onClick={() => { selectQuestion(current.id); setPreparedQuestionId(current.id); }}>准备重开所选题</button>
+            <button className="secondary-button" disabled={busy || controlsClosed || state?.stage === "QUESTION_OPEN"} onClick={() => update("SCOREBOARD", { seconds: 0 })}>展示积分榜</button>
+            <button className="secondary-button" disabled={busy || controlsClosed || state?.stage === "QUESTION_OPEN"} onClick={() => update("WINNERS", { seconds: 0 })}>确认获奖并上屏</button>
+          </div></details>
         </section>
         <aside className="control-aside">
           <article className="control-guide">

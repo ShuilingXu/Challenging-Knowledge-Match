@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { availableActivities, participantActivityId, activityEntry, participantMatches, activityNavigation, screenJoinPrompt, screenJoinUrl } from './activity-flow'
+import { quizNextStep, availableActivities, participantActivityId, activityEntry, participantMatches, activityNavigation, screenJoinPrompt, screenJoinUrl } from './activity-flow'
 
 describe('participant activity routing', () => {
   it('uses venue feature switches for all operational navigation', () => {
@@ -70,5 +70,26 @@ describe('big-screen join QR', () => {
   it('points every QR at the same join entry used by templates', () => {
     expect(screenJoinUrl('http://127.0.0.1:5173', 'venue-1')).toBe('http://127.0.0.1:5173/join/venue-1')
     expect(screenJoinUrl('https://live.example.com/', 'venue-1')).toBe('https://live.example.com/join/venue-1')
+  })
+})
+
+describe('guided quiz flow', () => {
+  it('waits for loaded state and an available question', () => {
+    expect(quizNextStep(null, '', 'q1', null, 0).disabled).toBe(true)
+    expect(quizNextStep({stage:'LOBBY'}, '', undefined, null, 0).disabled).toBe(true)
+  })
+  it('requires confirmation to reveal early, including when another question is prepared', () => {
+    expect(quizNextStep({stage:'QUESTION_OPEN',questionId:'q1'}, 'q2', 'q2', 'q2', 20).action).toBe('CONFIRM_REVEAL')
+    expect(quizNextStep({stage:'QUESTION_OPEN',questionId:'q1'}, '', 'q1', 'q2', 0).action).toBe('REVEAL')
+  })
+  it('previews the next question before allowing a separate start', () => {
+    const state = {stage:'ANSWER_REVEALED',questionId:'q1'}
+    expect(quizNextStep(state, '', 'q1', 'q2', 0)).toMatchObject({action:'PREPARE',questionId:'q2'})
+    expect(quizNextStep(state, 'q2', 'q2', 'q2', 0)).toMatchObject({action:'OPEN',questionId:'q2'})
+  })
+  it('finishes with the scoreboard and permits an explicit replay', () => {
+    expect(quizNextStep({stage:'ANSWER_REVEALED',questionId:'q2'}, '', 'q2', null, 0).action).toBe('SCOREBOARD')
+    expect(quizNextStep({stage:'SCOREBOARD',questionId:'q2'}, '', 'q2', null, 0).disabled).toBe(true)
+    expect(quizNextStep({stage:'SCOREBOARD',questionId:'q2'}, 'q1', 'q1', null, 0).action).toBe('OPEN')
   })
 })

@@ -2314,3 +2314,18 @@ a:focus-visible {
   .dialog-actions > button { width: 100%; }
 }
 
+
+/* Focused live operations; preparation stays available in disclosure panels. */
+.staff-sidebar .preparation-nav { margin-top: 18px; border-top: 1px solid var(--line, #e5ded3); padding-top: 14px; }
+.preparation-nav summary, .live-settings > summary { cursor: pointer; padding: 12px; font-weight: 600; }
+.preparation-nav button { width: 100%; }
+.live-segment-nav { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 28px; border-bottom: 1px solid #e5ded3; }
+.live-segment-nav a { color: inherit; padding: 8px 12px; border-radius: 8px; background: #f4efe7; text-decoration: none; }
+.live-next-step { padding: 20px; margin: 16px 0; border: 1px solid #d5c6b5; border-radius: 14px; background: #fffaf2; }
+.live-next-step > .primary-button, .live-next-step .soup-actions > .primary-button { min-height: 52px; font-size: 17px; }
+.live-next-step p { line-height: 1.7; }
+.live-settings { margin-bottom: 16px; }
+.live-settings[open] > summary { margin-bottom: 12px; }
+.live-settings > label { display: grid; gap: 8px; max-width: 300px; padding: 12px; }
+.live-ready { margin-top: 20px; }
+@media (max-width: 700px) { .live-segment-nav { padding: 10px 16px; gap: 6px; } .live-next-step { padding: 14px; } }
